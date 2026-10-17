@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "Promokashka",
+    "slug": "promokashka",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#6366F1"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "app.promokashka.ios",
+      "infoPlist": {
+        "NSCalendarsUsageDescription": "Promokashka сохраняет напоминания о скидках прямо в ваш календарь, чтобы вы успели ими воспользоваться.",
+        "NSRemindersUsageDescription": "Promokashka ставит напоминания о скором окончании скидок."
+      }
+    },
+    "android": {
+      "package": "app.promokashka.android",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#6366F1"
+      },
+      "permissions": [
+        "READ_CALENDAR",
+        "WRITE_CALENDAR"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-calendar",
+        {
+          "calendarPermission": "Разрешите доступ к календарю для сохранения скидок и промокодов."
+        }
+      ]
+    ]
+  }
+}
