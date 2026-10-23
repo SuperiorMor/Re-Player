@@ -33,7 +33,6 @@ class RePlayerEngine(private val context: Context) {
     private val trackSelector = DefaultTrackSelector(context).apply {
         parameters = parameters.buildUpon()
             .setExceedRendererCapabilitiesIfNecessary(true)
-            .setExceedAudioCapabilitiesIfNecessary(true)
             .build()
     }
 

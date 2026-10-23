@@ -354,6 +354,7 @@ fun UpnpBrowseScreen(
                                     MediaType.VIDEO -> Icons.Default.VideoFile
                                     MediaType.AUDIO -> Icons.Default.AudioFile
                                     MediaType.IMAGE -> Icons.Default.Image
+                                    MediaType.UNKNOWN -> Icons.Default.VideoFile
                                 }
                                 Box(
                                     modifier = Modifier
@@ -456,6 +457,7 @@ fun UpnpBrowseScreen(
                                     MediaType.VIDEO -> Icons.Default.VideoFile
                                     MediaType.AUDIO -> Icons.Default.AudioFile
                                     MediaType.IMAGE -> Icons.Default.Image
+                                    MediaType.UNKNOWN -> Icons.Default.VideoFile
                                 }
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),

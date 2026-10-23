@@ -371,6 +371,7 @@ fun GoogleDriveScreen(
                                     MediaType.VIDEO -> Icons.Default.VideoFile
                                     MediaType.AUDIO -> Icons.Default.AudioFile
                                     MediaType.IMAGE -> Icons.Default.Image
+                                    MediaType.UNKNOWN -> Icons.Default.VideoFile
                                 }
                                 Box(
                                     modifier = Modifier
@@ -470,6 +471,7 @@ fun GoogleDriveScreen(
                                     MediaType.VIDEO -> Icons.Default.VideoFile
                                     MediaType.AUDIO -> Icons.Default.AudioFile
                                     MediaType.IMAGE -> Icons.Default.Image
+                                    MediaType.UNKNOWN -> Icons.Default.VideoFile
                                 }
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
