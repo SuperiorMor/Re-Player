@@ -581,24 +581,22 @@ fun SettingsScreen(
             modifier = Modifier.padding(bottom = 12.dp)
         )
 
-        TvFocusCard(
-            onClick = {
-                if (updateUiState !is UpdateUiState.Checking && updateUiState !is UpdateUiState.Downloading) {
-                    startCheckUpdates()
-                }
-            },
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(90.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(DarkCard)
+                .padding(horizontal = 20.dp, vertical = 18.dp)
         ) {
             Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 20.dp),
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Icon(
                         imageVector = Icons.Default.SystemUpdate,
                         contentDescription = null,
@@ -608,7 +606,7 @@ fun SettingsScreen(
                     Spacer(modifier = Modifier.width(16.dp))
                     Column {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(text = "Re:Player", style = MaterialTheme.typography.titleMedium)
+                            Text(text = "Re:Player", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
                             Spacer(modifier = Modifier.width(8.dp))
                             Box(
                                 modifier = Modifier
@@ -624,15 +622,16 @@ fun SettingsScreen(
                                 )
                             }
                         }
+                        Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = when (updateUiState) {
+                            text = when (val state = updateUiState) {
                                 is UpdateUiState.Checking -> "Проверка обновлений на GitHub..."
                                 is UpdateUiState.UpToDate -> "У вас установлена актуальная версия"
                                 is UpdateUiState.NoReleases -> "Релизы на GitHub не найдены"
-                                is UpdateUiState.Available -> "Доступна новая версия: ${(updateUiState as UpdateUiState.Available).release.tagName}"
-                                is UpdateUiState.Downloading -> "Загрузка обновления..."
-                                is UpdateUiState.ReadyToInstall -> "Загрузка завершена! Нажмите для установки."
-                                is UpdateUiState.Error -> (updateUiState as UpdateUiState.Error).message
+                                is UpdateUiState.Available -> "Доступна новая версия: ${state.release.tagName}"
+                                is UpdateUiState.Downloading -> "Загрузка обновления: ${(state.progress * 100).toInt()}%"
+                                is UpdateUiState.ReadyToInstall -> "Загрузка завершена! Нажмите «Установить»."
+                                is UpdateUiState.Error -> state.message
                                 else -> "Проверка новых версий на GitHub и установка в один клик"
                             },
                             style = MaterialTheme.typography.bodySmall,
@@ -645,9 +644,11 @@ fun SettingsScreen(
                     }
                 }
 
+                Spacer(modifier = Modifier.width(16.dp))
+
                 when (val state = updateUiState) {
                     is UpdateUiState.Checking -> {
-                        CircularProgressIndicator(modifier = Modifier.size(24.dp), color = AccentCyan, strokeWidth = 2.dp)
+                        CircularProgressIndicator(modifier = Modifier.size(28.dp), color = AccentCyan, strokeWidth = 3.dp)
                     }
                     is UpdateUiState.Available -> {
                         TvFocusCard(
@@ -657,8 +658,23 @@ fun SettingsScreen(
                                 .height(44.dp)
                         ) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text(text = "Скачать", color = AccentCyan, style = MaterialTheme.typography.bodyMedium)
+                                Text(text = "Скачать", color = AccentCyan, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
                             }
+                        }
+                    }
+                    is UpdateUiState.Downloading -> {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                color = AccentCyan,
+                                strokeWidth = 3.dp
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "${(state.progress * 100).toInt()}%",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = AccentCyan
+                            )
                         }
                     }
                     is UpdateUiState.ReadyToInstall -> {
@@ -669,12 +685,25 @@ fun SettingsScreen(
                                 .height(44.dp)
                         ) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text(text = "Установить", color = AccentCyan, style = MaterialTheme.typography.bodyMedium)
+                                Text(text = "Установить", color = AccentCyan, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
                             }
                         }
                     }
                     else -> {
-                        Text(text = "Проверить", color = AccentCyan, style = MaterialTheme.typography.bodyMedium)
+                        TvFocusCard(
+                            onClick = { startCheckUpdates() },
+                            modifier = Modifier
+                                .width(140.dp)
+                                .height(44.dp)
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = if (updateUiState is UpdateUiState.Error) "Повторить" else "Проверить",
+                                    color = AccentCyan,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        }
                     }
                 }
             }

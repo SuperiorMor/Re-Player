@@ -33,8 +33,10 @@ sealed class UpdateCheckResult {
 
 class UpdateManager(private val context: Context) {
     private val client = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .followRedirects(true)
+        .followSslRedirects(true)
         .build()
 
     private val repoOwner = "SuperiorMor"
@@ -46,19 +48,25 @@ class UpdateManager(private val context: Context) {
             val request = Request.Builder()
                 .url(url)
                 .header("Accept", "application/vnd.github.v3+json")
+                .header("User-Agent", "RePlayer-App/v$currentVersion (Android TV)")
                 .build()
 
             val response = client.newCall(request).execute()
             if (response.code == 404) {
                 return@withContext UpdateCheckResult.NoReleasesFound
             }
-            if (!response.isSuccessful) {
-                return@withContext UpdateCheckResult.Error("Ошибка проверки обновления: HTTP ${response.code}")
+            if (response.code == 403 || !response.isSuccessful) {
+                // Rate limited (403) or API error -> Fallback to web redirect
+                Log.w("UpdateManager", "GitHub API returned ${response.code}, falling back to web release check")
+                return@withContext fetchLatestReleaseViaHtmlFallback(currentVersion)
             }
 
-            val body = response.body?.string() ?: return@withContext UpdateCheckResult.Error("Пустой ответ от сервера")
-            val json = JSONObject(body)
+            val body = response.body?.string()
+            if (body.isNullOrBlank()) {
+                return@withContext fetchLatestReleaseViaHtmlFallback(currentVersion)
+            }
 
+            val json = JSONObject(body)
             val tagName = json.optString("tag_name", "")
             val cleanVersion = tagName.removePrefix("v").trim()
             val name = json.optString("name", "Re:Player $tagName")
@@ -81,7 +89,8 @@ class UpdateManager(private val context: Context) {
             }
 
             if (apkUrl.isNullOrEmpty()) {
-                return@withContext UpdateCheckResult.Error("В релизе $tagName не найден файл APK")
+                apkName = "RePlayer-$tagName.apk"
+                apkUrl = "https://github.com/$repoOwner/$repoName/releases/download/$tagName/$apkName"
             }
 
             val releaseInfo = ReleaseInfo(
@@ -100,7 +109,69 @@ class UpdateManager(private val context: Context) {
                 UpdateCheckResult.UpToDate
             }
         } catch (e: Exception) {
-            Log.e("UpdateManager", "Check update failed", e)
+            Log.e("UpdateManager", "Check update via API failed, trying web fallback", e)
+            fetchLatestReleaseViaHtmlFallback(currentVersion)
+        }
+    }
+
+    private fun fetchLatestReleaseViaHtmlFallback(currentVersion: String): UpdateCheckResult {
+        return try {
+            val redirectClient = client.newBuilder()
+                .followRedirects(false)
+                .build()
+
+            val webUrl = "https://github.com/$repoOwner/$repoName/releases/latest"
+            val webRequest = Request.Builder()
+                .url(webUrl)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) RePlayer-TV-App/$currentVersion")
+                .head()
+                .build()
+
+            val webResponse = redirectClient.newCall(webRequest).execute()
+            var targetTag: String? = null
+            val location = webResponse.header("Location")
+            if (!location.isNullOrBlank() && location.contains("/releases/tag/")) {
+                targetTag = location.substringAfterLast("/")
+            }
+
+            if (targetTag.isNullOrBlank()) {
+                val fullResponse = client.newCall(
+                    Request.Builder()
+                        .url(webUrl)
+                        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) RePlayer-TV-App/$currentVersion")
+                        .build()
+                ).execute()
+                val finalUrl = fullResponse.request.url.toString()
+                if (finalUrl.contains("/releases/tag/")) {
+                    targetTag = finalUrl.substringAfterLast("/")
+                }
+            }
+
+            if (targetTag.isNullOrBlank()) {
+                return UpdateCheckResult.Error("Не удалось определить последнюю версию с GitHub")
+            }
+
+            val cleanVersion = targetTag.removePrefix("v").trim()
+            val apkName = "RePlayer-v$cleanVersion.apk"
+            val apkUrl = "https://github.com/$repoOwner/$repoName/releases/download/$targetTag/$apkName"
+
+            val releaseInfo = ReleaseInfo(
+                tagName = targetTag,
+                versionName = cleanVersion,
+                title = "Re:Player $targetTag",
+                changelog = "Обновление доступно для установки",
+                downloadUrl = apkUrl,
+                fileName = apkName,
+                fileSize = 0L
+            )
+
+            if (isNewerVersion(cleanVersion, currentVersion)) {
+                UpdateCheckResult.UpdateAvailable(releaseInfo)
+            } else {
+                UpdateCheckResult.UpToDate
+            }
+        } catch (e: Exception) {
+            Log.e("UpdateManager", "Fallback release check failed", e)
             UpdateCheckResult.Error(e.localizedMessage ?: "Ошибка сети при проверке обновлений")
         }
     }
@@ -116,7 +187,10 @@ class UpdateManager(private val context: Context) {
             val targetFile = File(updatesDir, fileName)
             if (targetFile.exists()) targetFile.delete()
 
-            val request = Request.Builder().url(downloadUrl).build()
+            val request = Request.Builder()
+                .url(downloadUrl)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) RePlayer-TV-App")
+                .build()
             val response = client.newCall(request).execute()
             if (!response.isSuccessful) return@withContext null
 
