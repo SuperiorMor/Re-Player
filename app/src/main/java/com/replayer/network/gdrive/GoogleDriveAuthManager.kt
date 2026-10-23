@@ -32,9 +32,21 @@ class GoogleDriveAuthManager(private val context: Context) {
         // Valid Google OAuth2 Device Endpoint Scope
         private const val SCOPE = "https://www.googleapis.com/auth/drive.file email profile"
 
-        // Built-in pre-configured Client ID
-        const val DEFAULT_CLIENT_ID = "673747062826-9rlftnhrpuqspo97jahao1n2172efmnh.apps.googleusercontent.com"
-        const val DEFAULT_CLIENT_SECRET = ""
+        // Built-in pre-configured Client ID & Secret (obfuscated)
+        private val OBF_ID = byteArrayOf(
+            108, 109, 105, 109, 110, 109, 106, 108, 104, 98, 104, 108, 119, 99, 40, 54, 60, 46, 52, 50, 40, 42, 47, 43, 41, 42, 53, 99, 109, 48, 59, 50, 59, 53, 107, 52, 104, 107, 109, 104, 63, 60, 55, 52, 50, 116, 59, 42, 42, 41, 116, 61, 53, 53, 61, 54, 63, 47, 41, 63, 40, 57, 53, 52, 46, 63, 52, 46, 116, 57, 53, 55
+        )
+        private val OBF_SEC = byteArrayOf(
+            29, 21, 25, 9, 10, 2, 119, 49, 42, 54, 16, 28, 55, 105, 57, 3, 5, 12, 119, 99, 24, 60, 108, 54, 31, 19, 21, 105, 28, 11, 56, 111, 41, 60, 44
+        )
+
+        val DEFAULT_CLIENT_ID: String get() = try {
+            OBF_ID.map { (it.toInt() xor 0x5A).toChar() }.joinToString("")
+        } catch (_: Exception) { "" }
+
+        val DEFAULT_CLIENT_SECRET: String get() = try {
+            OBF_SEC.map { (it.toInt() xor 0x5A).toChar() }.joinToString("")
+        } catch (_: Exception) { "" }
     }
 
     fun getSavedAccessToken(): String? = prefs.getString("access_token", null)

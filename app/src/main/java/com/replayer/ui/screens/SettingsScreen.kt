@@ -103,10 +103,7 @@ fun SettingsScreen(
     var discoveredDevices by remember { mutableStateOf<List<UpnpDevice>>(emptyList()) }
     var isScanningUpnp by remember { mutableStateOf(false) }
 
-    // Google Drive Client ID Dialog & Device Code
-    var showClientIdDialog by remember { mutableStateOf(false) }
-    var clientIdInput by remember { mutableStateOf(authManager.getSavedClientId()) }
-    var clientSecretInput by remember { mutableStateOf(authManager.getSavedClientSecret()) }
+    // Google Drive Device Code Flow
     var deviceCodeInfo by remember { mutableStateOf<DeviceCodeResponse?>(null) }
     var isPollingDriveAuth by remember { mutableStateOf(false) }
     var driveErrorMessage by remember { mutableStateOf<String?>(null) }
@@ -145,12 +142,6 @@ fun SettingsScreen(
     fun startDriveDeviceCodeFlow() {
         val clientId = authManager.getSavedClientId()
         val clientSecret = authManager.getSavedClientSecret()
-        if (clientId.isBlank() || clientSecret.isBlank()) {
-            clientIdInput = clientId
-            clientSecretInput = clientSecret
-            showClientIdDialog = true
-            return
-        }
 
         driveErrorMessage = null
         scope.launch {
@@ -476,21 +467,6 @@ fun SettingsScreen(
                                     Text(text = "Подключить", color = AccentCyan, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
                                 }
                             }
-
-                            TvFocusCard(
-                                onClick = {
-                                    clientIdInput = authManager.getSavedClientId()
-                                    clientSecretInput = authManager.getSavedClientSecret()
-                                    showClientIdDialog = true
-                                },
-                                modifier = Modifier
-                                    .width(130.dp)
-                                    .height(44.dp)
-                            ) {
-                                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    Text(text = "Ключи API", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
-                                }
-                            }
                         }
                     }
                 }
@@ -749,113 +725,6 @@ fun SettingsScreen(
     }
 
     // ---------------------------------------------------------
-    // Dialog: Setup Google OAuth 2.0 Client ID
-    // ---------------------------------------------------------
-    if (showClientIdDialog) {
-        Dialog(onDismissRequest = { showClientIdDialog = false }) {
-            Box(
-                modifier = Modifier
-                    .width(540.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(DarkCard)
-                    .border(1.dp, AccentCyan.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
-                    .padding(24.dp)
-            ) {
-                Column {
-                    Text(
-                        text = "Настройка Google Drive",
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                        color = TextPrimary
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Для подключения Google Drive требуются данные из Google Cloud Console (раздел «Учетные данные» -> TV client 1):",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TextSecondary,
-                        lineHeight = 18.sp
-                    )
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    Text(text = "Client ID:", style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    OutlinedTextField(
-                        value = clientIdInput,
-                        onValueChange = { clientIdInput = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        placeholder = {
-                            Text("123456789-abc.apps.googleusercontent.com", color = TextSecondary.copy(alpha = 0.5f), fontSize = 12.sp)
-                        },
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = AccentCyan,
-                            unfocusedBorderColor = DarkSurface,
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary
-                        )
-                    )
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Text(text = "Client Secret (начинается на GOCSPX-):", style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    OutlinedTextField(
-                        value = clientSecretInput,
-                        onValueChange = { clientSecretInput = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        placeholder = {
-                            Text("GOCSPX-...", color = TextSecondary.copy(alpha = 0.5f), fontSize = 12.sp)
-                        },
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = AccentCyan,
-                            unfocusedBorderColor = DarkSurface,
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary
-                        )
-                    )
-
-                    Spacer(modifier = Modifier.height(20.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
-                    ) {
-                        TvFocusCard(
-                            onClick = { showClientIdDialog = false },
-                            modifier = Modifier
-                                .width(120.dp)
-                                .height(44.dp)
-                        ) {
-                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text("Отмена", color = TextSecondary)
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.width(12.dp))
-
-                        TvFocusCard(
-                            onClick = {
-                                authManager.saveClientId(clientIdInput)
-                                authManager.saveClientSecret(clientSecretInput)
-                                showClientIdDialog = false
-                                startDriveDeviceCodeFlow()
-                            },
-                            modifier = Modifier
-                                .width(140.dp)
-                                .height(44.dp)
-                        ) {
-                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text("Сохранить", color = AccentCyan, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // ---------------------------------------------------------
     // Dialog: "Что нового?" in Player Style
     // ---------------------------------------------------------
     if (showChangelogDialog && changelogRelease != null) {
@@ -965,6 +834,14 @@ fun SettingsScreen(
 }
 
 private fun getFriendlyChangelog(version: String, rawChangelog: String): List<String> {
+    if (version.contains("0.2.5")) {
+        return listOf(
+            "Мгновенный вход в Google Диск: Вшит секретный ключ приложения. Больше никаких настроек API — просто сканируйте QR-код телефоном, и диск сразу подключится!",
+            "Улучшенный QR-код: Код больше никогда не сбрасывается по ошибке, телевизор надёжно ожидает подтверждения с телефона.",
+            "Плавное воспроизведение AVI и удобное управление: Все исправления плеера и кнопки «Назад» активны и работают по умолчанию."
+        )
+    }
+
     if (version.contains("0.2.4")) {
         return listOf(
             "Мгновенный «Назад»: Одно нажатие кнопки «Назад» сразу скрывает панель управления плеера без лишних кликов.",
