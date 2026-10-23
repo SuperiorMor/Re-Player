@@ -29,8 +29,8 @@ class GoogleDriveAuthManager(private val context: Context) {
         // Standard Google OAuth2 Device Endpoint
         private const val DEVICE_CODE_URL = "https://oauth2.googleapis.com/device/code"
         private const val TOKEN_URL = "https://oauth2.googleapis.com/token"
-        // Request read-only access to browse existing Drive files and folders, plus drive.file
-        private const val SCOPE = "https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file email profile"
+        // Valid Google OAuth2 Device Endpoint Scope
+        private const val SCOPE = "https://www.googleapis.com/auth/drive.file email profile"
 
         // Built-in pre-configured Client ID
         const val DEFAULT_CLIENT_ID = "673747062826-9rlftnhrpuqspo97jahao1n2172efmnh.apps.googleusercontent.com"

@@ -177,20 +177,12 @@ fun GoogleDriveScreen(
         }
     }
 
-    // Auto-focus & cursor restoration:
-    // When returning from player (isPlayerActive becomes false) and lastPlayedMediaId != null,
-    // scroll directly to that item and request focus on it.
-    // Otherwise, when entering a folder, focus the first item.
-    LaunchedEffect(isPlayerActive, lastPlayedMediaId, currentItems, isLoading) {
-        if (isPlayerActive || isLoading) return@LaunchedEffect
-
-        lastExitTimestamp = System.currentTimeMillis()
-
-        // Case A: Just returned from player with lastPlayedMediaId
-        if (lastPlayedMediaId != null && currentItems.isNotEmpty()) {
+    // 1. Returning from player: focus the played video item and keep focus on it!
+    LaunchedEffect(isPlayerActive) {
+        if (!isPlayerActive && lastPlayedMediaId != null) {
             val targetIndex = sortedItems.indexOfFirst { it.id == lastPlayedMediaId }
             if (targetIndex >= 0) {
-                delay(50)
+                delay(60)
                 try {
                     if (viewMode == ViewMode.LIST) {
                         listState.scrollToItem(maxOf(0, targetIndex))
@@ -198,20 +190,33 @@ fun GoogleDriveScreen(
                         gridState.scrollToItem(maxOf(0, targetIndex))
                     }
                 } catch (_: Exception) {}
-                delay(100)
+                delay(80)
                 try {
                     targetItemFocusRequester.requestFocus()
                 } catch (_: Exception) {}
-                onConsumeLastPlayedMediaId()
-                return@LaunchedEffect
-            } else {
-                onConsumeLastPlayedMediaId()
             }
         }
+    }
 
-        // Case B: Entering folder, exiting folder (Back), or first load
-        if (currentItems.isNotEmpty()) {
-            delay(120)
+    // 2. Folder navigation (entering folder or pressing Back): focus first item
+    LaunchedEffect(folderStack) {
+        if (folderStack.isNotEmpty() && !isPlayerActive) {
+            delay(60)
+            try {
+                if (viewMode == ViewMode.LIST) {
+                    listState.scrollToItem(0)
+                } else {
+                    gridState.scrollToItem(0)
+                }
+                firstItemFocusRequester.requestFocus()
+            } catch (_: Exception) {}
+        }
+    }
+
+    // 3. Initial folder items loaded
+    LaunchedEffect(currentItems) {
+        if (!isPlayerActive && lastPlayedMediaId == null && currentItems.isNotEmpty()) {
+            delay(50)
             try {
                 firstItemFocusRequester.requestFocus()
             } catch (_: Exception) {}
@@ -369,21 +374,19 @@ fun GoogleDriveScreen(
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        if (isLoading) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = AccentCyan)
-            }
-        } else if (sortedItems.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(text = "Папка пуста", style = MaterialTheme.typography.bodyLarge, color = TextSecondary)
-            }
-        } else if (viewMode == ViewMode.LIST) {
-            // Detailed List View
-            LazyColumn(
-                state = listState,
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                contentPadding = PaddingValues(vertical = 8.dp)
-            ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            if (sortedItems.isEmpty() && !isLoading) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(text = "Папка пуста", style = MaterialTheme.typography.bodyLarge, color = TextSecondary)
+                }
+            } else if (viewMode == ViewMode.LIST) {
+                // Detailed List View
+                LazyColumn(
+                    state = listState,
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    contentPadding = PaddingValues(vertical = 8.dp),
+                    modifier = Modifier.fillMaxSize()
+                ) {
                 items(sortedItems.size, key = { sortedItems[it].id }) { index ->
                     val item = sortedItems[index]
                     val isFirst = index == 0
@@ -612,6 +615,17 @@ fun GoogleDriveScreen(
                             }
                         }
                     }
+                }
+            }
+
+            if (isLoading) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.45f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(color = AccentCyan)
                 }
             }
         }

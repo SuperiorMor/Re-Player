@@ -45,14 +45,6 @@ class RePlayerEngine(private val context: Context) {
     private val renderersFactory = DefaultRenderersFactory(context)
         .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
         .setEnableDecoderFallback(true)
-        .setMediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunnelingDecoder ->
-            val decoders = MediaCodecSelector.DEFAULT.getDecoderInfos(mimeType, requiresSecureDecoder, requiresTunnelingDecoder)
-            if (mimeType == MimeTypes.VIDEO_MP4V) {
-                decoders.sortedBy { if (it.softwareOnly) 0 else 1 }
-            } else {
-                decoders
-            }
-        }
 
     private val loadControl = DefaultLoadControl.Builder()
         .setBufferDurationsMs(
@@ -169,10 +161,20 @@ class RePlayerEngine(private val context: Context) {
         }
 
         val isAvi = mediaItem.title.endsWith(".avi", ignoreCase = true) || mediaItem.uri.endsWith(".avi", ignoreCase = true)
-        val activeExtractorsFactory: ExtractorsFactory = if (isAvi) {
-            ExtractorsFactory { arrayOf(AviExtractor()) }
-        } else {
-            extractorsFactory
+        val activeExtractorsFactory = ExtractorsFactory { uri, responseHeaders ->
+            val cleanHeaders = if (isAvi && responseHeaders.containsKey("Content-Type")) {
+                responseHeaders.toMutableMap().apply { remove("Content-Type") }
+            } else {
+                responseHeaders
+            }
+            val effectiveUri = if (isAvi && !(uri.path?.endsWith(".avi", ignoreCase = true) == true)) {
+                android.net.Uri.parse("file:///stream.avi")
+            } else {
+                uri
+            }
+            DefaultExtractorsFactory()
+                .setConstantBitrateSeekingEnabled(false)
+                .createExtractors(effectiveUri, cleanHeaders)
         }
 
         val exoMediaItem = mediaBuilder.build()
