@@ -47,15 +47,23 @@ class RePlayerEngine(private val context: Context) {
     private val renderersFactory = DefaultRenderersFactory(context)
         .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
         .setEnableDecoderFallback(true)
+        .setMediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunnelingDecoder ->
+            val decoders = MediaCodecSelector.DEFAULT.getDecoderInfos(mimeType, requiresSecureDecoder, requiresTunnelingDecoder)
+            if (mimeType == MimeTypes.VIDEO_MP4V) {
+                decoders.sortedBy { if (it.softwareOnly) 0 else 1 }
+            } else {
+                decoders
+            }
+        }
 
     private val loadControl = DefaultLoadControl.Builder()
         .setBufferDurationsMs(
             /* minBufferMs= */ 15_000,
             /* maxBufferMs= */ 50_000,
-            /* bufferForPlaybackMs= */ 500,
-            /* bufferForPlaybackAfterRebufferMs= */ 1_000
+            /* bufferForPlaybackMs= */ 2_000,
+            /* bufferForPlaybackAfterRebufferMs= */ 3_000
         )
-        .setPrioritizeTimeOverSizeThresholds(false)
+        .setPrioritizeTimeOverSizeThresholds(true)
         .build()
 
     private val extractorsFactory = DefaultExtractorsFactory()

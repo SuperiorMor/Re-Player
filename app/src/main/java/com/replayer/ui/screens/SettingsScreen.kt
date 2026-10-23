@@ -635,7 +635,16 @@ fun SettingsScreen(
 
                 when (val state = updateUiState) {
                     is UpdateUiState.Checking -> {
-                        CircularProgressIndicator(modifier = Modifier.size(28.dp), color = AccentCyan, strokeWidth = 3.dp)
+                        TvFocusCard(
+                            onClick = {},
+                            modifier = Modifier
+                                .width(140.dp)
+                                .height(44.dp)
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(modifier = Modifier.size(20.dp), color = AccentCyan, strokeWidth = 2.dp)
+                            }
+                        }
                     }
                     is UpdateUiState.Available -> {
                         Row(
@@ -677,18 +686,29 @@ fun SettingsScreen(
                         }
                     }
                     is UpdateUiState.Downloading -> {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(24.dp),
-                                color = AccentCyan,
-                                strokeWidth = 3.dp
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "${(state.progress * 100).toInt()}%",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = AccentCyan
-                            )
+                        TvFocusCard(
+                            onClick = {},
+                            modifier = Modifier
+                                .width(130.dp)
+                                .height(44.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxSize(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    color = AccentCyan,
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "${(state.progress * 100).toInt()}%",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = AccentCyan
+                                )
+                            }
                         }
                     }
                     is UpdateUiState.ReadyToInstall -> {
@@ -834,6 +854,14 @@ fun SettingsScreen(
 }
 
 private fun getFriendlyChangelog(version: String, rawChangelog: String): List<String> {
+    if (version.contains("0.2.6")) {
+        return listOf(
+            "Стабильный фокус в настройках: При нажатии «Скачать» или «Проверить» фокус больше не улетает в меню на «Домой».",
+            "Чистый звук и видео в AVI: Исправлен расчёт кадров и включён надёжный программный декодер MPEG-4 — никаких артефактов и инопланетных звуков.",
+            "Загрузка файлов Google Drive: Исправлен запрос к Google API и добавлено автообновление токена — файлы и папки диска отображаются корректно."
+        )
+    }
+
     if (version.contains("0.2.5")) {
         return listOf(
             "Мгновенный вход в Google Диск: Вшит секретный ключ приложения. Больше никаких настроек API — просто сканируйте QR-код телефоном, и диск сразу подключится!",

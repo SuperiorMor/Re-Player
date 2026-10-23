@@ -98,6 +98,7 @@ fun GoogleDriveScreen(
     var currentItems by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     var folderStack by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
     var isLoading by remember { mutableStateOf(false) }
+    var driveLoadError by remember { mutableStateOf<String?>(null) }
 
     var viewMode by remember { mutableStateOf(ViewMode.LIST) }
     var sortMode by remember { mutableStateOf(SortMode.BY_NAME) }
@@ -111,8 +112,10 @@ fun GoogleDriveScreen(
 
     fun loadFolder(folderId: String) {
         isLoading = true
+        driveLoadError = null
         scope.launch {
             currentItems = driveService.listFolder(folderId)
+            driveLoadError = driveService.lastErrorMessage
             isLoading = false
         }
     }
@@ -377,7 +380,11 @@ fun GoogleDriveScreen(
         Box(modifier = Modifier.fillMaxSize()) {
             if (sortedItems.isEmpty() && !isLoading) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(text = "Папка пуста", style = MaterialTheme.typography.bodyLarge, color = TextSecondary)
+                    Text(
+                        text = driveLoadError ?: "Папка пуста",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = if (driveLoadError != null) Color(0xFFFF5252) else TextSecondary
+                    )
                 }
             } else if (viewMode == ViewMode.LIST) {
                 // Detailed List View

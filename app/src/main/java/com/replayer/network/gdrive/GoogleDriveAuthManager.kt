@@ -83,6 +83,38 @@ class GoogleDriveAuthManager(private val context: Context) {
         _isAuthenticatedFlow.value = false
     }
 
+    suspend fun refreshAccessToken(): String? = withContext(Dispatchers.IO) {
+        val refreshToken = prefs.getString("refresh_token", null) ?: return@withContext null
+        val clientId = getSavedClientId()
+        val clientSecret = getSavedClientSecret()
+        if (clientId.isBlank() || clientSecret.isBlank()) return@withContext null
+
+        val form = FormBody.Builder()
+            .add("client_id", clientId.trim())
+            .add("client_secret", clientSecret.trim())
+            .add("refresh_token", refreshToken)
+            .add("grant_type", "refresh_token")
+            .build()
+
+        val request = Request.Builder().url(TOKEN_URL).post(form).build()
+        try {
+            val response = client.newCall(request).execute()
+            val body = response.body?.string() ?: return@withContext null
+            if (!response.isSuccessful) {
+                android.util.Log.e("DriveAuth", "Refresh failed (${response.code}): $body")
+                return@withContext null
+            }
+            val tokenResp = json.decodeFromString<TokenResponse>(body)
+            if (!tokenResp.access_token.isNullOrBlank()) {
+                saveTokens(tokenResp.access_token, tokenResp.refresh_token ?: refreshToken)
+                return@withContext tokenResp.access_token
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("DriveAuth", "Refresh exception: ${e.message}")
+        }
+        null
+    }
+
     suspend fun requestDeviceCode(clientId: String = getSavedClientId()): Result<DeviceCodeResponse> = withContext(Dispatchers.IO) {
         val actualClientId = clientId.ifBlank { getSavedClientId() }
         if (actualClientId.isBlank() || actualClientId.contains("YOUR_TV_CLIENT_ID")) {

@@ -131,8 +131,16 @@ import java.util.Arrays;
   public void commitIndex() {
     keyFrameOffsets = Arrays.copyOf(keyFrameOffsets, indexSize);
     keyFrameIndices = Arrays.copyOf(keyFrameIndices, indexSize);
-    if (indexSize > 0) {
-      chunkCount = indexSize;
+    if (isAudio()) {
+      if (indexChunkCount > 0) {
+        chunkCount = indexChunkCount;
+      }
+    } else {
+      if (streamHeaderChunk.length > 0) {
+        chunkCount = streamHeaderChunk.length;
+      } else if (indexChunkCount > 0) {
+        chunkCount = indexChunkCount;
+      }
     }
   }
 
