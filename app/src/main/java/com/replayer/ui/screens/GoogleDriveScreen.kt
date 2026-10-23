@@ -616,6 +616,7 @@ fun GoogleDriveScreen(
                         }
                     }
                 }
+                }
             }
 
             if (isLoading) {

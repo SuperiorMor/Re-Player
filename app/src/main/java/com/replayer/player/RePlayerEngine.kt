@@ -1,7 +1,9 @@
 package com.replayer.player
 
 import android.content.Context
+import android.net.Uri
 import androidx.annotation.OptIn
+import androidx.media3.extractor.Extractor
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem as ExoMediaItem
 import androidx.media3.common.PlaybackException
@@ -161,20 +163,25 @@ class RePlayerEngine(private val context: Context) {
         }
 
         val isAvi = mediaItem.title.endsWith(".avi", ignoreCase = true) || mediaItem.uri.endsWith(".avi", ignoreCase = true)
-        val activeExtractorsFactory = ExtractorsFactory { uri, responseHeaders ->
-            val cleanHeaders = if (isAvi && responseHeaders.containsKey("Content-Type")) {
-                responseHeaders.toMutableMap().apply { remove("Content-Type") }
-            } else {
-                responseHeaders
+        val activeExtractorsFactory = object : ExtractorsFactory {
+            override fun createExtractors(): Array<Extractor> =
+                DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(false).createExtractors()
+
+            override fun createExtractors(uri: Uri, responseHeaders: Map<String, List<String>>): Array<Extractor> {
+                val cleanHeaders = if (isAvi) {
+                    responseHeaders.filterKeys { !it.equals("Content-Type", ignoreCase = true) }
+                } else {
+                    responseHeaders
+                }
+                val effectiveUri = if (isAvi && !(uri.path?.endsWith(".avi", ignoreCase = true) == true)) {
+                    Uri.parse("file:///stream.avi")
+                } else {
+                    uri
+                }
+                return DefaultExtractorsFactory()
+                    .setConstantBitrateSeekingEnabled(false)
+                    .createExtractors(effectiveUri, cleanHeaders)
             }
-            val effectiveUri = if (isAvi && !(uri.path?.endsWith(".avi", ignoreCase = true) == true)) {
-                android.net.Uri.parse("file:///stream.avi")
-            } else {
-                uri
-            }
-            DefaultExtractorsFactory()
-                .setConstantBitrateSeekingEnabled(false)
-                .createExtractors(effectiveUri, cleanHeaders)
         }
 
         val exoMediaItem = mediaBuilder.build()
