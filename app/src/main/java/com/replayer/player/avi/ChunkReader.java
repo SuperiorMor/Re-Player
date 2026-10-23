@@ -83,6 +83,15 @@ import java.util.Arrays;
       AviStreamHeaderChunk streamHeaderChunk,
       TrackOutput trackOutput,
       boolean allSamplesAreSyncSamples) {
+    this(id, streamHeaderChunk, trackOutput, allSamplesAreSyncSamples, C.TIME_UNSET);
+  }
+
+  public ChunkReader(
+      int id,
+      AviStreamHeaderChunk streamHeaderChunk,
+      TrackOutput trackOutput,
+      boolean allSamplesAreSyncSamples,
+      long movieDurationUs) {
     this.streamHeaderChunk = streamHeaderChunk;
     this.allSamplesAreSyncSamples = allSamplesAreSyncSamples;
     @C.TrackType int trackType = streamHeaderChunk.getTrackType();
@@ -90,14 +99,15 @@ import java.util.Arrays;
     @ChunkType
     int chunkType = trackType == TRACK_TYPE_VIDEO ? CHUNK_TYPE_VIDEO_COMPRESSED : CHUNK_TYPE_AUDIO;
     chunkId = getChunkIdFourCc(id, chunkType);
-    durationUs = streamHeaderChunk.getDurationUs();
+    long headerDuration = streamHeaderChunk.getDurationUs();
+    durationUs = headerDuration > 0 ? headerDuration : (movieDurationUs > 0 ? movieDurationUs : C.TIME_UNSET);
     this.trackOutput = trackOutput;
     alternativeChunkId =
         trackType == TRACK_TYPE_VIDEO ? getChunkIdFourCc(id, CHUNK_TYPE_VIDEO_UNCOMPRESSED) : -1;
     firstIndexChunkOffset = C.INDEX_UNSET;
     keyFrameOffsets = new long[INITIAL_INDEX_SIZE];
     keyFrameIndices = new int[INITIAL_INDEX_SIZE];
-    chunkCount = streamHeaderChunk.length;
+    chunkCount = streamHeaderChunk.length > 0 ? streamHeaderChunk.length : 1;
   }
 
   public void appendIndexChunk(long offset, boolean isKeyFrame) {
@@ -131,16 +141,10 @@ import java.util.Arrays;
   public void commitIndex() {
     keyFrameOffsets = Arrays.copyOf(keyFrameOffsets, indexSize);
     keyFrameIndices = Arrays.copyOf(keyFrameIndices, indexSize);
-    if (isAudio()) {
-      if (indexChunkCount > 0) {
-        chunkCount = indexChunkCount;
-      }
-    } else {
-      if (streamHeaderChunk.length > 0) {
-        chunkCount = streamHeaderChunk.length;
-      } else if (indexChunkCount > 0) {
-        chunkCount = indexChunkCount;
-      }
+    if (indexChunkCount > 0) {
+      chunkCount = indexChunkCount;
+    } else if (streamHeaderChunk.length > 0) {
+      chunkCount = streamHeaderChunk.length;
     }
   }
 
@@ -223,7 +227,8 @@ import java.util.Arrays;
 
   private long getChunkTimestampUs(int chunkIndex) {
     long count = chunkCount > 0 ? chunkCount : 1;
-    return durationUs * chunkIndex / count;
+    long totalDuration = durationUs > 0 ? durationUs : 0;
+    return totalDuration * chunkIndex / count;
   }
 
   private SeekPoint getSeekPoint(int keyFrameIndex) {

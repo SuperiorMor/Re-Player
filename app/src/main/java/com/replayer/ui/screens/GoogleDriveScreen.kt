@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.filled.VideoFile
@@ -38,6 +39,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -379,12 +381,98 @@ fun GoogleDriveScreen(
 
         Box(modifier = Modifier.fillMaxSize()) {
             if (sortedItems.isEmpty() && !isLoading) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        text = driveLoadError ?: "Папка пуста",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = if (driveLoadError != null) Color(0xFFFF5252) else TextSecondary
-                    )
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    val currentFolderId = folderStack.lastOrNull()?.first ?: "root"
+                    if (driveLoadError != null) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                            modifier = Modifier.padding(32.dp)
+                        ) {
+                            Text(
+                                text = driveLoadError ?: "Ошибка загрузки",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = Color(0xFFFF5252)
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            TvFocusCard(
+                                onClick = { loadFolder(currentFolderId) },
+                                modifier = Modifier
+                                    .width(180.dp)
+                                    .height(48.dp)
+                                    .focusRequester(firstItemFocusRequester)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxSize(),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.Refresh, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(20.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(text = "Повторить", color = AccentCyan, style = MaterialTheme.typography.bodyMedium)
+                                }
+                            }
+                        }
+                    } else {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                            modifier = Modifier
+                                .width(560.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(DarkCard)
+                                .padding(32.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(64.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(AccentCyan.copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Cloud,
+                                    contentDescription = null,
+                                    tint = AccentCyan,
+                                    modifier = Modifier.size(36.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                text = "Папка «Re:Player» готова к просмотру",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                color = TextPrimary
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "По правилам безопасности Google доступ на ТВ открыт к специальной папке «Re:Player». Скопируйте или загрузите в неё видео с телефона или компьютера — они сразу появятся здесь!",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = TextSecondary,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(20.dp))
+                            TvFocusCard(
+                                onClick = { loadFolder(currentFolderId) },
+                                modifier = Modifier
+                                    .width(200.dp)
+                                    .height(48.dp)
+                                    .focusRequester(firstItemFocusRequester)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxSize(),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.Refresh, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(20.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(text = "Обновить список", color = AccentCyan, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                                }
+                            }
+                        }
+                    }
                 }
             } else if (viewMode == ViewMode.LIST) {
                 // Detailed List View

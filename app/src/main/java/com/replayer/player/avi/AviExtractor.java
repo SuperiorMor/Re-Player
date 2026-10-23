@@ -505,6 +505,12 @@ public final class AviExtractor implements Extractor {
       return null;
     }
     long durationUs = aviStreamHeaderChunk.getDurationUs();
+    long movieDurationUs = aviHeader != null
+        ? ((long) aviHeader.totalFrames * aviHeader.frameDurationUs)
+        : durationUs;
+    if (durationUs <= 0) {
+      durationUs = movieDurationUs;
+    }
     Format streamFormat = streamFormatChunk.format;
     Format.Builder builder = streamFormat.buildUpon();
     builder.setId(streamId);
@@ -526,7 +532,8 @@ public final class AviExtractor implements Extractor {
           streamId,
           aviStreamHeaderChunk,
           trackOutput,
-          MimeTypes.allSamplesAreSyncSamples(format.sampleMimeType, format.codecs));
+          MimeTypes.allSamplesAreSyncSamples(format.sampleMimeType, format.codecs),
+          movieDurationUs);
     } else {
       // We don't currently support tracks other than video and audio.
       return null;

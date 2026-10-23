@@ -11,8 +11,10 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 
 class GoogleDriveService(private val authManager: GoogleDriveAuthManager) {
     private val client = OkHttpClient()
@@ -20,6 +22,80 @@ class GoogleDriveService(private val authManager: GoogleDriveAuthManager) {
 
     var lastErrorMessage: String? = null
         private set
+
+    suspend fun getOrCreateRePlayerFolder(token: String): MediaItem? = withContext(Dispatchers.IO) {
+        val searchUrl = "https://www.googleapis.com/drive/v3/files".toHttpUrl().newBuilder()
+            .addQueryParameter("q", "mimeType = 'application/vnd.google-apps.folder' and name = 'Re:Player' and trashed = false")
+            .addQueryParameter("fields", "files(id,name,mimeType)")
+            .addQueryParameter("pageSize", "1")
+            .addQueryParameter("supportsAllDrives", "true")
+            .addQueryParameter("includeItemsFromAllDrives", "true")
+            .build()
+
+        val searchReq = Request.Builder()
+            .url(searchUrl)
+            .addHeader("Authorization", "Bearer $token")
+            .build()
+
+        try {
+            val response = client.newCall(searchReq).execute()
+            val body = response.body?.string() ?: ""
+            if (response.isSuccessful) {
+                val rootObj = json.parseToJsonElement(body).jsonObject
+                val files = rootObj["files"]?.jsonArray
+                if (files != null && files.isNotEmpty()) {
+                    val folderObj = files[0].jsonObject
+                    val id = folderObj["id"]?.jsonPrimitive?.content ?: ""
+                    if (id.isNotBlank()) {
+                        return@withContext MediaItem(
+                            id = id,
+                            title = "Re:Player",
+                            uri = "",
+                            type = MediaType.DIRECTORY,
+                            sourceType = MediaSourceType.GOOGLE_DRIVE,
+                            parentId = "root"
+                        )
+                    }
+                }
+            }
+
+            // Folder does not exist, create it
+            val createUrl = "https://www.googleapis.com/drive/v3/files".toHttpUrl().newBuilder()
+                .addQueryParameter("supportsAllDrives", "true")
+                .build()
+
+            val jsonBody = """{"name":"Re:Player","mimeType":"application/vnd.google-apps.folder"}"""
+            val reqBody = jsonBody.toRequestBody("application/json; charset=utf-8".toMediaType())
+
+            val createReq = Request.Builder()
+                .url(createUrl)
+                .addHeader("Authorization", "Bearer $token")
+                .post(reqBody)
+                .build()
+
+            val createResp = client.newCall(createReq).execute()
+            val createBody = createResp.body?.string() ?: ""
+            if (createResp.isSuccessful) {
+                val createdObj = json.parseToJsonElement(createBody).jsonObject
+                val id = createdObj["id"]?.jsonPrimitive?.content ?: ""
+                if (id.isNotBlank()) {
+                    return@withContext MediaItem(
+                        id = id,
+                        title = "Re:Player",
+                        uri = "",
+                        type = MediaType.DIRECTORY,
+                        sourceType = MediaSourceType.GOOGLE_DRIVE,
+                        parentId = "root"
+                    )
+                }
+            } else {
+                Log.e("DriveService", "Create folder error (${createResp.code}): $createBody")
+            }
+        } catch (e: Exception) {
+            Log.e("DriveService", "Error getOrCreateRePlayerFolder: ${e.message}", e)
+        }
+        null
+    }
 
     suspend fun listFolder(folderId: String = "root"): List<MediaItem> = withContext(Dispatchers.IO) {
         lastErrorMessage = null
@@ -30,13 +106,18 @@ class GoogleDriveService(private val authManager: GoogleDriveAuthManager) {
         }
 
         val isRoot = folderId == "root"
+        var replayerFolder: MediaItem? = null
+        if (isRoot) {
+            replayerFolder = getOrCreateRePlayerFolder(token)
+        }
+
         val primaryQuery = if (isRoot) {
             "'root' in parents and trashed = false"
         } else {
             "'$folderId' in parents and trashed = false"
         }
 
-        var items = executeDriveQuery(token, primaryQuery, folderId)
+        var items = executeDriveQuery(token, primaryQuery, folderId).toMutableList()
 
         // If token was expired (401), try refreshing token and re-execute
         if (lastErrorMessage?.contains("401") == true) {
@@ -44,14 +125,25 @@ class GoogleDriveService(private val authManager: GoogleDriveAuthManager) {
             if (!newToken.isNullOrBlank()) {
                 token = newToken
                 lastErrorMessage = null
-                items = executeDriveQuery(token, primaryQuery, folderId)
+                if (isRoot && replayerFolder == null) {
+                    replayerFolder = getOrCreateRePlayerFolder(token)
+                }
+                items = executeDriveQuery(token, primaryQuery, folderId).toMutableList()
             }
         }
 
-        // If root folder is empty with strict parent query, also try listing all non-trashed files and folders
-        if (isRoot && items.isEmpty() && lastErrorMessage == null) {
-            Log.d("DriveService", "Root query returned 0 items, attempting broad query trashed = false")
-            items = executeDriveQuery(token, "trashed = false", folderId)
+        // For root folder: also check broad query for any files/folders accessible by the app
+        if (isRoot && lastErrorMessage == null) {
+            val broadItems = executeDriveQuery(token, "trashed = false", folderId)
+            val existingIds = items.map { it.id }.toSet()
+            for (item in broadItems) {
+                if (item.id !in existingIds) {
+                    items.add(item)
+                }
+            }
+            if (replayerFolder != null && items.none { it.id == replayerFolder.id }) {
+                items.add(0, replayerFolder)
+            }
         }
 
         items

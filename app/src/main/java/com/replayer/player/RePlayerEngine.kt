@@ -47,23 +47,15 @@ class RePlayerEngine(private val context: Context) {
     private val renderersFactory = DefaultRenderersFactory(context)
         .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
         .setEnableDecoderFallback(true)
-        .setMediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunnelingDecoder ->
-            val decoders = MediaCodecSelector.DEFAULT.getDecoderInfos(mimeType, requiresSecureDecoder, requiresTunnelingDecoder)
-            if (mimeType == MimeTypes.VIDEO_MP4V) {
-                decoders.sortedBy { if (it.softwareOnly) 0 else 1 }
-            } else {
-                decoders
-            }
-        }
 
     private val loadControl = DefaultLoadControl.Builder()
         .setBufferDurationsMs(
             /* minBufferMs= */ 15_000,
             /* maxBufferMs= */ 50_000,
-            /* bufferForPlaybackMs= */ 2_000,
-            /* bufferForPlaybackAfterRebufferMs= */ 3_000
+            /* bufferForPlaybackMs= */ 500,
+            /* bufferForPlaybackAfterRebufferMs= */ 1_000
         )
-        .setPrioritizeTimeOverSizeThresholds(true)
+        .setPrioritizeTimeOverSizeThresholds(false)
         .build()
 
     private val extractorsFactory = DefaultExtractorsFactory()
@@ -141,10 +133,14 @@ class RePlayerEngine(private val context: Context) {
             .setUri(mediaItem.uri)
             .setMediaId(mediaItem.id)
 
+        val isAvi = mediaItem.title.endsWith(".avi", ignoreCase = true) ||
+                mediaItem.uri.endsWith(".avi", ignoreCase = true) ||
+                mediaItem.format?.equals("avi", ignoreCase = true) == true
+
         // Ensure container MIME type is explicitly specified (crucial for AVI and DLNA streams)
         // Check file extension FIRST because DLNA servers often misreport AVI as video/mpeg
         val detectedMimeType = when {
-            mediaItem.title.endsWith(".avi", ignoreCase = true) || mediaItem.uri.endsWith(".avi", ignoreCase = true) -> MimeTypes.VIDEO_AVI
+            isAvi -> MimeTypes.VIDEO_AVI
             mediaItem.title.endsWith(".mkv", ignoreCase = true) || mediaItem.uri.endsWith(".mkv", ignoreCase = true) -> MimeTypes.VIDEO_MATROSKA
             mediaItem.title.endsWith(".mp4", ignoreCase = true) || mediaItem.uri.endsWith(".mp4", ignoreCase = true) -> MimeTypes.VIDEO_MP4
             mediaItem.title.endsWith(".mov", ignoreCase = true) || mediaItem.uri.endsWith(".mov", ignoreCase = true) -> "video/quicktime"
@@ -169,10 +165,6 @@ class RePlayerEngine(private val context: Context) {
                 finalHeaders["Authorization"] = "Bearer $token"
             }
         }
-
-        val isAvi = mediaItem.title.endsWith(".avi", ignoreCase = true) ||
-                mediaItem.uri.endsWith(".avi", ignoreCase = true) ||
-                mediaItem.format?.equals("avi", ignoreCase = true) == true
         val activeExtractorsFactory = object : ExtractorsFactory {
             override fun createExtractors(): Array<Extractor> {
                 if (isAvi) {

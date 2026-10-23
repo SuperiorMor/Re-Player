@@ -45,7 +45,7 @@ fun TvNavigationRail(
     Column(
         modifier = modifier
             .fillMaxHeight()
-            .width(90.dp)
+            .width(96.dp)
             .background(SurfaceDark)
             .padding(vertical = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -56,8 +56,8 @@ fun TvNavigationRail(
             painter = painterResource(id = com.replayer.R.drawable.app_logo_transparent),
             contentDescription = "Re:Player",
             modifier = Modifier
-                .padding(bottom = 24.dp)
-                .size(56.dp)
+                .padding(bottom = 20.dp)
+                .size(72.dp)
         )
 
         NavItem.entries.forEach { item ->
