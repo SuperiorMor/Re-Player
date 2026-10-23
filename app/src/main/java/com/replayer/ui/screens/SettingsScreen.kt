@@ -45,6 +45,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -55,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
+import kotlinx.coroutines.delay
 import com.replayer.data.ServerConfigManager
 import com.replayer.model.DeviceCodeResponse
 import com.replayer.model.UpnpDevice
@@ -113,6 +116,16 @@ fun SettingsScreen(
     var downloadProgress by remember { mutableFloatStateOf(0f) }
     var showChangelogDialog by remember { mutableStateOf(false) }
     var changelogRelease by remember { mutableStateOf<ReleaseInfo?>(null) }
+    val updateActionFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(updateUiState) {
+        if (updateUiState is UpdateUiState.Downloading || updateUiState is UpdateUiState.ReadyToInstall) {
+            delay(60)
+            try {
+                updateActionFocusRequester.requestFocus()
+            } catch (_: Exception) {}
+        }
+    }
 
     BackHandler(enabled = true) {
         onBack()
@@ -691,6 +704,7 @@ fun SettingsScreen(
                             modifier = Modifier
                                 .width(130.dp)
                                 .height(44.dp)
+                                .focusRequester(updateActionFocusRequester)
                         ) {
                             Row(
                                 modifier = Modifier.fillMaxSize(),
@@ -717,6 +731,7 @@ fun SettingsScreen(
                             modifier = Modifier
                                 .width(160.dp)
                                 .height(44.dp)
+                                .focusRequester(updateActionFocusRequester)
                         ) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Text(text = "Установить", color = AccentCyan, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
@@ -854,6 +869,14 @@ fun SettingsScreen(
 }
 
 private fun getFriendlyChangelog(version: String, rawChangelog: String): List<String> {
+    if (version.contains("0.2.8")) {
+        return listOf(
+            "Google Drive: Вшиты новые параметры подключения (Desktop Client) с поддержкой прямого доступа ко всему диску.",
+            "Фокус в настройках: Кнопка «Скачать» и «Установить» больше никогда не теряют фокус и не сбрасывают курсор в боковое меню.",
+            "Воспроизведение AVI: Расчёт таймстемпов по точной спецификации AVI устраняет чёрный экран и рассинхрон звука."
+        )
+    }
+
     if (version.contains("0.2.7")) {
         return listOf(
             "Стабильное воспроизведение AVI: Полностью исправлена синхронизация аудио и видео — чистый звук и плавное видео без зависаний.",

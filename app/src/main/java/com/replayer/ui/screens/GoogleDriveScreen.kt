@@ -442,13 +442,16 @@ fun GoogleDriveScreen(
                             }
                             Spacer(modifier = Modifier.height(16.dp))
                             Text(
-                                text = "Папка «Re:Player» готова к просмотру",
+                                text = if (currentFolderId == "root") "Google Диск подключен" else "Папка пуста",
                                 style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                                 color = TextPrimary
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                text = "По правилам безопасности Google доступ на ТВ открыт к специальной папке «Re:Player». Скопируйте или загрузите в неё видео с телефона или компьютера — они сразу появятся здесь!",
+                                text = if (currentFolderId == "root")
+                                    "В корне вашего Google Диска пока нет видеофайлов или папок. Загрузите видео на диск и нажмите «Обновить»."
+                                else
+                                    "В этой папке нет видео- или аудиофайлов. Скопируйте медиафайлы или вернитесь назад.",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = TextSecondary,
                                 textAlign = TextAlign.Center

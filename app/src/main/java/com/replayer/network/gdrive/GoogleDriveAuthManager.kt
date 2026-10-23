@@ -29,15 +29,15 @@ class GoogleDriveAuthManager(private val context: Context) {
         // Standard Google OAuth2 Device Endpoint
         private const val DEVICE_CODE_URL = "https://oauth2.googleapis.com/device/code"
         private const val TOKEN_URL = "https://oauth2.googleapis.com/token"
-        // Valid Google OAuth2 Device Endpoint Scope
-        private const val SCOPE = "https://www.googleapis.com/auth/drive.file email profile"
+        private const val PRIMARY_SCOPE = "https://www.googleapis.com/auth/drive.readonly email profile"
+        private const val FALLBACK_SCOPE = "https://www.googleapis.com/auth/drive.file email profile"
 
-        // Built-in pre-configured Client ID & Secret (obfuscated)
+        // Built-in pre-configured Client ID & Secret (Desktop application client)
         private val OBF_ID = byteArrayOf(
-            108, 109, 105, 109, 110, 109, 106, 108, 104, 98, 104, 108, 119, 99, 40, 54, 60, 46, 52, 50, 40, 42, 47, 43, 41, 42, 53, 99, 109, 48, 59, 50, 59, 53, 107, 52, 104, 107, 109, 104, 63, 60, 55, 52, 50, 116, 59, 42, 42, 41, 116, 61, 53, 53, 61, 54, 63, 47, 41, 63, 40, 57, 53, 52, 46, 63, 52, 46, 116, 57, 53, 55
+            108, 109, 105, 109, 110, 109, 106, 108, 104, 98, 104, 108, 119, 41, 62, 44, 99, 44, 60, 61, 56, 51, 110, 108, 108, 109, 44, 55, 49, 40, 62, 99, 106, 47, 50, 60, 105, 98, 107, 41, 109, 111, 40, 57, 105, 116, 59, 42, 42, 41, 116, 61, 53, 53, 61, 54, 63, 47, 41, 63, 40, 57, 53, 52, 46, 63, 52, 46, 116, 57, 53, 55
         )
         private val OBF_SEC = byteArrayOf(
-            29, 21, 25, 9, 10, 2, 119, 49, 42, 54, 16, 28, 55, 105, 57, 3, 5, 12, 119, 99, 24, 60, 108, 54, 31, 19, 21, 105, 28, 11, 56, 111, 41, 60, 44
+            29, 21, 25, 9, 10, 2, 119, 51, 54, 31, 32, 60, 32, 105, 28, 56, 13, 30, 40, 46, 23, 31, 12, 30, 63, 21, 2, 18, 48, 50, 14, 50, 30, 105
         )
 
         val DEFAULT_CLIENT_ID: String get() = try {
@@ -123,21 +123,39 @@ class GoogleDriveAuthManager(private val context: Context) {
             )
         }
 
-        val form = FormBody.Builder()
-            .add("client_id", clientId.trim())
-            .add("scope", SCOPE)
+        val formPrimary = FormBody.Builder()
+            .add("client_id", actualClientId.trim())
+            .add("scope", PRIMARY_SCOPE)
             .build()
 
-        val request = Request.Builder().url(DEVICE_CODE_URL).post(form).build()
+        val requestPrimary = Request.Builder().url(DEVICE_CODE_URL).post(formPrimary).build()
         try {
-            val response = client.newCall(request).execute()
-            val body = response.body?.string() ?: return@withContext Result.failure(Exception("Пустой ответ от Google"))
-            if (!response.isSuccessful) {
-                return@withContext Result.failure(Exception("Ошибка Google API (${response.code}): $body"))
+            val responsePrimary = client.newCall(requestPrimary).execute()
+            val bodyPrimary = responsePrimary.body?.string() ?: ""
+            if (responsePrimary.isSuccessful) {
+                val codeResp = json.decodeFromString<DeviceCodeResponse>(bodyPrimary)
+                saveClientId(actualClientId)
+                return@withContext Result.success(codeResp)
             }
-            val codeResp = json.decodeFromString<DeviceCodeResponse>(body)
-            saveClientId(clientId)
-            Result.success(codeResp)
+
+            // If invalid_scope, gracefully retry with fallback scope
+            if (bodyPrimary.contains("invalid_scope")) {
+                val formFallback = FormBody.Builder()
+                    .add("client_id", actualClientId.trim())
+                    .add("scope", FALLBACK_SCOPE)
+                    .build()
+                val requestFallback = Request.Builder().url(DEVICE_CODE_URL).post(formFallback).build()
+                val responseFallback = client.newCall(requestFallback).execute()
+                val bodyFallback = responseFallback.body?.string() ?: ""
+                if (responseFallback.isSuccessful) {
+                    val codeResp = json.decodeFromString<DeviceCodeResponse>(bodyFallback)
+                    saveClientId(actualClientId)
+                    return@withContext Result.success(codeResp)
+                }
+                return@withContext Result.failure(Exception("Ошибка Google API (${responseFallback.code}): $bodyFallback"))
+            }
+
+            return@withContext Result.failure(Exception("Ошибка Google API (${responsePrimary.code}): $bodyPrimary"))
         } catch (e: Exception) {
             Result.failure(e)
         }

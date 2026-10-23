@@ -106,11 +106,6 @@ class GoogleDriveService(private val authManager: GoogleDriveAuthManager) {
         }
 
         val isRoot = folderId == "root"
-        var replayerFolder: MediaItem? = null
-        if (isRoot) {
-            replayerFolder = getOrCreateRePlayerFolder(token)
-        }
-
         val primaryQuery = if (isRoot) {
             "'root' in parents and trashed = false"
         } else {
@@ -125,24 +120,18 @@ class GoogleDriveService(private val authManager: GoogleDriveAuthManager) {
             if (!newToken.isNullOrBlank()) {
                 token = newToken
                 lastErrorMessage = null
-                if (isRoot && replayerFolder == null) {
-                    replayerFolder = getOrCreateRePlayerFolder(token)
-                }
                 items = executeDriveQuery(token, primaryQuery, folderId).toMutableList()
             }
         }
 
-        // For root folder: also check broad query for any files/folders accessible by the app
-        if (isRoot && lastErrorMessage == null) {
+        // If root has no items with "'root' in parents", fallback to broad query for accessible files/folders
+        if (isRoot && items.isEmpty() && lastErrorMessage == null) {
             val broadItems = executeDriveQuery(token, "trashed = false", folderId)
             val existingIds = items.map { it.id }.toSet()
             for (item in broadItems) {
                 if (item.id !in existingIds) {
                     items.add(item)
                 }
-            }
-            if (replayerFolder != null && items.none { it.id == replayerFolder.id }) {
-                items.add(0, replayerFolder)
             }
         }
 

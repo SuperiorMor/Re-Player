@@ -135,7 +135,15 @@ import java.util.Arrays;
   }
 
   public long getFrameDurationUs() {
-    return getChunkTimestampUs(/* chunkIndex= */ 1);
+    if (streamHeaderChunk.rate > 0 && streamHeaderChunk.scale > 0) {
+      long duration = Util.scaleLargeTimestamp(
+          1,
+          (long) streamHeaderChunk.scale * C.MICROS_PER_SECOND,
+          streamHeaderChunk.rate);
+      return duration > 0 ? duration : 40_000L;
+    }
+    long chunkDur = getChunkTimestampUs(/* chunkIndex= */ 1);
+    return chunkDur > 0 ? chunkDur : 40_000L;
   }
 
   public void commitIndex() {
@@ -209,7 +217,8 @@ import java.util.Arrays;
       return new SeekMap.SeekPoints(
           new SeekPoint(/* timeUs= */ 0, /* position= */ firstIndexChunkOffset));
     }
-    int targetFrameIndex = (int) (timeUs / getFrameDurationUs());
+    long frameDur = getFrameDurationUs();
+    int targetFrameIndex = (int) (timeUs / (frameDur > 0 ? frameDur : 40_000L));
     int keyFrameIndex =
         Util.binarySearchFloor(
             keyFrameIndices, targetFrameIndex, /* inclusive= */ true, /* stayInBounds= */ true);
@@ -226,6 +235,12 @@ import java.util.Arrays;
   }
 
   private long getChunkTimestampUs(int chunkIndex) {
+    if (streamHeaderChunk.rate > 0 && streamHeaderChunk.scale > 0) {
+      return Util.scaleLargeTimestamp(
+          chunkIndex,
+          (long) streamHeaderChunk.scale * C.MICROS_PER_SECOND,
+          streamHeaderChunk.rate);
+    }
     long count = chunkCount > 0 ? chunkCount : 1;
     long totalDuration = durationUs > 0 ? durationUs : 0;
     return totalDuration * chunkIndex / count;
