@@ -2,6 +2,7 @@ package com.replayer.ui.screens
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,15 +18,17 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AudioFile
-import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.filled.VideoFile
 import androidx.compose.material.icons.filled.ViewList
@@ -35,6 +38,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -43,73 +47,91 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.replayer.data.FavoritesManager
+import com.replayer.data.ServerConfigManager
+import com.replayer.model.FavoriteFolder
 import com.replayer.model.MediaItem
+import com.replayer.model.MediaSourceType
 import com.replayer.model.MediaType
-import com.replayer.model.UpnpDevice
 import com.replayer.network.upnp.ContentDirectoryService
-import com.replayer.network.upnp.SsdpDiscovery
 import com.replayer.ui.components.TvFocusCard
 import com.replayer.ui.theme.AccentCyan
+import com.replayer.ui.theme.DarkCard
+import com.replayer.ui.theme.DarkSurface
 import com.replayer.ui.theme.TextPrimary
 import com.replayer.ui.theme.TextSecondary
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-
-enum class ViewMode {
-    LIST, GRID
-}
-
-enum class SortMode {
-    BY_NAME, BY_DATE
-}
 
 @Composable
 fun UpnpBrowseScreen(
     onPlayMedia: (MediaItem) -> Unit,
+    onNavigateToSettings: () -> Unit,
     onBackToHome: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    initialFolder: Pair<String, String>? = null
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val discovery = remember { SsdpDiscovery(context) }
+    val serverConfigManager = remember { ServerConfigManager(context) }
+    val favoritesManager = remember { FavoritesManager(context) }
     val contentDirectory = remember { ContentDirectoryService() }
 
-    var devices by remember { mutableStateOf<List<UpnpDevice>>(emptyList()) }
-    var selectedDevice by remember { mutableStateOf<UpnpDevice?>(null) }
+    val connectedDevice by serverConfigManager.connectedUpnpDevice.collectAsState()
+    val favorites by favoritesManager.favorites.collectAsState()
+
     var currentItems by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
-    var folderStack by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) } // Pair(id, title)
-    var isScanning by remember { mutableStateOf(false) }
+    var folderStack by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
     var isLoadingFolder by remember { mutableStateOf(false) }
 
     // User preferences: Default view is LIST
     var viewMode by remember { mutableStateOf(ViewMode.LIST) }
     var sortMode by remember { mutableStateOf(SortMode.BY_NAME) }
 
-    fun scanDevices() {
-        isScanning = true
+    val firstItemFocusRequester = remember { FocusRequester() }
+
+    fun loadFolder(controlUrl: String, folderId: String) {
+        isLoadingFolder = true
         scope.launch {
-            discovery.discoverDevices().collect { list ->
-                devices = list
-                isScanning = false
+            currentItems = contentDirectory.browse(controlUrl, folderId)
+            isLoadingFolder = false
+        }
+    }
+
+    fun openFolder(controlUrl: String, folderId: String, title: String) {
+        folderStack = folderStack + Pair(folderId, title)
+        loadFolder(controlUrl, folderId)
+    }
+
+    // Initialize root folder when connectedDevice changes or initialFolder provided
+    LaunchedEffect(connectedDevice) {
+        if (connectedDevice != null && folderStack.isEmpty()) {
+            val controlUrl = connectedDevice!!.contentDirectoryControlUrl ?: return@LaunchedEffect
+            if (initialFolder != null) {
+                folderStack = listOf(Pair("0", connectedDevice!!.friendlyName), initialFolder)
+                loadFolder(controlUrl, initialFolder.first)
+            } else {
+                folderStack = listOf(Pair("0", connectedDevice!!.friendlyName))
+                loadFolder(controlUrl, "0")
             }
         }
     }
 
-    LaunchedEffect(Unit) {
-        scanDevices()
-    }
-
-    fun openFolder(controlUrl: String, folderId: String, title: String) {
-        isLoadingFolder = true
-        scope.launch {
-            val items = contentDirectory.browse(controlUrl, folderId)
-            currentItems = items
-            folderStack = folderStack + Pair(folderId, title)
-            isLoadingFolder = false
+    // Auto-focus first item when folder contents load
+    LaunchedEffect(currentItems) {
+        if (currentItems.isNotEmpty()) {
+            delay(150)
+            try {
+                firstItemFocusRequester.requestFocus()
+            } catch (_: Exception) {}
         }
     }
 
@@ -117,20 +139,10 @@ fun UpnpBrowseScreen(
         if (folderStack.size > 1) {
             val parentIdx = folderStack.size - 2
             val parentFolder = folderStack[parentIdx]
-            val newStack = folderStack.take(parentIdx + 1)
-            selectedDevice?.contentDirectoryControlUrl?.let { url ->
-                isLoadingFolder = true
-                scope.launch {
-                    val items = contentDirectory.browse(url, parentFolder.first)
-                    currentItems = items
-                    folderStack = newStack
-                    isLoadingFolder = false
-                }
+            folderStack = folderStack.take(parentIdx + 1)
+            connectedDevice?.contentDirectoryControlUrl?.let { url ->
+                loadFolder(url, parentFolder.first)
             }
-        } else if (selectedDevice != null) {
-            selectedDevice = null
-            folderStack = emptyList()
-            currentItems = emptyList()
         } else {
             onBackToHome()
         }
@@ -140,7 +152,7 @@ fun UpnpBrowseScreen(
         navigateBack()
     }
 
-    // Sorted items list
+    // Sorting
     val sortedItems = remember(currentItems, sortMode) {
         when (sortMode) {
             SortMode.BY_NAME -> {
@@ -159,108 +171,151 @@ fun UpnpBrowseScreen(
         }
     }
 
+    if (connectedDevice == null) {
+        // Not connected state
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .padding(32.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(80.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(DarkCard),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Folder,
+                        contentDescription = null,
+                        tint = AccentCyan,
+                        modifier = Modifier.size(42.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.height(20.dp))
+                Text(
+                    text = "Подключите свой сервер DLNA/UPnP в настройках",
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
+                    color = TextPrimary
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Выберите DLNA сервер (например Keenetic Giga или медиасервер ПК) в меню настроек.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextSecondary
+                )
+                Spacer(modifier = Modifier.height(24.dp))
+                TvFocusCard(
+                    onClick = onNavigateToSettings,
+                    modifier = Modifier
+                        .width(220.dp)
+                        .height(48.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Settings, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(text = "Перейти в настройки", color = AccentCyan, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+        }
+        return
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 32.dp, vertical = 24.dp)
     ) {
-        // Top Header
+        // Header with Breadcrumb and Controls
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                if (selectedDevice == null) {
-                    Text(
-                        text = "UPnP / DLNA Серверы",
-                        style = MaterialTheme.typography.displayLarge
-                    )
-                    Text(
-                        text = if (isScanning) "Сканирование локальной сети..." else "Найдено устройств: ${devices.size}",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = AccentCyan
-                    )
-                } else {
-                    Text(
-                        text = selectedDevice?.friendlyName ?: "DLNA Сервер",
-                        style = MaterialTheme.typography.displayLarge,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    val breadcrumbs = folderStack.joinToString(" / ") { it.second }
-                    Text(
-                        text = if (breadcrumbs.isNotEmpty()) breadcrumbs else "Корневой каталог",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = AccentCyan,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
+                Text(
+                    text = connectedDevice!!.friendlyName,
+                    style = MaterialTheme.typography.displayLarge
+                )
+                val breadcrumb = folderStack.joinToString(" / ") { it.second }
+                Text(
+                    text = breadcrumb.ifEmpty { connectedDevice!!.friendlyName },
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = AccentCyan,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
 
-            // Controls for View Mode and Sort Mode
-            if (selectedDevice != null) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // View Switcher (List / Grid)
+                TvFocusCard(
+                    onClick = {
+                        viewMode = if (viewMode == ViewMode.LIST) ViewMode.GRID else ViewMode.LIST
+                    },
+                    modifier = Modifier
+                        .width(160.dp)
+                        .height(48.dp)
                 ) {
-                    // View Switcher (List / Grid)
-                    TvFocusCard(
-                        onClick = {
-                            viewMode = if (viewMode == ViewMode.LIST) ViewMode.GRID else ViewMode.LIST
-                        },
-                        modifier = Modifier
-                            .width(160.dp)
-                            .height(48.dp)
+                    Row(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxSize(),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = if (viewMode == ViewMode.LIST) Icons.Default.ViewList else Icons.Default.GridView,
-                                contentDescription = null,
-                                tint = AccentCyan,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = if (viewMode == ViewMode.LIST) "Вид: Список" else "Вид: Плитка",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = TextPrimary
-                            )
-                        }
+                        Icon(
+                            imageVector = if (viewMode == ViewMode.LIST) Icons.Default.ViewList else Icons.Default.GridView,
+                            contentDescription = null,
+                            tint = AccentCyan,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (viewMode == ViewMode.LIST) "Вид: Список" else "Вид: Плитка",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = TextPrimary
+                        )
                     }
+                }
 
-                    // Sort Switcher (Name / Date)
-                    TvFocusCard(
-                        onClick = {
-                            sortMode = if (sortMode == SortMode.BY_NAME) SortMode.BY_DATE else SortMode.BY_NAME
-                        },
-                        modifier = Modifier
-                            .width(170.dp)
-                            .height(48.dp)
+                // Sort Switcher (Name / Date)
+                TvFocusCard(
+                    onClick = {
+                        sortMode = if (sortMode == SortMode.BY_NAME) SortMode.BY_DATE else SortMode.BY_NAME
+                    },
+                    modifier = Modifier
+                        .width(170.dp)
+                        .height(48.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxSize(),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Sort,
-                                contentDescription = null,
-                                tint = AccentCyan,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = if (sortMode == SortMode.BY_NAME) "Сорт: По имени" else "Сорт: По дате",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = TextPrimary
-                            )
-                        }
+                        Icon(
+                            imageVector = Icons.Default.Sort,
+                            contentDescription = null,
+                            tint = AccentCyan,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (sortMode == SortMode.BY_NAME) "Сорт: По имени" else "Сорт: По дате",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = TextPrimary
+                        )
                     }
                 }
             }
@@ -270,201 +325,88 @@ fun UpnpBrowseScreen(
 
         if (isLoadingFolder) {
             Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .weight(1f),
+                modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
                 CircularProgressIndicator(color = AccentCyan)
             }
-        } else if (selectedDevice == null) {
-            // Discovered DLNA Servers List
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 240.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+        } else if (sortedItems.isEmpty()) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "Папка пуста",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = TextSecondary
+                )
+            }
+        } else if (viewMode == ViewMode.LIST) {
+            // Detailed List View
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
                 contentPadding = PaddingValues(vertical = 8.dp)
             ) {
-                items(devices) { device ->
+                itemsIndexed(sortedItems, key = { _, item -> item.id }) { index, item ->
+                    val isFirst = index == 0
+                    val isFav = favorites.any { it.id == item.id }
+
                     TvFocusCard(
                         onClick = {
-                            selectedDevice = device
-                            device.contentDirectoryControlUrl?.let { url ->
-                                openFolder(url, "0", device.friendlyName)
+                            if (item.type == MediaType.DIRECTORY) {
+                                connectedDevice?.contentDirectoryControlUrl?.let { url ->
+                                    openFolder(url, item.id, item.title)
+                                }
+                            } else {
+                                onPlayMedia(item)
                             }
                         },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(130.dp)
+                            .height(78.dp)
+                            .then(if (isFirst) Modifier.focusRequester(firstItemFocusRequester) else Modifier)
                     ) {
-                        Column(
+                        Row(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .padding(16.dp),
-                            verticalArrangement = Arrangement.Center
+                                .padding(horizontal = 20.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Default.Dns, contentDescription = null, tint = AccentCyan)
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = device.friendlyName,
-                                style = MaterialTheme.typography.titleMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = device.manufacturer,
-                                style = MaterialTheme.typography.bodyMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                }
-            }
-        } else {
-            // Folder Contents: List View (Default) or Grid View
-            if (viewMode == ViewMode.LIST) {
-                LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = PaddingValues(vertical = 8.dp)
-                ) {
-                    items(sortedItems) { item ->
-                        TvFocusCard(
-                            onClick = {
-                                if (item.type == MediaType.DIRECTORY) {
-                                    selectedDevice?.contentDirectoryControlUrl?.let { url ->
-                                        openFolder(url, item.id, item.title)
-                                    }
-                                } else {
-                                    onPlayMedia(item)
-                                }
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(78.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(horizontal = 20.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                val icon = when (item.type) {
-                                    MediaType.DIRECTORY -> Icons.Default.Folder
-                                    MediaType.VIDEO -> Icons.Default.VideoFile
-                                    MediaType.AUDIO -> Icons.Default.AudioFile
-                                    MediaType.IMAGE -> Icons.Default.Image
-                                    MediaType.UNKNOWN -> Icons.Default.VideoFile
-                                }
-                                Box(
-                                    modifier = Modifier
-                                        .size(44.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(AccentCyan.copy(alpha = 0.12f)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = icon,
-                                        contentDescription = null,
-                                        tint = AccentCyan,
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                }
-
-                                Spacer(modifier = Modifier.width(16.dp))
-
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = item.title,
-                                        style = MaterialTheme.typography.titleMedium,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        color = TextPrimary
-                                    )
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        // Format Badge
-                                        Box(
-                                            modifier = Modifier
-                                                .clip(RoundedCornerShape(4.dp))
-                                                .background(AccentCyan.copy(alpha = 0.2f))
-                                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                                        ) {
-                                            Text(
-                                                text = item.fileFormat(),
-                                                color = AccentCyan,
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
-
-                                        val sizeStr = item.formattedSize()
-                                        if (sizeStr.isNotEmpty()) {
-                                            Spacer(modifier = Modifier.width(12.dp))
-                                            Text(
-                                                text = sizeStr,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = TextSecondary
-                                            )
-                                        }
-
-                                        val dateStr = item.formattedDate()
-                                        if (dateStr.isNotEmpty()) {
-                                            Spacer(modifier = Modifier.width(12.dp))
-                                            Text(
-                                                text = dateStr,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = TextSecondary
-                                            )
-                                        }
-                                    }
-                                }
+                            val icon = when (item.type) {
+                                MediaType.DIRECTORY -> Icons.Default.Folder
+                                MediaType.VIDEO -> Icons.Default.VideoFile
+                                MediaType.AUDIO -> Icons.Default.AudioFile
+                                MediaType.IMAGE -> Icons.Default.Image
+                                MediaType.UNKNOWN -> Icons.Default.VideoFile
                             }
-                        }
-                    }
-                }
-            } else {
-                // Grid View
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 220.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                    contentPadding = PaddingValues(vertical = 8.dp)
-                ) {
-                    items(sortedItems) { item ->
-                        TvFocusCard(
-                            onClick = {
-                                if (item.type == MediaType.DIRECTORY) {
-                                    selectedDevice?.contentDirectoryControlUrl?.let { url ->
-                                        openFolder(url, item.id, item.title)
-                                    }
-                                } else {
-                                    onPlayMedia(item)
-                                }
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(130.dp)
-                        ) {
-                            Column(
+                            Box(
                                 modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(16.dp),
-                                verticalArrangement = Arrangement.Center
+                                    .size(44.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(AccentCyan.copy(alpha = 0.12f)),
+                                contentAlignment = Alignment.Center
                             ) {
-                                val icon = when (item.type) {
-                                    MediaType.DIRECTORY -> Icons.Default.Folder
-                                    MediaType.VIDEO -> Icons.Default.VideoFile
-                                    MediaType.AUDIO -> Icons.Default.AudioFile
-                                    MediaType.IMAGE -> Icons.Default.Image
-                                    MediaType.UNKNOWN -> Icons.Default.VideoFile
-                                }
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(icon, contentDescription = null, tint = AccentCyan)
+                                Icon(
+                                    imageVector = icon,
+                                    contentDescription = null,
+                                    tint = AccentCyan,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(16.dp))
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = item.title,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    color = TextPrimary
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    // Format Badge
                                     Box(
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(4.dp))
@@ -474,28 +416,164 @@ fun UpnpBrowseScreen(
                                         Text(
                                             text = item.fileFormat(),
                                             color = AccentCyan,
-                                            fontSize = 10.sp,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+
+                                    val sizeStr = item.formattedSize()
+                                    if (sizeStr.isNotEmpty()) {
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Text(
+                                            text = sizeStr,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = TextSecondary
+                                        )
+                                    }
+
+                                    val dateStr = item.formattedDate()
+                                    if (dateStr.isNotEmpty()) {
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Text(
+                                            text = dateStr,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = TextSecondary
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Favorite Heart button for folders
+                            if (item.type == MediaType.DIRECTORY) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(if (isFav) Color(0xFFFF4081).copy(alpha = 0.15f) else Color.Transparent)
+                                        .clickable {
+                                            favoritesManager.toggleFavorite(
+                                                FavoriteFolder(
+                                                    id = item.id,
+                                                    title = item.title,
+                                                    sourceType = MediaSourceType.UPNP,
+                                                    serverControlUrl = connectedDevice?.contentDirectoryControlUrl,
+                                                    parentId = item.parentId
+                                                )
+                                            )
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                        contentDescription = "Избранное",
+                                        tint = if (isFav) Color(0xFFFF4081) else TextSecondary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            // Grid View
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(minSize = 220.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                contentPadding = PaddingValues(vertical = 8.dp)
+            ) {
+                itemsIndexed(sortedItems, key = { _, item -> item.id }) { index, item ->
+                    val isFirst = index == 0
+                    val isFav = favorites.any { it.id == item.id }
+
+                    TvFocusCard(
+                        onClick = {
+                            if (item.type == MediaType.DIRECTORY) {
+                                connectedDevice?.contentDirectoryControlUrl?.let { url ->
+                                    openFolder(url, item.id, item.title)
+                                }
+                            } else {
+                                onPlayMedia(item)
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(130.dp)
+                            .then(if (isFirst) Modifier.focusRequester(firstItemFocusRequester) else Modifier)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(16.dp),
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            val icon = when (item.type) {
+                                MediaType.DIRECTORY -> Icons.Default.Folder
+                                MediaType.VIDEO -> Icons.Default.VideoFile
+                                MediaType.AUDIO -> Icons.Default.AudioFile
+                                MediaType.IMAGE -> Icons.Default.Image
+                                MediaType.UNKNOWN -> Icons.Default.VideoFile
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(icon, contentDescription = null, tint = AccentCyan)
+
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (item.type == MediaType.DIRECTORY) {
+                                        Icon(
+                                            imageVector = if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                            contentDescription = null,
+                                            tint = if (isFav) Color(0xFFFF4081) else TextSecondary,
+                                            modifier = Modifier
+                                                .size(20.dp)
+                                                .clickable {
+                                                    favoritesManager.toggleFavorite(
+                                                        FavoriteFolder(
+                                                            id = item.id,
+                                                            title = item.title,
+                                                            sourceType = MediaSourceType.UPNP,
+                                                            serverControlUrl = connectedDevice?.contentDirectoryControlUrl,
+                                                            parentId = item.parentId
+                                                        )
+                                                    )
+                                                }
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                    }
+
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(AccentCyan.copy(alpha = 0.2f))
+                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = item.fileFormat(),
+                                            color = AccentCyan,
+                                            fontSize = 11.sp,
                                             fontWeight = FontWeight.Bold
                                         )
                                     }
                                 }
-                                Spacer(modifier = Modifier.height(10.dp))
+                            }
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = item.title,
+                                style = MaterialTheme.typography.titleMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            val sizeStr = item.formattedSize()
+                            if (sizeStr.isNotEmpty()) {
                                 Text(
-                                    text = item.title,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    text = sizeStr,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextSecondary
                                 )
-                                val sizeStr = item.formattedSize()
-                                if (sizeStr.isNotEmpty()) {
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(
-                                        text = sizeStr,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = TextSecondary,
-                                        maxLines = 1
-                                    )
-                                }
                             }
                         }
                     }

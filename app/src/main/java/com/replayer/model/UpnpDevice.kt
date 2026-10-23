@@ -1,5 +1,8 @@
 package com.replayer.model
 
+import kotlinx.serialization.Serializable
+
+@Serializable
 data class UpnpDevice(
     val id: String,
     val friendlyName: String,

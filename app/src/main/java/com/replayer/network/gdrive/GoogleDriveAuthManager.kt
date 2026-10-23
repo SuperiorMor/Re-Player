@@ -70,19 +70,23 @@ class GoogleDriveAuthManager(private val context: Context) {
         }
     }
 
+    fun isAuthenticated(): Boolean = !getSavedAccessToken().isNullOrBlank()
+
     suspend fun pollForToken(
         clientId: String,
-        clientSecret: String,
         deviceCode: String,
+        clientSecret: String = "",
         intervalSec: Int = 5,
-        maxRetries: Int = 30
+        maxRetries: Int = 60
     ): TokenResponse? = withContext(Dispatchers.IO) {
-        val form = FormBody.Builder()
+        val formBuilder = FormBody.Builder()
             .add("client_id", clientId.trim())
-            .add("client_secret", clientSecret.trim())
             .add("device_code", deviceCode)
             .add("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
-            .build()
+        if (clientSecret.isNotBlank()) {
+            formBuilder.add("client_secret", clientSecret.trim())
+        }
+        val form = formBuilder.build()
 
         var retries = 0
         while (retries < maxRetries) {

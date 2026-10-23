@@ -3,6 +3,7 @@ package com.replayer.ui.screens
 import android.content.Context
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,8 +19,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
@@ -28,8 +33,12 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -44,6 +53,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import com.replayer.data.ServerConfigManager
+import com.replayer.model.DeviceCodeResponse
+import com.replayer.model.UpnpDevice
+import com.replayer.network.gdrive.GoogleDriveAuthManager
+import com.replayer.network.upnp.SsdpDiscovery
 import com.replayer.ui.components.TvFocusCard
 import com.replayer.ui.theme.AccentCyan
 import com.replayer.ui.theme.DarkCard
@@ -74,21 +89,93 @@ fun SettingsScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val serverConfigManager = remember { ServerConfigManager(context) }
+    val authManager = remember { GoogleDriveAuthManager(context) }
+    val discovery = remember { SsdpDiscovery(context) }
     val updateManager = remember { UpdateManager(context) }
     val currentVersion = remember { getCurrentAppVersion(context) }
 
-    var uiState by remember { mutableStateOf<UpdateUiState>(UpdateUiState.Idle) }
+    val connectedUpnpDevice by serverConfigManager.connectedUpnpDevice.collectAsState()
+    var isGdriveAuthenticated by remember { mutableStateOf(authManager.isAuthenticated()) }
+
+    // UPnP scanning state
+    var discoveredDevices by remember { mutableStateOf<List<UpnpDevice>>(emptyList()) }
+    var isScanningUpnp by remember { mutableStateOf(false) }
+
+    // Google Drive Client ID Dialog & Device Code
+    var showClientIdDialog by remember { mutableStateOf(false) }
+    var clientIdInput by remember { mutableStateOf(authManager.getSavedClientId()) }
+    var deviceCodeInfo by remember { mutableStateOf<DeviceCodeResponse?>(null) }
+    var isPollingDriveAuth by remember { mutableStateOf(false) }
+    var driveErrorMessage by remember { mutableStateOf<String?>(null) }
+
+    // App updates state
+    var updateUiState by remember { mutableStateOf<UpdateUiState>(UpdateUiState.Idle) }
     var downloadProgress by remember { mutableFloatStateOf(0f) }
 
     BackHandler(enabled = true) {
         onBack()
     }
 
+    // Auto-scan for DLNA on entering settings if none connected
+    LaunchedEffect(Unit) {
+        if (connectedUpnpDevice == null) {
+            isScanningUpnp = true
+            discovery.discoverDevices().collect { list ->
+                discoveredDevices = list
+                isScanningUpnp = false
+            }
+        }
+    }
+
+    fun rescanUpnp() {
+        isScanningUpnp = true
+        scope.launch {
+            discovery.discoverDevices().collect { list ->
+                discoveredDevices = list
+                isScanningUpnp = false
+            }
+        }
+    }
+
+    fun startDriveDeviceCodeFlow() {
+        val clientId = authManager.getSavedClientId()
+        if (clientId.isBlank()) {
+            showClientIdDialog = true
+            return
+        }
+
+        driveErrorMessage = null
+        scope.launch {
+            val result = authManager.requestDeviceCode(clientId)
+            result.onSuccess { info ->
+                deviceCodeInfo = info
+                isPollingDriveAuth = true
+                scope.launch {
+                    val token = authManager.pollForToken(
+                        clientId = clientId,
+                        deviceCode = info.device_code,
+                        intervalSec = info.interval.coerceAtLeast(5)
+                    )
+                    isPollingDriveAuth = false
+                    if (token != null && token.access_token != null) {
+                        isGdriveAuthenticated = true
+                        deviceCodeInfo = null
+                    } else {
+                        driveErrorMessage = "Время ожидания авторизации истекло. Попробуйте снова."
+                    }
+                }
+            }.onFailure { err ->
+                driveErrorMessage = err.localizedMessage ?: "Ошибка запроса кода"
+            }
+        }
+    }
+
     fun startCheckUpdates() {
-        uiState = UpdateUiState.Checking
+        updateUiState = UpdateUiState.Checking
         scope.launch {
             val result = updateManager.checkForUpdates(currentVersion)
-            uiState = when (result) {
+            updateUiState = when (result) {
                 is UpdateCheckResult.UpdateAvailable -> UpdateUiState.Available(result.release)
                 is UpdateCheckResult.UpToDate -> UpdateUiState.UpToDate
                 is UpdateCheckResult.NoReleasesFound -> UpdateUiState.NoReleases
@@ -98,18 +185,17 @@ fun SettingsScreen(
     }
 
     fun startDownload(release: ReleaseInfo) {
-        uiState = UpdateUiState.Downloading(0f)
+        updateUiState = UpdateUiState.Downloading(0f)
         downloadProgress = 0f
         scope.launch {
-            val file = updateManager.downloadApk(release.downloadUrl) { progress ->
+            val file = updateManager.downloadUpdate(release) { progress ->
                 downloadProgress = progress
-                uiState = UpdateUiState.Downloading(progress)
+                updateUiState = UpdateUiState.Downloading(progress)
             }
-            if (file != null && file.exists()) {
-                uiState = UpdateUiState.ReadyToInstall(file)
-                updateManager.installApk(file)
+            updateUiState = if (file != null) {
+                UpdateUiState.ReadyToInstall(file)
             } else {
-                uiState = UpdateUiState.Error("Не удалось загрузить файл обновления")
+                UpdateUiState.Error("Не удалось загрузить файл обновления")
             }
         }
     }
@@ -117,323 +203,522 @@ fun SettingsScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(32.dp)
             .verticalScroll(rememberScrollState())
+            .padding(horizontal = 32.dp, vertical = 24.dp)
     ) {
-        // Header
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column {
-                Text(
-                    text = "Настройки",
-                    style = MaterialTheme.typography.displayLarge
-                )
-                Text(
-                    text = "Параметры приложения и обновление системы",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = TextSecondary
-                )
-            }
-        }
+        Text(
+            text = "Настройки",
+            style = MaterialTheme.typography.displayLarge
+        )
+        Text(
+            text = "Подключение медиа-серверов и системные параметры",
+            style = MaterialTheme.typography.bodyLarge,
+            color = TextSecondary,
+            modifier = Modifier.padding(top = 4.dp, bottom = 24.dp)
+        )
 
-        Spacer(modifier = Modifier.height(28.dp))
+        // ---------------------------------------------------------
+        // 1. DLNA / UPnP Серверы
+        // ---------------------------------------------------------
+        Text(
+            text = "Серверы DLNA / UPnP",
+            style = MaterialTheme.typography.titleLarge,
+            color = TextPrimary,
+            modifier = Modifier.padding(bottom = 12.dp)
+        )
 
-        // App Information Card
-        TvFocusCard(
-            onClick = {},
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(110.dp)
-        ) {
-            Row(
+        if (connectedUpnpDevice != null) {
+            TvFocusCard(
+                onClick = {},
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(20.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .fillMaxWidth()
+                    .height(84.dp)
             ) {
-                Box(
+                Row(
                     modifier = Modifier
-                        .size(56.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(AccentCyan.copy(alpha = 0.15f)),
-                    contentAlignment = Alignment.Center
+                        .fillMaxSize()
+                        .padding(horizontal = 20.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        Icons.Default.Info,
-                        contentDescription = null,
-                        tint = AccentCyan,
-                        modifier = Modifier.size(32.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(20.dp))
-
-                Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "Re:Player",
-                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                            color = TextPrimary
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(AccentCyan)
-                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                                .size(44.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(AccentCyan.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
                         ) {
+                            Icon(Icons.Default.Folder, contentDescription = null, tint = AccentCyan)
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = connectedUpnpDevice!!.friendlyName,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = TextPrimary
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(AccentCyan.copy(alpha = 0.2f))
+                                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = "Подключено",
+                                        color = AccentCyan,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
                             Text(
-                                text = "v$currentVersion",
-                                color = Color.Black,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
+                                text = connectedUpnpDevice!!.location,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary
                             )
                         }
                     }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Современный медиаплеер для Android TV • DLNA / Google Drive / ExoPlayer",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = TextSecondary
-                    )
+
+                    TvFocusCard(
+                        onClick = { serverConfigManager.disconnectUpnpDevice() },
+                        modifier = Modifier
+                            .width(140.dp)
+                            .height(44.dp)
+                    ) {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text(text = "Отключить", color = Color(0xFFFF5252), style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
                 }
             }
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // Update Section Title
-        Text(
-            text = "Обновление приложения",
-            style = MaterialTheme.typography.titleLarge,
-            color = TextPrimary
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Check Update Button Card
-        TvFocusCard(
-            onClick = {
-                if (uiState !is UpdateUiState.Checking && uiState !is UpdateUiState.Downloading) {
-                    startCheckUpdates()
-                }
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(95.dp)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(20.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Default.SystemUpdate,
-                        contentDescription = null,
-                        tint = AccentCyan,
-                        modifier = Modifier.size(28.dp)
-                    )
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Column {
+        } else {
+            // Discovered devices list
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (discoveredDevices.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(DarkCard)
+                            .padding(20.dp)
+                    ) {
                         Text(
-                            text = "Проверить обновление",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = TextPrimary
-                        )
-                        Text(
-                            text = "Проверка новых версий на GitHub и установка в один клик",
+                            text = if (isScanningUpnp) "Поиск серверов в локальной сети..." else "Серверы не найдены. Убедитесь, что DLNA включен на роутере/ПК.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = TextSecondary
                         )
                     }
-                }
-
-                if (uiState is UpdateUiState.Checking) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(28.dp),
-                        color = AccentCyan,
-                        strokeWidth = 3.dp
-                    )
-                }
-            }
-        }
-
-        // Dynamic Update Status
-        when (val state = uiState) {
-            is UpdateUiState.Checking -> {
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = "Подключение к GitHub и проверка последнего релиза...",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = AccentCyan
-                )
-            }
-            is UpdateUiState.UpToDate -> {
-                Spacer(modifier = Modifier.height(16.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Default.CheckCircle,
-                        contentDescription = null,
-                        tint = Color(0xFF4CAF50),
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text(
-                        text = "У вас установлена самая актуальная версия (v$currentVersion)",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = Color(0xFF4CAF50)
-                    )
-                }
-            }
-            is UpdateUiState.NoReleases -> {
-                Spacer(modifier = Modifier.height(16.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Default.CheckCircle,
-                        contentDescription = null,
-                        tint = AccentCyan,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text(
-                        text = "Текущая версия актуальна (v$currentVersion)",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = TextSecondary
-                    )
-                }
-            }
-            is UpdateUiState.Available -> {
-                Spacer(modifier = Modifier.height(20.dp))
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(DarkCard)
-                        .padding(20.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text(
-                                text = "🎉 Доступно обновление: ${state.release.title}",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                color = AccentCyan
-                            )
-                            Text(
-                                text = "Файл: ${state.release.fileName}",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = TextSecondary
-                            )
-                        }
-
+                } else {
+                    discoveredDevices.forEach { device ->
                         TvFocusCard(
-                            onClick = { startDownload(state.release) },
+                            onClick = { serverConfigManager.connectUpnpDevice(device) },
                             modifier = Modifier
-                                .width(240.dp)
-                                .height(56.dp)
+                                .fillMaxWidth()
+                                .height(72.dp)
                         ) {
                             Row(
-                                modifier = Modifier.fillMaxSize(),
-                                horizontalArrangement = Arrangement.Center,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 20.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(Icons.Default.Download, contentDescription = null, tint = AccentCyan)
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "Скачать и обновить",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = TextPrimary
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Folder, contentDescription = null, tint = AccentCyan)
+                                    Spacer(modifier = Modifier.width(16.dp))
+                                    Column {
+                                        Text(text = device.friendlyName, style = MaterialTheme.typography.titleMedium, color = TextPrimary)
+                                        Text(text = device.manufacturer.ifEmpty { device.location }, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                                    }
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(AccentCyan.copy(alpha = 0.15f))
+                                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                                ) {
+                                    Text(text = "Подключить", color = AccentCyan, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                }
                             }
                         }
                     }
+                }
 
-                    Spacer(modifier = Modifier.height(14.dp))
-                    Text(
-                        text = "Список изменений:",
-                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
-                        color = TextPrimary
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = state.release.changelog,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = TextSecondary
-                    )
-                }
-            }
-            is UpdateUiState.Downloading -> {
-                Spacer(modifier = Modifier.height(20.dp))
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(DarkCard)
-                        .padding(20.dp)
-                ) {
-                    Text(
-                        text = "Загрузка обновления: ${(state.progress * 100).toInt()}%",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = AccentCyan
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(8.dp)
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(DarkSurface)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth(fraction = state.progress.coerceIn(0f, 1f))
-                                .height(8.dp)
-                                .background(AccentCyan)
-                        )
-                    }
-                }
-            }
-            is UpdateUiState.ReadyToInstall -> {
-                Spacer(modifier = Modifier.height(20.dp))
+                // Rescan button
                 TvFocusCard(
-                    onClick = { updateManager.installApk(state.apkFile) },
+                    onClick = { rescanUpnp() },
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .height(80.dp)
+                        .width(220.dp)
+                        .height(48.dp)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxSize(),
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.SystemUpdate, contentDescription = null, tint = AccentCyan)
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(
-                            text = "Файл загружен. Нажмите, чтобы установить обновление",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = TextPrimary
-                        )
+                        if (isScanningUpnp) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), color = AccentCyan, strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Default.Refresh, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(text = if (isScanningUpnp) "Поиск..." else "Обновить список", style = MaterialTheme.typography.bodyMedium)
                     }
                 }
             }
-            is UpdateUiState.Error -> {
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = "Ошибка: ${state.message}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color(0xFFFF5252)
-                )
+        }
+
+        Spacer(modifier = Modifier.height(28.dp))
+
+        // ---------------------------------------------------------
+        // 2. Google Drive Хранилище
+        // ---------------------------------------------------------
+        Text(
+            text = "Google Drive",
+            style = MaterialTheme.typography.titleLarge,
+            color = TextPrimary,
+            modifier = Modifier.padding(bottom = 12.dp)
+        )
+
+        TvFocusCard(
+            onClick = {},
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(if (deviceCodeInfo != null) 180.dp else 90.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.Center
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color(0xFF4285F4).copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Cloud, contentDescription = null, tint = Color(0xFF4285F4))
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(text = "Google Drive", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(if (isGdriveAuthenticated) AccentCyan.copy(alpha = 0.2f) else DarkSurface)
+                                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = if (isGdriveAuthenticated) "Подключено" else "Не подключено",
+                                        color = if (isGdriveAuthenticated) AccentCyan else TextSecondary,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                            val savedClientId = authManager.getSavedClientId()
+                            Text(
+                                text = if (savedClientId.isNotBlank()) "Client ID: ${savedClientId.take(16)}..." else "OAuth Client ID: не задан",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary
+                            )
+                        }
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        TvFocusCard(
+                            onClick = {
+                                clientIdInput = authManager.getSavedClientId()
+                                showClientIdDialog = true
+                            },
+                            modifier = Modifier
+                                .width(150.dp)
+                                .height(44.dp)
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text(text = "Настроить ID", style = MaterialTheme.typography.bodyMedium)
+                            }
+                        }
+
+                        if (isGdriveAuthenticated) {
+                            TvFocusCard(
+                                onClick = {
+                                    authManager.clearAuth()
+                                    isGdriveAuthenticated = false
+                                },
+                                modifier = Modifier
+                                    .width(140.dp)
+                                    .height(44.dp)
+                            ) {
+                                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Text(text = "Отключить", color = Color(0xFFFF5252), style = MaterialTheme.typography.bodyMedium)
+                                }
+                            }
+                        } else if (deviceCodeInfo == null) {
+                            TvFocusCard(
+                                onClick = { startDriveDeviceCodeFlow() },
+                                modifier = Modifier
+                                    .width(160.dp)
+                                    .height(44.dp)
+                            ) {
+                                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Text(text = "Получить код", color = AccentCyan, style = MaterialTheme.typography.bodyMedium)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (deviceCodeInfo != null) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(DarkSurface)
+                            .padding(12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "Откройте на телефоне/ПК: google.com/device",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = TextPrimary
+                            )
+                            Text(
+                                text = "Код подтверждения: ${deviceCodeInfo!!.user_code}",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                color = AccentCyan
+                            )
+                        }
+                        if (isPollingDriveAuth) {
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp), color = AccentCyan, strokeWidth = 2.dp)
+                        }
+                    }
+                }
             }
-            else -> {}
+        }
+
+        if (driveErrorMessage != null) {
+            Text(
+                text = driveErrorMessage!!,
+                color = Color(0xFFFF5252),
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(28.dp))
+
+        // ---------------------------------------------------------
+        // 3. Обновление приложения
+        // ---------------------------------------------------------
+        Text(
+            text = "Обновление приложения",
+            style = MaterialTheme.typography.titleLarge,
+            color = TextPrimary,
+            modifier = Modifier.padding(bottom = 12.dp)
+        )
+
+        TvFocusCard(
+            onClick = {
+                if (updateUiState !is UpdateUiState.Checking && updateUiState !is UpdateUiState.Downloading) {
+                    startCheckUpdates()
+                }
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(90.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.SystemUpdate,
+                        contentDescription = null,
+                        tint = AccentCyan,
+                        modifier = Modifier.size(32.dp)
+                    )
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(text = "Re:Player", style = MaterialTheme.typography.titleMedium)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(AccentCyan.copy(alpha = 0.2f))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "v$currentVersion",
+                                    color = AccentCyan,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                        Text(
+                            text = when (updateUiState) {
+                                is UpdateUiState.Checking -> "Проверка обновлений на GitHub..."
+                                is UpdateUiState.UpToDate -> "У вас установлена актуальная версия"
+                                is UpdateUiState.NoReleases -> "Релизы на GitHub не найдены"
+                                is UpdateUiState.Available -> "Доступна новая версия: ${(updateUiState as UpdateUiState.Available).release.tagName}"
+                                is UpdateUiState.Downloading -> "Загрузка обновления..."
+                                is UpdateUiState.ReadyToInstall -> "Загрузка завершена! Нажмите для установки."
+                                is UpdateUiState.Error -> (updateUiState as UpdateUiState.Error).message
+                                else -> "Проверка новых версий на GitHub и установка в один клик"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = when (updateUiState) {
+                                is UpdateUiState.Available -> AccentCyan
+                                is UpdateUiState.Error -> Color(0xFFFF5252)
+                                else -> TextSecondary
+                            }
+                        )
+                    }
+                }
+
+                when (val state = updateUiState) {
+                    is UpdateUiState.Checking -> {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp), color = AccentCyan, strokeWidth = 2.dp)
+                    }
+                    is UpdateUiState.Available -> {
+                        TvFocusCard(
+                            onClick = { startDownload(state.release) },
+                            modifier = Modifier
+                                .width(150.dp)
+                                .height(44.dp)
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text(text = "Скачать", color = AccentCyan, style = MaterialTheme.typography.bodyMedium)
+                            }
+                        }
+                    }
+                    is UpdateUiState.ReadyToInstall -> {
+                        TvFocusCard(
+                            onClick = { updateManager.installApk(state.apkFile) },
+                            modifier = Modifier
+                                .width(160.dp)
+                                .height(44.dp)
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text(text = "Установить", color = AccentCyan, style = MaterialTheme.typography.bodyMedium)
+                            }
+                        }
+                    }
+                    else -> {
+                        Text(text = "Проверить", color = AccentCyan, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+        }
+    }
+
+    // ---------------------------------------------------------
+    // Dialog: Setup Google OAuth 2.0 Client ID
+    // ---------------------------------------------------------
+    if (showClientIdDialog) {
+        Dialog(onDismissRequest = { showClientIdDialog = false }) {
+            Box(
+                modifier = Modifier
+                    .width(520.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(DarkCard)
+                    .border(1.dp, AccentCyan.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
+                    .padding(24.dp)
+            ) {
+                Column {
+                    Text(
+                        text = "Настройка Google Drive",
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                        color = TextPrimary
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Для безопасного подключения Google Drive на ТВ требуется бесплатный OAuth Client ID:\n" +
+                                "1. Откройте console.cloud.google.com на телефоне или ПК\n" +
+                                "2. Создайте проект и включите 'Google Drive API'\n" +
+                                "3. В 'Учетные данные' создайте 'OAuth Client ID' (тип: 'Телевизоры и устройства с ограниченным вводом')\n" +
+                                "4. Вставьте Client ID ниже:",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary,
+                        lineHeight = 18.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    OutlinedTextField(
+                        value = clientIdInput,
+                        onValueChange = { clientIdInput = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        placeholder = {
+                            Text("123456789-abc.apps.googleusercontent.com", color = TextSecondary.copy(alpha = 0.5f), fontSize = 12.sp)
+                        },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = AccentCyan,
+                            unfocusedBorderColor = DarkSurface,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        )
+                    )
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        TvFocusCard(
+                            onClick = { showClientIdDialog = false },
+                            modifier = Modifier
+                                .width(120.dp)
+                                .height(44.dp)
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text("Отмена", color = TextSecondary)
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.width(12.dp))
+
+                        TvFocusCard(
+                            onClick = {
+                                authManager.saveClientId(clientIdInput)
+                                showClientIdDialog = false
+                                startDriveDeviceCodeFlow()
+                            },
+                            modifier = Modifier
+                                .width(140.dp)
+                                .height(44.dp)
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text("Сохранить", color = AccentCyan, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -441,8 +726,8 @@ fun SettingsScreen(
 private fun getCurrentAppVersion(context: Context): String {
     return try {
         val pInfo = context.packageManager.getPackageInfo(context.packageName, 0)
-        pInfo.versionName ?: "0.1.1"
+        pInfo.versionName ?: "0.1.3"
     } catch (e: Exception) {
-        "0.1.1"
+        "0.1.3"
     }
 }

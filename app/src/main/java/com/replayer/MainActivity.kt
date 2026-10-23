@@ -36,7 +36,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import com.replayer.model.FavoriteFolder
 import com.replayer.model.MediaItem
+import com.replayer.model.MediaSourceType
 import com.replayer.ui.components.NavItem
 import com.replayer.ui.components.TvFocusCard
 import com.replayer.ui.components.TvNavigationRail
@@ -60,6 +62,8 @@ class MainActivity : ComponentActivity() {
                 var selectedNav by remember { mutableStateOf(NavItem.HOME) }
                 var activeMediaItem by remember { mutableStateOf<MediaItem?>(null) }
                 var showExitDialog by remember { mutableStateOf(false) }
+                var initialUpnpFolder by remember { mutableStateOf<Pair<String, String>?>(null) }
+                var initialGdriveFolder by remember { mutableStateOf<Pair<String, String>?>(null) }
 
                 // Exit confirmation dialog on Home screen
                 if (activeMediaItem == null && selectedNav == NavItem.HOME && !showExitDialog) {
@@ -73,37 +77,55 @@ class MainActivity : ComponentActivity() {
                         .fillMaxSize()
                         .background(DarkBackground)
                 ) {
+                    // TV Navigation & Main UI (always kept alive so state is preserved on player close)
+                    Row(modifier = Modifier.fillMaxSize()) {
+                        TvNavigationRail(
+                            selectedItem = selectedNav,
+                            onItemSelected = {
+                                selectedNav = it
+                                initialUpnpFolder = null
+                                initialGdriveFolder = null
+                            }
+                        )
+
+                        Box(modifier = Modifier.weight(1f).fillMaxSize()) {
+                            when (selectedNav) {
+                                NavItem.HOME -> HomeScreen(
+                                    onOpenFavorite = { fav ->
+                                        if (fav.sourceType == MediaSourceType.UPNP) {
+                                            initialUpnpFolder = Pair(fav.id, fav.title)
+                                            selectedNav = NavItem.UPNP
+                                        } else if (fav.sourceType == MediaSourceType.GOOGLE_DRIVE) {
+                                            initialGdriveFolder = Pair(fav.id, fav.title)
+                                            selectedNav = NavItem.GDRIVE
+                                        }
+                                    }
+                                )
+                                NavItem.UPNP -> UpnpBrowseScreen(
+                                    onPlayMedia = { activeMediaItem = it },
+                                    onNavigateToSettings = { selectedNav = NavItem.SETTINGS },
+                                    onBackToHome = { selectedNav = NavItem.HOME },
+                                    initialFolder = initialUpnpFolder
+                                )
+                                NavItem.GDRIVE -> GoogleDriveScreen(
+                                    onPlayMedia = { activeMediaItem = it },
+                                    onNavigateToSettings = { selectedNav = NavItem.SETTINGS },
+                                    onBackToHome = { selectedNav = NavItem.HOME },
+                                    initialFolder = initialGdriveFolder
+                                )
+                                NavItem.SETTINGS -> SettingsScreen(
+                                    onBack = { selectedNav = NavItem.HOME }
+                                )
+                            }
+                        }
+                    }
+
+                    // Fullscreen Player Overlay
                     if (activeMediaItem != null) {
-                        // Fullscreen Player
                         PlayerScreen(
                             mediaItem = activeMediaItem!!,
                             onBack = { activeMediaItem = null }
                         )
-                    } else {
-                        // TV Navigation & Main UI
-                        Row(modifier = Modifier.fillMaxSize()) {
-                            TvNavigationRail(
-                                selectedItem = selectedNav,
-                                onItemSelected = { selectedNav = it }
-                            )
-
-                            Box(modifier = Modifier.weight(1f).fillMaxSize()) {
-                                when (selectedNav) {
-                                    NavItem.HOME -> HomeScreen(onNavigate = { selectedNav = it })
-                                    NavItem.UPNP -> UpnpBrowseScreen(
-                                        onPlayMedia = { activeMediaItem = it },
-                                        onBackToHome = { selectedNav = NavItem.HOME }
-                                    )
-                                    NavItem.GDRIVE -> GoogleDriveScreen(
-                                        onPlayMedia = { activeMediaItem = it },
-                                        onBackToHome = { selectedNav = NavItem.HOME }
-                                    )
-                                    NavItem.SETTINGS -> SettingsScreen(
-                                        onBack = { selectedNav = NavItem.HOME }
-                                    )
-                                }
-                            }
-                        }
                     }
 
                     // TV Exit Confirmation Dialog

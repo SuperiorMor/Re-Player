@@ -30,14 +30,10 @@ import kotlinx.coroutines.launch
 @OptIn(UnstableApi::class)
 class RePlayerEngine(private val context: Context) {
 
-    private val trackSelector = DefaultTrackSelector(context).apply {
-        parameters = parameters.buildUpon()
-            .setExceedRendererCapabilitiesIfNecessary(true)
-            .build()
-    }
+    private val trackSelector = DefaultTrackSelector(context)
 
     private val renderersFactory = DefaultRenderersFactory(context)
-        .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+        .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
         .setEnableDecoderFallback(true)
 
     private val loadControl = DefaultLoadControl.Builder()
@@ -144,7 +140,7 @@ class RePlayerEngine(private val context: Context) {
             val group = tracks.groups[groupIndex]
             if (group.type == C.TRACK_TYPE_AUDIO && groupIndex == track.groupIndex) {
                 val trackGroup = group.mediaTrackGroup
-                trackSelector.parameters = trackSelector.parameters.buildUpon()
+                exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters.buildUpon()
                     .setOverrideForType(TrackSelectionOverride(trackGroup, listOf(track.index)))
                     .build()
                 _playerState.value = _playerState.value.copy(selectedAudioTrackId = track.id)
@@ -156,7 +152,7 @@ class RePlayerEngine(private val context: Context) {
     fun selectSubtitleTrack(track: SubtitleTrackInfo?) {
         if (track == null) {
             // Disable subtitles
-            trackSelector.parameters = trackSelector.parameters.buildUpon()
+            exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters.buildUpon()
                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
                 .build()
             _playerState.value = _playerState.value.copy(selectedSubtitleTrackId = null)
@@ -166,7 +162,7 @@ class RePlayerEngine(private val context: Context) {
                 val group = tracks.groups[groupIndex]
                 if (group.type == C.TRACK_TYPE_TEXT && groupIndex == track.groupIndex) {
                     val trackGroup = group.mediaTrackGroup
-                    trackSelector.parameters = trackSelector.parameters.buildUpon()
+                    exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters.buildUpon()
                         .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
                         .setOverrideForType(TrackSelectionOverride(trackGroup, listOf(track.index)))
                         .build()

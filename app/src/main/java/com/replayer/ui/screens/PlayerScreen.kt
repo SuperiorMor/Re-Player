@@ -61,7 +61,8 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
@@ -71,6 +72,7 @@ import com.replayer.model.SubtitleTrackInfo
 import com.replayer.player.RePlayerEngine
 import com.replayer.ui.components.TvFocusCard
 import com.replayer.ui.theme.AccentCyan
+import com.replayer.ui.theme.DarkCard
 import com.replayer.ui.theme.FocusBorder
 import com.replayer.ui.theme.SurfaceDark
 import com.replayer.ui.theme.TextPrimary
@@ -179,7 +181,7 @@ fun PlayerScreen(
 
         // TV On-Screen Display (OSD) Overlay
         AnimatedVisibility(
-            visible = showControls,
+            visible = showControls && !showAudioDialog && !showSubtitleDialog,
             enter = fadeIn(),
             exit = fadeOut()
         ) {
@@ -465,46 +467,67 @@ fun AudioTrackDialog(
     onSelect: (AudioTrackInfo) -> Unit,
     onDismiss: () -> Unit
 ) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color(0xCC000000)),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
+    val firstFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(Unit) {
+        delay(100)
+        try {
+            firstFocusRequester.requestFocus()
+        } catch (_: Exception) {}
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Box(
             modifier = Modifier
-                .width(440.dp)
-                .background(SurfaceDark, RoundedCornerShape(16.dp))
+                .width(480.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(DarkCard)
+                .border(1.dp, AccentCyan.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
                 .padding(24.dp)
         ) {
-            Text(
-                text = "Выбор аудиодорожки",
-                style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.padding(bottom = 16.dp)
-            )
+            Column {
+                Text(
+                    text = "Выбор аудиодорожки",
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                    color = TextPrimary,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
 
-            tracks.forEach { track ->
-                TvFocusCard(
-                    onClick = { onSelect(track) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(60.dp)
-                        .padding(vertical = 4.dp)
-                ) {
-                    Row(
+                if (tracks.isEmpty()) {
+                    Text(
+                        text = "Дорожки не найдены",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextSecondary,
+                        modifier = Modifier.padding(vertical = 12.dp)
+                    )
+                }
+
+                tracks.forEachIndexed { index, track ->
+                    val isFirst = index == 0
+                    val isSelected = track.id == selectedId
+                    TvFocusCard(
+                        onClick = { onSelect(track) },
                         modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 16.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                            .fillMaxWidth()
+                            .height(56.dp)
+                            .padding(vertical = 4.dp)
+                            .then(if (isFirst) Modifier.focusRequester(firstFocusRequester) else Modifier)
                     ) {
-                        Text(
-                            text = track.label,
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = if (track.id == selectedId) AccentCyan else TextPrimary,
-                            modifier = Modifier.weight(1f)
-                        )
-                        if (track.id == selectedId) {
-                            Text(text = "✓", color = AccentCyan)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = track.label,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = if (isSelected) AccentCyan else TextPrimary,
+                                modifier = Modifier.weight(1f)
+                            )
+                            if (isSelected) {
+                                Text(text = "✓", color = AccentCyan, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
@@ -520,56 +543,39 @@ fun SubtitleTrackDialog(
     onSelect: (SubtitleTrackInfo?) -> Unit,
     onDismiss: () -> Unit
 ) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color(0xCC000000)),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
+    val firstFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(Unit) {
+        delay(100)
+        try {
+            firstFocusRequester.requestFocus()
+        } catch (_: Exception) {}
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Box(
             modifier = Modifier
-                .width(440.dp)
-                .background(SurfaceDark, RoundedCornerShape(16.dp))
+                .width(480.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(DarkCard)
+                .border(1.dp, AccentCyan.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
                 .padding(24.dp)
         ) {
-            Text(
-                text = "Выбор субтитров",
-                style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.padding(bottom = 16.dp)
-            )
+            Column {
+                Text(
+                    text = "Выбор субтитров",
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                    color = TextPrimary,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
 
-            TvFocusCard(
-                onClick = { onSelect(null) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(60.dp)
-                    .padding(vertical = 4.dp)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Отключить субтитры",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = if (selectedId == null) AccentCyan else TextPrimary,
-                        modifier = Modifier.weight(1f)
-                    )
-                    if (selectedId == null) {
-                        Text(text = "✓", color = AccentCyan)
-                    }
-                }
-            }
-
-            tracks.forEach { track ->
                 TvFocusCard(
-                    onClick = { onSelect(track) },
+                    onClick = { onSelect(null) },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(60.dp)
+                        .height(56.dp)
                         .padding(vertical = 4.dp)
+                        .focusRequester(firstFocusRequester)
                 ) {
                     Row(
                         modifier = Modifier
@@ -578,13 +584,41 @@ fun SubtitleTrackDialog(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = track.label,
+                            text = "Отключить субтитры",
                             style = MaterialTheme.typography.bodyLarge,
-                            color = if (track.id == selectedId) AccentCyan else TextPrimary,
+                            color = if (selectedId == null) AccentCyan else TextPrimary,
                             modifier = Modifier.weight(1f)
                         )
-                        if (track.id == selectedId) {
-                            Text(text = "✓", color = AccentCyan)
+                        if (selectedId == null) {
+                            Text(text = "✓", color = AccentCyan, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                tracks.forEach { track ->
+                    val isSelected = track.id == selectedId
+                    TvFocusCard(
+                        onClick = { onSelect(track) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp)
+                            .padding(vertical = 4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = track.label,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = if (isSelected) AccentCyan else TextPrimary,
+                                modifier = Modifier.weight(1f)
+                            )
+                            if (isSelected) {
+                                Text(text = "✓", color = AccentCyan, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
