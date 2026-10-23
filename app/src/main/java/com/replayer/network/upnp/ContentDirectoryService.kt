@@ -93,6 +93,12 @@ class ContentDirectoryService {
                         currentItem["isContainer"] = if (localTag == "container") "true" else "false"
                         currentItem["id"] = parser.getAttributeValue(null, "id") ?: ""
                     }
+                    if (localTag == "res" && currentItem != null) {
+                        val sizeAttr = parser.getAttributeValue(null, "size")
+                        if (!sizeAttr.isNullOrEmpty()) {
+                            currentItem["size"] = sizeAttr
+                        }
+                    }
                 }
                 XmlPullParser.TEXT -> {
                     textBuffer.append(parser.text ?: "")
@@ -107,6 +113,7 @@ class ContentDirectoryService {
                             "title" -> currentItem["title"] = text
                             "res" -> currentItem["res"] = text
                             "class" -> currentItem["class"] = text
+                            "date" -> currentItem["date"] = text
                             "albumarturi" -> currentItem["albumArt"] = text
                         }
                     }
@@ -117,6 +124,10 @@ class ContentDirectoryService {
                         val title = currentItem["title"]?.trim()?.ifEmpty { "Unnamed" } ?: "Unnamed"
                         val id = currentItem["id"] ?: ""
                         val res = currentItem["res"] ?: ""
+                        val size = currentItem["size"]?.toLongOrNull() ?: 0L
+                        val date = currentItem["date"]
+                        val ext = title.substringAfterLast('.', "").uppercase()
+                        val format = if (ext.isNotEmpty() && ext.length <= 5) ext else null
 
                         val mediaType = when {
                             isContainer -> MediaType.DIRECTORY
@@ -142,7 +153,10 @@ class ContentDirectoryService {
                                 uri = res,
                                 type = mediaType,
                                 sourceType = MediaSourceType.UPNP_DLNA,
-                                parentId = parentId
+                                size = size,
+                                parentId = parentId,
+                                dateAdded = date,
+                                format = format
                             )
                         )
                         currentItem = null

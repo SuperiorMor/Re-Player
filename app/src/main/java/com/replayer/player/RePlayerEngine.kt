@@ -9,6 +9,9 @@ import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.common.AudioAttributes
+import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import com.replayer.model.AudioTrackInfo
@@ -27,12 +30,42 @@ import kotlinx.coroutines.launch
 @OptIn(UnstableApi::class)
 class RePlayerEngine(private val context: Context) {
 
-    private val trackSelector = DefaultTrackSelector(context)
-    val exoPlayer: ExoPlayer = ExoPlayer.Builder(context)
+    private val trackSelector = DefaultTrackSelector(context).apply {
+        parameters = parameters.buildUpon()
+            .setExceedRendererCapabilitiesIfNecessary(true)
+            .setExceedAudioCapabilitiesIfNecessary(true)
+            .build()
+    }
+
+    private val renderersFactory = DefaultRenderersFactory(context)
+        .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+        .setEnableDecoderFallback(true)
+
+    private val loadControl = DefaultLoadControl.Builder()
+        .setBufferDurationsMs(
+            /* minBufferMs= */ 15_000,
+            /* maxBufferMs= */ 60_000,
+            /* bufferForPlaybackMs= */ 2_500,
+            /* bufferForPlaybackAfterRebufferMs= */ 5_000
+        )
+        .setPrioritizeTimeOverSizeThresholds(true)
+        .build()
+
+    val exoPlayer: ExoPlayer = ExoPlayer.Builder(context, renderersFactory)
         .setTrackSelector(trackSelector)
+        .setLoadControl(loadControl)
         .setSeekBackIncrementMs(10000)
         .setSeekForwardIncrementMs(10000)
-        .build()
+        .setAudioAttributes(
+            AudioAttributes.Builder()
+                .setUsage(C.USAGE_MEDIA)
+                .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+                .build(),
+            true
+        )
+        .build().apply {
+            volume = 1.0f
+        }
 
     private val _playerState = MutableStateFlow(RePlayerState())
     val playerState: StateFlow<RePlayerState> = _playerState.asStateFlow()

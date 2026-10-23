@@ -25,6 +25,12 @@ class GoogleDriveAuthManager(private val context: Context) {
 
     fun getSavedAccessToken(): String? = prefs.getString("access_token", null)
 
+    fun getSavedClientId(): String = prefs.getString("gdrive_client_id", "") ?: ""
+
+    fun saveClientId(clientId: String) {
+        prefs.edit().putString("gdrive_client_id", clientId.trim()).apply()
+    }
+
     fun saveTokens(accessToken: String, refreshToken: String?) {
         prefs.edit().apply {
             putString("access_token", accessToken)
@@ -34,22 +40,33 @@ class GoogleDriveAuthManager(private val context: Context) {
     }
 
     fun clearAuth() {
-        prefs.edit().clear().apply()
+        prefs.edit().remove("access_token").remove("refresh_token").apply()
     }
 
-    suspend fun requestDeviceCode(clientId: String): DeviceCodeResponse? = withContext(Dispatchers.IO) {
+    suspend fun requestDeviceCode(clientId: String): Result<DeviceCodeResponse> = withContext(Dispatchers.IO) {
+        if (clientId.isBlank() || clientId.contains("YOUR_TV_CLIENT_ID")) {
+            return@withContext Result.failure(
+                Exception("Укажите ваш OAuth 2.0 Client ID (тип: TVs and Limited Input devices) из Google Cloud Console.")
+            )
+        }
+
         val form = FormBody.Builder()
-            .add("client_id", clientId)
+            .add("client_id", clientId.trim())
             .add("scope", SCOPE)
             .build()
 
         val request = Request.Builder().url(DEVICE_CODE_URL).post(form).build()
         try {
             val response = client.newCall(request).execute()
-            val body = response.body?.string() ?: return@withContext null
-            json.decodeFromString<DeviceCodeResponse>(body)
+            val body = response.body?.string() ?: return@withContext Result.failure(Exception("Пустой ответ от Google"))
+            if (!response.isSuccessful) {
+                return@withContext Result.failure(Exception("Ошибка Google API (${response.code}): $body"))
+            }
+            val codeResp = json.decodeFromString<DeviceCodeResponse>(body)
+            saveClientId(clientId)
+            Result.success(codeResp)
         } catch (e: Exception) {
-            null
+            Result.failure(e)
         }
     }
 
@@ -61,8 +78,8 @@ class GoogleDriveAuthManager(private val context: Context) {
         maxRetries: Int = 30
     ): TokenResponse? = withContext(Dispatchers.IO) {
         val form = FormBody.Builder()
-            .add("client_id", clientId)
-            .add("client_secret", clientSecret)
+            .add("client_id", clientId.trim())
+            .add("client_secret", clientSecret.trim())
             .add("device_code", deviceCode)
             .add("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
             .build()
