@@ -113,6 +113,8 @@ fun SettingsScreen(
     // App updates state
     var updateUiState by remember { mutableStateOf<UpdateUiState>(UpdateUiState.Idle) }
     var downloadProgress by remember { mutableFloatStateOf(0f) }
+    var showChangelogDialog by remember { mutableStateOf(false) }
+    var changelogRelease by remember { mutableStateOf<ReleaseInfo?>(null) }
 
     BackHandler(enabled = true) {
         onBack()
@@ -651,14 +653,41 @@ fun SettingsScreen(
                         CircularProgressIndicator(modifier = Modifier.size(28.dp), color = AccentCyan, strokeWidth = 3.dp)
                     }
                     is UpdateUiState.Available -> {
-                        TvFocusCard(
-                            onClick = { startDownload(state.release) },
-                            modifier = Modifier
-                                .width(150.dp)
-                                .height(44.dp)
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text(text = "Скачать", color = AccentCyan, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                            // Orange "Что нового?" Button in Player Style
+                            TvFocusCard(
+                                onClick = {
+                                    changelogRelease = state.release
+                                    showChangelogDialog = true
+                                },
+                                focusBorderColor = Color(0xFFFF7A00),
+                                backgroundColor = Color(0x28FF7A00),
+                                modifier = Modifier
+                                    .width(160.dp)
+                                    .height(44.dp)
+                            ) {
+                                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = "Что нового?",
+                                        color = Color(0xFFFF9500),
+                                        fontWeight = FontWeight.Bold,
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                }
+                            }
+
+                            TvFocusCard(
+                                onClick = { startDownload(state.release) },
+                                modifier = Modifier
+                                    .width(130.dp)
+                                    .height(44.dp)
+                            ) {
+                                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Text(text = "Скачать", color = AccentCyan, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                                }
                             }
                         }
                     }
@@ -797,6 +826,145 @@ fun SettingsScreen(
             }
         }
     }
+
+    // ---------------------------------------------------------
+    // Dialog: "Что нового?" in Player Style
+    // ---------------------------------------------------------
+    if (showChangelogDialog && changelogRelease != null) {
+        Dialog(onDismissRequest = { showChangelogDialog = false }) {
+            Box(
+                modifier = Modifier
+                    .width(620.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(DarkCard)
+                    .border(2.dp, Color(0xFFFF7A00), RoundedCornerShape(20.dp))
+                    .padding(28.dp)
+            ) {
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "Re:",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, fontSize = 24.sp),
+                                color = AccentCyan
+                            )
+                            Text(
+                                text = "Player",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, fontSize = 24.sp),
+                                color = Color(0xFFFF7A00)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color(0x33FF7A00))
+                                    .padding(horizontal = 8.dp, vertical = 3.dp)
+                            ) {
+                                Text(
+                                    text = "v${changelogRelease!!.versionName}",
+                                    color = Color(0xFFFF9500),
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "Главные улучшения этого обновления:",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = TextSecondary
+                    )
+
+                    Spacer(modifier = Modifier.height(18.dp))
+
+                    val items = getFriendlyChangelog(changelogRelease!!.versionName, changelogRelease!!.changelog)
+                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        items.forEach { item ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                Text(
+                                    text = "•",
+                                    color = Color(0xFFFF7A00),
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(end = 12.dp)
+                                )
+                                Text(
+                                    text = item,
+                                    style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 22.sp),
+                                    color = TextPrimary
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(26.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        TvFocusCard(
+                            onClick = { showChangelogDialog = false },
+                            focusBorderColor = Color(0xFFFF7A00),
+                            backgroundColor = Color(0x33FF7A00),
+                            modifier = Modifier
+                                .width(140.dp)
+                                .height(44.dp)
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = "Понятно",
+                                    color = Color(0xFFFF9500),
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun getFriendlyChangelog(version: String, rawChangelog: String): List<String> {
+    if (version.contains("0.2.1")) {
+        return listOf(
+            "Фирменный логотип: Вместо скучного текста теперь аккуратный прозрачный логотип в боковом меню.",
+            "Поддержка AVI: Старые и редкие видео в формате .avi теперь открываются и воспроизводятся без сбоев.",
+            "Пульт не теряется: Меню плеера больше не застревает — нажми любую стрелку или ОК, и управление появится.",
+            "Умная память папок: После просмотра возвращаешься ровно в ту же папку, и курсор сразу стоит на просмотренном файле.",
+            "Быстрый выход: Одно нажатие «Назад» во время фильма сразу возвращает к списку файлов."
+        )
+    }
+
+    val extracted = rawChangelog.lines()
+        .map { it.trim() }
+        .filter { it.startsWith("-") || it.startsWith("*") || (it.length > 2 && it[0].isDigit() && it[1] == '.') }
+        .map { line ->
+            line.removePrefix("-").removePrefix("*").replace(Regex("^\\d+\\.\\s*"), "").trim()
+        }
+        .filter { it.isNotEmpty() && !it.contains("Full Changelog", ignoreCase = true) }
+        .take(5)
+
+    if (extracted.size >= 2) {
+        return extracted
+    }
+
+    return listOf(
+        "Повышена стабильность и плавность воспроизведения видео и звука.",
+        "Улучшена отзывчивость управления пультом Android TV.",
+        "Оптимизирована работа с сетевыми папками и хранилищем."
+    )
 }
 
 private fun getCurrentAppVersion(context: Context): String {

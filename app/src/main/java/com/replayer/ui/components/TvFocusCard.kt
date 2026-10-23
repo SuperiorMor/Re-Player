@@ -27,6 +27,8 @@ import com.replayer.ui.theme.FocusBorder
 fun TvFocusCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    focusBorderColor: Color = FocusBorder,
+    backgroundColor: Color = CardBackground,
     content: @Composable BoxScope.() -> Unit
 ) {
     val interactionSource = remember { MutableInteractionSource() }
@@ -39,10 +41,10 @@ fun TvFocusCard(
             .zIndex(if (isFocused) 10f else 1f)
             .scale(scale)
             .clip(RoundedCornerShape(12.dp))
-            .background(CardBackground)
+            .background(backgroundColor)
             .then(
                 if (isFocused) {
-                    Modifier.border(2.5.dp, FocusBorder, RoundedCornerShape(12.dp))
+                    Modifier.border(2.5.dp, focusBorderColor, RoundedCornerShape(12.dp))
                 } else {
                     Modifier.border(1.dp, Color(0x22FFFFFF), RoundedCornerShape(12.dp))
                 }

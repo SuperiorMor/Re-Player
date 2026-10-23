@@ -22,6 +22,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material3.Text
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.res.painterResource
 import com.replayer.ui.theme.AccentCyan
 import com.replayer.ui.theme.SurfaceDark
 import com.replayer.ui.theme.TextSecondary
@@ -48,12 +51,13 @@ fun TvNavigationRail(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Top
     ) {
-        // Logo Indicator
-        Text(
-            text = "Re:",
-            color = AccentCyan,
-            fontSize = 24.sp,
-            modifier = Modifier.padding(bottom = 32.dp)
+        // Official App Logo
+        Image(
+            painter = painterResource(id = com.replayer.R.drawable.app_logo_transparent),
+            contentDescription = "Re:Player",
+            modifier = Modifier
+                .padding(bottom = 24.dp)
+                .size(56.dp)
         )
 
         NavItem.entries.forEach { item ->

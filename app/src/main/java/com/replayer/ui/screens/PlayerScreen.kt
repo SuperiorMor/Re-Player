@@ -98,6 +98,7 @@ fun PlayerScreen(
     var lastInteractionTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
     val playButtonFocusRequester = remember { FocusRequester() }
+    val rootFocusRequester = remember { FocusRequester() }
 
     // KEEP SCREEN ON during video playback!
     DisposableEffect(Unit) {
@@ -120,13 +121,20 @@ fun PlayerScreen(
         }
     }
 
-    // When controls become visible, automatically focus the Play/Pause button
+    // Focus management: when controls are shown, focus play button; when hidden, focus root box
     LaunchedEffect(showControls) {
         if (showControls) {
             delay(100)
             try {
                 playButtonFocusRequester.requestFocus()
-            } catch (e: Exception) {
+            } catch (_: Exception) {
+                // Ignore focus request failure
+            }
+        } else {
+            delay(50)
+            try {
+                rootFocusRequester.requestFocus()
+            } catch (_: Exception) {
                 // Ignore focus request failure
             }
         }
@@ -137,8 +145,6 @@ fun PlayerScreen(
             showAudioDialog = false
             showSubtitleDialog = false
             lastInteractionTime = System.currentTimeMillis()
-        } else if (showControls) {
-            showControls = false
         } else {
             onBack()
         }
@@ -148,26 +154,30 @@ fun PlayerScreen(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black)
-            .then(
-                if (!showControls) {
-                    Modifier
-                        .focusable()
-                        .onKeyEvent { keyEvent ->
-                            if (keyEvent.type == KeyEventType.KeyDown) {
-                                when (keyEvent.key) {
-                                    Key.DirectionCenter, Key.Enter,
-                                    Key.DirectionUp, Key.DirectionDown,
-                                    Key.DirectionLeft, Key.DirectionRight -> {
-                                        showControls = true
-                                        lastInteractionTime = System.currentTimeMillis()
-                                        true
-                                    }
-                                    else -> false
-                                }
-                            } else false
+            .focusRequester(rootFocusRequester)
+            .focusable()
+            .onKeyEvent { keyEvent ->
+                if (keyEvent.type == KeyEventType.KeyDown) {
+                    if (!showControls) {
+                        // Any remote button press (D-Pad center, arrows, enter, play/pause) restores controls!
+                        when (keyEvent.key) {
+                            Key.DirectionCenter, Key.Enter,
+                            Key.DirectionUp, Key.DirectionDown,
+                            Key.DirectionLeft, Key.DirectionRight,
+                            Key.MediaPlay, Key.MediaPause, Key.MediaPlayPause,
+                            Key.Spacebar -> {
+                                showControls = true
+                                lastInteractionTime = System.currentTimeMillis()
+                                true
+                            }
+                            else -> false
                         }
-                } else Modifier
-            )
+                    } else {
+                        lastInteractionTime = System.currentTimeMillis()
+                        false
+                    }
+                } else false
+            }
     ) {
         // Video Surface
         AndroidView(
@@ -176,9 +186,19 @@ fun PlayerScreen(
                     player = engine.exoPlayer
                     useController = false
                     keepScreenOn = true
+                    isFocusable = false
+                    isFocusableInTouchMode = false
                 }
             },
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) {
+                    showControls = !showControls
+                    lastInteractionTime = System.currentTimeMillis()
+                }
         )
 
         // TV On-Screen Display (OSD) Overlay

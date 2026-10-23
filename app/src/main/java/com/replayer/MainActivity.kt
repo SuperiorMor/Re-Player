@@ -64,6 +64,7 @@ class MainActivity : ComponentActivity() {
                 var showExitDialog by remember { mutableStateOf(false) }
                 var initialUpnpFolder by remember { mutableStateOf<Pair<String, String>?>(null) }
                 var initialGdriveFolder by remember { mutableStateOf<Pair<String, String>?>(null) }
+                var lastPlayedMediaId by remember { mutableStateOf<String?>(null) }
 
                 // Exit confirmation dialog on Home screen
                 if (activeMediaItem == null && selectedNav == NavItem.HOME && !showExitDialog) {
@@ -102,16 +103,28 @@ class MainActivity : ComponentActivity() {
                                     }
                                 )
                                 NavItem.UPNP -> UpnpBrowseScreen(
-                                    onPlayMedia = { activeMediaItem = it },
+                                    onPlayMedia = {
+                                        lastPlayedMediaId = it.id
+                                        activeMediaItem = it
+                                    },
                                     onNavigateToSettings = { selectedNav = NavItem.SETTINGS },
                                     onBackToHome = { selectedNav = NavItem.HOME },
-                                    initialFolder = initialUpnpFolder
+                                    initialFolder = initialUpnpFolder,
+                                    lastPlayedMediaId = lastPlayedMediaId,
+                                    isPlayerActive = (activeMediaItem != null),
+                                    onFolderLoaded = { initialUpnpFolder = null }
                                 )
                                 NavItem.GDRIVE -> GoogleDriveScreen(
-                                    onPlayMedia = { activeMediaItem = it },
+                                    onPlayMedia = {
+                                        lastPlayedMediaId = it.id
+                                        activeMediaItem = it
+                                    },
                                     onNavigateToSettings = { selectedNav = NavItem.SETTINGS },
                                     onBackToHome = { selectedNav = NavItem.HOME },
-                                    initialFolder = initialGdriveFolder
+                                    initialFolder = initialGdriveFolder,
+                                    lastPlayedMediaId = lastPlayedMediaId,
+                                    isPlayerActive = (activeMediaItem != null),
+                                    onFolderLoaded = { initialGdriveFolder = null }
                                 )
                                 NavItem.SETTINGS -> SettingsScreen(
                                     onBack = { selectedNav = NavItem.HOME }

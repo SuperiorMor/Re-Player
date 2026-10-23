@@ -19,7 +19,10 @@ import com.replayer.model.MediaItem
 import com.replayer.model.MediaSourceType
 import com.replayer.model.SubtitleTrackInfo
 import com.replayer.network.gdrive.GoogleDriveAuthManager
+import androidx.media3.common.MimeTypes
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -50,9 +53,22 @@ class RePlayerEngine(private val context: Context) {
         .setPrioritizeTimeOverSizeThresholds(true)
         .build()
 
+    private val extractorsFactory = DefaultExtractorsFactory()
+        .setConstantBitrateSeekingEnabled(true)
+
+    private val baseHttpDataSourceFactory = DefaultHttpDataSource.Factory()
+        .setAllowCrossProtocolRedirects(true)
+        .setConnectTimeoutMs(15000)
+        .setReadTimeoutMs(30000)
+        .setUserAgent("RePlayer-TV")
+
+    private val defaultDataSourceFactory = DefaultDataSource.Factory(context, baseHttpDataSourceFactory)
+    private val defaultMediaSourceFactory = DefaultMediaSourceFactory(defaultDataSourceFactory, extractorsFactory)
+
     val exoPlayer: ExoPlayer = ExoPlayer.Builder(context, renderersFactory)
         .setTrackSelector(trackSelector)
         .setLoadControl(loadControl)
+        .setMediaSourceFactory(defaultMediaSourceFactory)
         .setSeekBackIncrementMs(10000)
         .setSeekForwardIncrementMs(10000)
         .setAudioAttributes(
@@ -111,6 +127,21 @@ class RePlayerEngine(private val context: Context) {
             .setUri(mediaItem.uri)
             .setMediaId(mediaItem.id)
 
+        // Ensure container MIME type is explicitly specified (crucial for AVI and DLNA streams)
+        val detectedMimeType = when {
+            mediaItem.mimeType?.isNotBlank() == true && mediaItem.mimeType != "application/octet-stream" -> mediaItem.mimeType
+            mediaItem.title.endsWith(".avi", ignoreCase = true) || mediaItem.uri.endsWith(".avi", ignoreCase = true) -> MimeTypes.VIDEO_AVI
+            mediaItem.title.endsWith(".mkv", ignoreCase = true) || mediaItem.uri.endsWith(".mkv", ignoreCase = true) -> MimeTypes.VIDEO_MATROSKA
+            mediaItem.title.endsWith(".mp4", ignoreCase = true) || mediaItem.uri.endsWith(".mp4", ignoreCase = true) -> MimeTypes.VIDEO_MP4
+            mediaItem.title.endsWith(".mov", ignoreCase = true) || mediaItem.uri.endsWith(".mov", ignoreCase = true) -> MimeTypes.VIDEO_QUICKTIME
+            mediaItem.title.endsWith(".ts", ignoreCase = true) || mediaItem.uri.endsWith(".ts", ignoreCase = true) -> MimeTypes.VIDEO_MP2T
+            mediaItem.title.endsWith(".mp3", ignoreCase = true) || mediaItem.uri.endsWith(".mp3", ignoreCase = true) -> MimeTypes.AUDIO_MPEG
+            else -> null
+        }
+        if (detectedMimeType != null) {
+            mediaBuilder.setMimeType(detectedMimeType)
+        }
+
         _playerState.value = _playerState.value.copy(
             currentMediaTitle = mediaItem.title,
             errorMessage = null
@@ -124,15 +155,19 @@ class RePlayerEngine(private val context: Context) {
             }
         }
 
+        val exoMediaItem = mediaBuilder.build()
         if (finalHeaders.isNotEmpty()) {
-            val dataSourceFactory = DefaultHttpDataSource.Factory()
+            val customHttpFactory = DefaultHttpDataSource.Factory()
                 .setAllowCrossProtocolRedirects(true)
+                .setConnectTimeoutMs(15000)
+                .setReadTimeoutMs(30000)
+                .setUserAgent("RePlayer-TV")
                 .setDefaultRequestProperties(finalHeaders)
-            val mediaSourceFactory = DefaultMediaSourceFactory(context)
-                .setDataSourceFactory(dataSourceFactory)
-            exoPlayer.setMediaSource(mediaSourceFactory.createMediaSource(mediaBuilder.build()))
+            val customDataSourceFactory = DefaultDataSource.Factory(context, customHttpFactory)
+            val customMediaSourceFactory = DefaultMediaSourceFactory(customDataSourceFactory, extractorsFactory)
+            exoPlayer.setMediaSource(customMediaSourceFactory.createMediaSource(exoMediaItem))
         } else {
-            exoPlayer.setMediaItem(mediaBuilder.build())
+            exoPlayer.setMediaSource(defaultMediaSourceFactory.createMediaSource(exoMediaItem))
         }
 
         exoPlayer.prepare()

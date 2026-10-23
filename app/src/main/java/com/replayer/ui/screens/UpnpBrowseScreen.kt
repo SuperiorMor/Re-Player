@@ -16,8 +16,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AudioFile
@@ -38,6 +40,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -77,7 +80,10 @@ fun UpnpBrowseScreen(
     onNavigateToSettings: () -> Unit,
     onBackToHome: () -> Unit,
     modifier: Modifier = Modifier,
-    initialFolder: Pair<String, String>? = null
+    initialFolder: Pair<String, String>? = null,
+    lastPlayedMediaId: String? = null,
+    isPlayerActive: Boolean = false,
+    onFolderLoaded: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -96,7 +102,12 @@ fun UpnpBrowseScreen(
     var viewMode by remember { mutableStateOf(ViewMode.LIST) }
     var sortMode by remember { mutableStateOf(SortMode.BY_NAME) }
 
+    val listState = rememberLazyListState()
+    val gridState = rememberLazyGridState()
+
     val firstItemFocusRequester = remember { FocusRequester() }
+    val targetItemFocusRequester = remember { FocusRequester() }
+    var lastExitTimestamp by remember { mutableLongStateOf(0L) }
 
     fun loadFolder(controlUrl: String, folderId: String) {
         isLoadingFolder = true
@@ -111,27 +122,20 @@ fun UpnpBrowseScreen(
         loadFolder(controlUrl, folderId)
     }
 
-    // Initialize root folder when connectedDevice changes or initialFolder provided
-    LaunchedEffect(connectedDevice) {
-        if (connectedDevice != null && folderStack.isEmpty()) {
+    // Initialize or switch folder when connectedDevice or initialFolder changes
+    LaunchedEffect(connectedDevice, initialFolder) {
+        if (connectedDevice != null) {
             val controlUrl = connectedDevice!!.contentDirectoryControlUrl ?: return@LaunchedEffect
             if (initialFolder != null) {
-                folderStack = listOf(Pair("0", connectedDevice!!.friendlyName), initialFolder)
-                loadFolder(controlUrl, initialFolder.first)
-            } else {
+                if (folderStack.lastOrNull()?.first != initialFolder.first) {
+                    folderStack = listOf(Pair("0", connectedDevice!!.friendlyName), initialFolder)
+                    loadFolder(controlUrl, initialFolder.first)
+                    onFolderLoaded()
+                }
+            } else if (folderStack.isEmpty()) {
                 folderStack = listOf(Pair("0", connectedDevice!!.friendlyName))
                 loadFolder(controlUrl, "0")
             }
-        }
-    }
-
-    // Auto-focus first item when folder contents load
-    LaunchedEffect(currentItems) {
-        if (currentItems.isNotEmpty()) {
-            delay(150)
-            try {
-                firstItemFocusRequester.requestFocus()
-            } catch (_: Exception) {}
         }
     }
 
@@ -148,7 +152,11 @@ fun UpnpBrowseScreen(
         }
     }
 
-    BackHandler(enabled = true) {
+    BackHandler(enabled = !isPlayerActive) {
+        // Prevent accidental multiple back taps within 400ms after closing player from popping folders
+        if (System.currentTimeMillis() - lastExitTimestamp < 400) {
+            return@BackHandler
+        }
         navigateBack()
     }
 
@@ -344,13 +352,21 @@ fun UpnpBrowseScreen(
         } else if (viewMode == ViewMode.LIST) {
             // Detailed List View
             LazyColumn(
+                state = listState,
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 contentPadding = PaddingValues(vertical = 8.dp)
             ) {
                 items(sortedItems.size, key = { sortedItems[it].id }) { index ->
                     val item = sortedItems[index]
                     val isFirst = index == 0
+                    val isTarget = item.id == lastPlayedMediaId
                     val isFav = favorites.any { it.id == item.id }
+
+                    val itemFocusModifier = when {
+                        isTarget -> Modifier.focusRequester(targetItemFocusRequester)
+                        isFirst && lastPlayedMediaId == null -> Modifier.focusRequester(firstItemFocusRequester)
+                        else -> Modifier
+                    }
 
                     TvFocusCard(
                         onClick = {
@@ -365,7 +381,7 @@ fun UpnpBrowseScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(78.dp)
-                            .then(if (isFirst) Modifier.focusRequester(firstItemFocusRequester) else Modifier)
+                            .then(itemFocusModifier)
                     ) {
                         Row(
                             modifier = Modifier
@@ -479,6 +495,7 @@ fun UpnpBrowseScreen(
         } else {
             // Grid View
             LazyVerticalGrid(
+                state = gridState,
                 columns = GridCells.Adaptive(minSize = 220.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -487,7 +504,14 @@ fun UpnpBrowseScreen(
                 items(sortedItems.size, key = { sortedItems[it].id }) { index ->
                     val item = sortedItems[index]
                     val isFirst = index == 0
+                    val isTarget = item.id == lastPlayedMediaId
                     val isFav = favorites.any { it.id == item.id }
+
+                    val itemFocusModifier = when {
+                        isTarget -> Modifier.focusRequester(targetItemFocusRequester)
+                        isFirst && lastPlayedMediaId == null -> Modifier.focusRequester(firstItemFocusRequester)
+                        else -> Modifier
+                    }
 
                     TvFocusCard(
                         onClick = {
@@ -502,7 +526,7 @@ fun UpnpBrowseScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(130.dp)
-                            .then(if (isFirst) Modifier.focusRequester(firstItemFocusRequester) else Modifier)
+                            .then(itemFocusModifier)
                     ) {
                         Column(
                             modifier = Modifier
@@ -581,6 +605,41 @@ fun UpnpBrowseScreen(
                     }
                 }
             }
+        }
+    }
+
+    // Auto-focus & cursor restoration:
+    // When returning from player (isPlayerActive becomes false) and lastPlayedMediaId != null,
+    // scroll directly to that item and request focus on it.
+    // Otherwise, when entering a folder, focus the first item.
+    LaunchedEffect(isPlayerActive, lastPlayedMediaId, currentItems) {
+        if (!isPlayerActive) {
+            lastExitTimestamp = System.currentTimeMillis()
+            if (lastPlayedMediaId != null && currentItems.isNotEmpty()) {
+                val targetIndex = sortedItems.indexOfFirst { it.id == lastPlayedMediaId }
+                if (targetIndex >= 0) {
+                    delay(50)
+                    try {
+                        if (viewMode == ViewMode.LIST) {
+                            listState.scrollToItem(maxOf(0, targetIndex))
+                        } else {
+                            gridState.scrollToItem(maxOf(0, targetIndex))
+                        }
+                    } catch (_: Exception) {}
+                    delay(100)
+                    try {
+                        targetItemFocusRequester.requestFocus()
+                    } catch (_: Exception) {}
+                    return@LaunchedEffect
+                }
+            }
+        }
+
+        if (!isPlayerActive && currentItems.isNotEmpty() && lastPlayedMediaId == null) {
+            delay(150)
+            try {
+                firstItemFocusRequester.requestFocus()
+            } catch (_: Exception) {}
         }
     }
 }
