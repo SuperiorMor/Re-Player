@@ -1,7 +1,6 @@
 package com.replayer.ui.screens
 
 import android.app.Activity
-import android.view.KeyEvent
 import android.view.WindowManager
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
@@ -9,8 +8,11 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
-import androidx.compose.ui.input.key.nativeKeyEvent
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -103,9 +105,9 @@ fun PlayerScreen(
             .focusable()
             .onKeyEvent { keyEvent ->
                 // Remote D-Pad key handling
-                if (keyEvent.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
-                    when (keyEvent.nativeKeyEvent.keyCode) {
-                        KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                if (keyEvent.type == KeyEventType.KeyDown) {
+                    when (keyEvent.key) {
+                        Key.DirectionCenter, Key.Enter -> {
                             if (!showControls) {
                                 showControls = true
                                 true
@@ -114,21 +116,21 @@ fun PlayerScreen(
                                 true
                             }
                         }
-                        KeyEvent.KEYCODE_DPAD_LEFT -> {
+                        Key.DirectionLeft -> {
                             engine.seekRelative(-10000)
                             showControls = true
                             true
                         }
-                        KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                        Key.DirectionRight -> {
                             engine.seekRelative(10000)
                             showControls = true
                             true
                         }
-                        KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> {
+                        Key.DirectionUp, Key.DirectionDown -> {
                             showControls = true
                             true
                         }
-                        KeyEvent.KEYCODE_BACK -> {
+                        Key.Back -> {
                             if (showAudioDialog || showSubtitleDialog) {
                                 showAudioDialog = false
                                 showSubtitleDialog = false
