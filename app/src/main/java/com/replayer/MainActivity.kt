@@ -92,7 +92,7 @@ class MainActivity : ComponentActivity() {
                             when (selectedNav) {
                                 NavItem.HOME -> HomeScreen(
                                     onOpenFavorite = { fav ->
-                                        if (fav.sourceType == MediaSourceType.UPNP) {
+                                        if (fav.sourceType == MediaSourceType.UPNP_DLNA) {
                                             initialUpnpFolder = Pair(fav.id, fav.title)
                                             selectedNav = NavItem.UPNP
                                         } else if (fav.sourceType == MediaSourceType.GOOGLE_DRIVE) {

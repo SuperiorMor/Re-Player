@@ -18,8 +18,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.itemsIndexed
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AudioFile
@@ -347,7 +345,8 @@ fun UpnpBrowseScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 contentPadding = PaddingValues(vertical = 8.dp)
             ) {
-                itemsIndexed(sortedItems, key = { _, item -> item.id }) { index, item ->
+                items(sortedItems.size, key = { sortedItems[it].id }) { index ->
+                    val item = sortedItems[index]
                     val isFirst = index == 0
                     val isFav = favorites.any { it.id == item.id }
 
@@ -455,7 +454,7 @@ fun UpnpBrowseScreen(
                                                 FavoriteFolder(
                                                     id = item.id,
                                                     title = item.title,
-                                                    sourceType = MediaSourceType.UPNP,
+                                                    sourceType = MediaSourceType.UPNP_DLNA,
                                                     serverControlUrl = connectedDevice?.contentDirectoryControlUrl,
                                                     parentId = item.parentId
                                                 )
@@ -483,7 +482,8 @@ fun UpnpBrowseScreen(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 contentPadding = PaddingValues(vertical = 8.dp)
             ) {
-                itemsIndexed(sortedItems, key = { _, item -> item.id }) { index, item ->
+                items(sortedItems.size, key = { sortedItems[it].id }) { index ->
+                    val item = sortedItems[index]
                     val isFirst = index == 0
                     val isFav = favorites.any { it.id == item.id }
 
@@ -535,7 +535,7 @@ fun UpnpBrowseScreen(
                                                         FavoriteFolder(
                                                             id = item.id,
                                                             title = item.title,
-                                                            sourceType = MediaSourceType.UPNP,
+                                                            sourceType = MediaSourceType.UPNP_DLNA,
                                                             serverControlUrl = connectedDevice?.contentDirectoryControlUrl,
                                                             parentId = item.parentId
                                                         )
