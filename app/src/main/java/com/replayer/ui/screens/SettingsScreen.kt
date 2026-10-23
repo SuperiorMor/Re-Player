@@ -97,7 +97,7 @@ fun SettingsScreen(
     val currentVersion = remember { getCurrentAppVersion(context) }
 
     val connectedUpnpDevice by serverConfigManager.connectedUpnpDevice.collectAsState()
-    var isGdriveAuthenticated by remember { mutableStateOf(authManager.isAuthenticated()) }
+    val isGdriveAuthenticated by GoogleDriveAuthManager.sharedAuthenticatedFlow.collectAsState()
 
     // UPnP scanning state
     var discoveredDevices by remember { mutableStateOf<List<UpnpDevice>>(emptyList()) }
@@ -161,9 +161,9 @@ fun SettingsScreen(
                         intervalSec = info.interval.coerceAtLeast(5)
                     )
                     isPollingDriveAuth = false
-                    if (token != null && token.access_token != null) {
-                        isGdriveAuthenticated = true
-                        deviceCodeInfo = null
+                    deviceCodeInfo = null
+                    if (token != null && !token.access_token.isNullOrBlank()) {
+                        driveErrorMessage = null
                     } else {
                         driveErrorMessage = "Время ожидания авторизации истекло. Попробуйте снова."
                     }
@@ -447,7 +447,6 @@ fun SettingsScreen(
                             TvFocusCard(
                                 onClick = {
                                     authManager.clearAuth()
-                                    isGdriveAuthenticated = false
                                 },
                                 modifier = Modifier
                                     .width(140.dp)
@@ -937,6 +936,16 @@ fun SettingsScreen(
 }
 
 private fun getFriendlyChangelog(version: String, rawChangelog: String): List<String> {
+    if (version.contains("0.2.2")) {
+        return listOf(
+            "Послушный курсор: При открытии папок и выходе назад фокус всегда на первом файле, а не улетает в меню.",
+            "Кнопка «Назад»: Если панель плеера открыта, нажатие «Назад» просто скрывает её, не закрывая видео.",
+            "Удобная перемотка: Стрелки влево и вправо мотают на 10 сек без лишних плашек, а полоса прогресса не прыгает в начало.",
+            "Честный AVI: Фильмы в формате .avi теперь идут чисто и плавно — без шумов, заиканий и артефактов.",
+            "Google Drive без заминок: После входа на телефоне телевизор сразу открывает все твои папки и файлы."
+        )
+    }
+
     if (version.contains("0.2.1")) {
         return listOf(
             "Фирменный логотип: Вместо скучного текста теперь аккуратный прозрачный логотип в боковом меню.",

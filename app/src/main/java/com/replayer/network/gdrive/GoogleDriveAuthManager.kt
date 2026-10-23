@@ -16,11 +16,21 @@ class GoogleDriveAuthManager(private val context: Context) {
     private val json = Json { ignoreUnknownKeys = true }
     private val prefs = context.getSharedPreferences("replayer_drive_prefs", Context.MODE_PRIVATE)
 
+    init {
+        _isAuthenticatedFlow.value = isAuthenticated()
+    }
+
+    val isAuthenticatedFlow: kotlinx.coroutines.flow.StateFlow<Boolean> = _isAuthenticatedFlow
+
     companion object {
+        private val _isAuthenticatedFlow = kotlinx.coroutines.flow.MutableStateFlow(false)
+        val sharedAuthenticatedFlow: kotlinx.coroutines.flow.StateFlow<Boolean> = _isAuthenticatedFlow
+
         // Standard Google OAuth2 Device Endpoint
         private const val DEVICE_CODE_URL = "https://oauth2.googleapis.com/device/code"
         private const val TOKEN_URL = "https://oauth2.googleapis.com/token"
-        private const val SCOPE = "https://www.googleapis.com/auth/drive.file email profile"
+        // Request read-only access to browse existing Drive files and folders, plus drive.file
+        private const val SCOPE = "https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file email profile"
 
         // Built-in pre-configured Client ID
         const val DEFAULT_CLIENT_ID = "673747062826-9rlftnhrpuqspo97jahao1n2172efmnh.apps.googleusercontent.com"
@@ -43,10 +53,12 @@ class GoogleDriveAuthManager(private val context: Context) {
             if (refreshToken != null) putString("refresh_token", refreshToken)
             apply()
         }
+        _isAuthenticatedFlow.value = true
     }
 
     fun clearAuth() {
         prefs.edit().remove("access_token").remove("refresh_token").apply()
+        _isAuthenticatedFlow.value = false
     }
 
     suspend fun requestDeviceCode(clientId: String = getSavedClientId()): Result<DeviceCodeResponse> = withContext(Dispatchers.IO) {
@@ -84,7 +96,7 @@ class GoogleDriveAuthManager(private val context: Context) {
         deviceCode: String,
         clientSecret: String = "",
         intervalSec: Int = 5,
-        maxRetries: Int = 60
+        maxRetries: Int = 120
     ): TokenResponse? = withContext(Dispatchers.IO) {
         val formBuilder = FormBody.Builder()
             .add("client_id", clientId.trim())
@@ -95,26 +107,44 @@ class GoogleDriveAuthManager(private val context: Context) {
         }
         val form = formBuilder.build()
 
+        var currentInterval = intervalSec.coerceAtLeast(5)
         var retries = 0
         while (retries < maxRetries) {
-            delay(intervalSec * 1000L)
+            delay(currentInterval * 1000L)
             retries++
 
             val request = Request.Builder().url(TOKEN_URL).post(form).build()
             try {
                 val response = client.newCall(request).execute()
                 val body = response.body?.string() ?: continue
+                android.util.Log.d("DriveAuth", "Poll ($retries): code=${response.code}, body=$body")
+
                 val tokenResp = json.decodeFromString<TokenResponse>(body)
 
-                if (tokenResp.access_token != null) {
+                if (!tokenResp.access_token.isNullOrBlank()) {
                     saveTokens(tokenResp.access_token, tokenResp.refresh_token)
                     return@withContext tokenResp
                 }
-                if (tokenResp.error != "authorization_pending") {
-                    return@withContext tokenResp
+
+                when (tokenResp.error) {
+                    "authorization_pending" -> {
+                        // User is still authorizing on phone, keep polling
+                    }
+                    "slow_down" -> {
+                        // Rate limit: increase polling interval by 5 seconds
+                        currentInterval += 5
+                    }
+                    "access_denied", "expired_token" -> {
+                        return@withContext tokenResp
+                    }
+                    else -> {
+                        if (tokenResp.error != null) {
+                            return@withContext tokenResp
+                        }
+                    }
                 }
             } catch (e: Exception) {
-                // Continue polling
+                android.util.Log.w("DriveAuth", "Poll exception: ${e.message}")
             }
         }
         null

@@ -112,7 +112,8 @@ class MainActivity : ComponentActivity() {
                                     initialFolder = initialUpnpFolder,
                                     lastPlayedMediaId = lastPlayedMediaId,
                                     isPlayerActive = (activeMediaItem != null),
-                                    onFolderLoaded = { initialUpnpFolder = null }
+                                    onFolderLoaded = { initialUpnpFolder = null },
+                                    onConsumeLastPlayedMediaId = { lastPlayedMediaId = null }
                                 )
                                 NavItem.GDRIVE -> GoogleDriveScreen(
                                     onPlayMedia = {
@@ -124,7 +125,8 @@ class MainActivity : ComponentActivity() {
                                     initialFolder = initialGdriveFolder,
                                     lastPlayedMediaId = lastPlayedMediaId,
                                     isPlayerActive = (activeMediaItem != null),
-                                    onFolderLoaded = { initialGdriveFolder = null }
+                                    onFolderLoaded = { initialGdriveFolder = null },
+                                    onConsumeLastPlayedMediaId = { lastPlayedMediaId = null }
                                 )
                                 NavItem.SETTINGS -> SettingsScreen(
                                     onBack = { selectedNav = NavItem.HOME }

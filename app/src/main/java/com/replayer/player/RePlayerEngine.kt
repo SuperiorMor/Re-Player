@@ -23,6 +23,9 @@ import androidx.media3.common.MimeTypes
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.extractor.DefaultExtractorsFactory
+import androidx.media3.extractor.ExtractorsFactory
+import androidx.media3.extractor.avi.AviExtractor
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -42,6 +45,14 @@ class RePlayerEngine(private val context: Context) {
     private val renderersFactory = DefaultRenderersFactory(context)
         .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
         .setEnableDecoderFallback(true)
+        .setMediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunnelingDecoder ->
+            val decoders = MediaCodecSelector.DEFAULT.getDecoderInfos(mimeType, requiresSecureDecoder, requiresTunnelingDecoder)
+            if (mimeType == MimeTypes.VIDEO_MP4V) {
+                decoders.sortedBy { if (it.softwareOnly) 0 else 1 }
+            } else {
+                decoders
+            }
+        }
 
     private val loadControl = DefaultLoadControl.Builder()
         .setBufferDurationsMs(
@@ -54,7 +65,7 @@ class RePlayerEngine(private val context: Context) {
         .build()
 
     private val extractorsFactory = DefaultExtractorsFactory()
-        .setConstantBitrateSeekingEnabled(true)
+        .setConstantBitrateSeekingEnabled(false)
 
     private val baseHttpDataSourceFactory = DefaultHttpDataSource.Factory()
         .setAllowCrossProtocolRedirects(true)
@@ -97,10 +108,11 @@ class RePlayerEngine(private val context: Context) {
 
             override fun onPlaybackStateChanged(playbackState: Int) {
                 val isBuffering = playbackState == Player.STATE_BUFFERING
-                val duration = if (playbackState == Player.STATE_READY || playbackState == Player.STATE_ENDED) {
-                    exoPlayer.duration.coerceAtLeast(0L)
+                val exoDuration = exoPlayer.duration
+                val duration = if (exoDuration > 0) {
+                    exoDuration
                 } else {
-                    0L
+                    _playerState.value.durationMs
                 }
                 _playerState.value = _playerState.value.copy(
                     isBuffering = isBuffering,
@@ -128,14 +140,15 @@ class RePlayerEngine(private val context: Context) {
             .setMediaId(mediaItem.id)
 
         // Ensure container MIME type is explicitly specified (crucial for AVI and DLNA streams)
+        // Check file extension FIRST because DLNA servers often misreport AVI as video/mpeg
         val detectedMimeType = when {
-            mediaItem.mimeType?.isNotBlank() == true && mediaItem.mimeType != "application/octet-stream" -> mediaItem.mimeType
             mediaItem.title.endsWith(".avi", ignoreCase = true) || mediaItem.uri.endsWith(".avi", ignoreCase = true) -> MimeTypes.VIDEO_AVI
             mediaItem.title.endsWith(".mkv", ignoreCase = true) || mediaItem.uri.endsWith(".mkv", ignoreCase = true) -> MimeTypes.VIDEO_MATROSKA
             mediaItem.title.endsWith(".mp4", ignoreCase = true) || mediaItem.uri.endsWith(".mp4", ignoreCase = true) -> MimeTypes.VIDEO_MP4
             mediaItem.title.endsWith(".mov", ignoreCase = true) || mediaItem.uri.endsWith(".mov", ignoreCase = true) -> "video/quicktime"
             mediaItem.title.endsWith(".ts", ignoreCase = true) || mediaItem.uri.endsWith(".ts", ignoreCase = true) -> MimeTypes.VIDEO_MP2T
             mediaItem.title.endsWith(".mp3", ignoreCase = true) || mediaItem.uri.endsWith(".mp3", ignoreCase = true) -> MimeTypes.AUDIO_MPEG
+            mediaItem.mimeType?.isNotBlank() == true && mediaItem.mimeType != "application/octet-stream" -> mediaItem.mimeType
             else -> null
         }
         if (detectedMimeType != null) {
@@ -155,20 +168,27 @@ class RePlayerEngine(private val context: Context) {
             }
         }
 
+        val isAvi = mediaItem.title.endsWith(".avi", ignoreCase = true) || mediaItem.uri.endsWith(".avi", ignoreCase = true)
+        val activeExtractorsFactory: ExtractorsFactory = if (isAvi) {
+            ExtractorsFactory { arrayOf(AviExtractor()) }
+        } else {
+            extractorsFactory
+        }
+
         val exoMediaItem = mediaBuilder.build()
-        if (finalHeaders.isNotEmpty()) {
+        val dataSourceFactory = if (finalHeaders.isNotEmpty()) {
             val customHttpFactory = DefaultHttpDataSource.Factory()
                 .setAllowCrossProtocolRedirects(true)
                 .setConnectTimeoutMs(15000)
                 .setReadTimeoutMs(30000)
                 .setUserAgent("RePlayer-TV")
                 .setDefaultRequestProperties(finalHeaders)
-            val customDataSourceFactory = DefaultDataSource.Factory(context, customHttpFactory)
-            val customMediaSourceFactory = DefaultMediaSourceFactory(customDataSourceFactory, extractorsFactory)
-            exoPlayer.setMediaSource(customMediaSourceFactory.createMediaSource(exoMediaItem))
+            DefaultDataSource.Factory(context, customHttpFactory)
         } else {
-            exoPlayer.setMediaSource(defaultMediaSourceFactory.createMediaSource(exoMediaItem))
+            defaultDataSourceFactory
         }
+        val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory, activeExtractorsFactory)
+        exoPlayer.setMediaSource(mediaSourceFactory.createMediaSource(exoMediaItem))
 
         exoPlayer.prepare()
         exoPlayer.playWhenReady = true
@@ -183,12 +203,17 @@ class RePlayerEngine(private val context: Context) {
     }
 
     fun seekRelative(deltaMs: Long) {
-        val target = (exoPlayer.currentPosition + deltaMs).coerceIn(0, exoPlayer.duration.coerceAtLeast(0L))
+        val duration = if (exoPlayer.duration > 0) exoPlayer.duration else _playerState.value.durationMs
+        val target = (exoPlayer.currentPosition + deltaMs).coerceIn(0, duration.coerceAtLeast(0L))
         exoPlayer.seekTo(target)
+        _playerState.value = _playerState.value.copy(currentPositionMs = target)
     }
 
     fun seekTo(positionMs: Long) {
-        exoPlayer.seekTo(positionMs.coerceIn(0, exoPlayer.duration.coerceAtLeast(0L)))
+        val duration = if (exoPlayer.duration > 0) exoPlayer.duration else _playerState.value.durationMs
+        val target = positionMs.coerceIn(0, duration.coerceAtLeast(0L))
+        exoPlayer.seekTo(target)
+        _playerState.value = _playerState.value.copy(currentPositionMs = target)
     }
 
     fun selectAudioTrack(track: AudioTrackInfo) {

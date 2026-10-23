@@ -44,13 +44,24 @@ class GoogleDriveService(private val authManager: GoogleDriveAuthManager) {
                 val thumb = f["thumbnailLink"]?.jsonPrimitive?.content
 
                 val isFolder = mimeType == "application/vnd.google-apps.folder"
+                val lowerName = name.lowercase()
                 val mediaType = when {
                     isFolder -> MediaType.DIRECTORY
                     mimeType.startsWith("video/") -> MediaType.VIDEO
                     mimeType.startsWith("audio/") -> MediaType.AUDIO
                     mimeType.startsWith("image/") -> MediaType.IMAGE
+                    lowerName.endsWith(".mkv") || lowerName.endsWith(".avi") || lowerName.endsWith(".mp4") ||
+                    lowerName.endsWith(".mov") || lowerName.endsWith(".ts") || lowerName.endsWith(".m2ts") ||
+                    lowerName.endsWith(".webm") -> MediaType.VIDEO
+                    lowerName.endsWith(".mp3") || lowerName.endsWith(".flac") || lowerName.endsWith(".wav") ||
+                    lowerName.endsWith(".m4a") || lowerName.endsWith(".aac") || lowerName.endsWith(".ogg") -> MediaType.AUDIO
+                    lowerName.endsWith(".jpg") || lowerName.endsWith(".jpeg") || lowerName.endsWith(".png") ||
+                    lowerName.endsWith(".webp") -> MediaType.IMAGE
                     else -> continue
                 }
+
+                val ext = name.substringAfterLast('.', "").uppercase()
+                val format = if (ext.isNotEmpty() && ext.length <= 5) ext else null
 
                 // Streaming URL with alt=media
                 val streamUrl = "https://www.googleapis.com/drive/v3/files/$id?alt=media"
@@ -65,7 +76,8 @@ class GoogleDriveService(private val authManager: GoogleDriveAuthManager) {
                         size = size,
                         mimeType = mimeType,
                         thumbnailUrl = thumb,
-                        parentId = folderId
+                        parentId = folderId,
+                        format = format
                     )
                 )
             }

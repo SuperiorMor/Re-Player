@@ -145,6 +145,11 @@ fun PlayerScreen(
             showAudioDialog = false
             showSubtitleDialog = false
             lastInteractionTime = System.currentTimeMillis()
+        } else if (showControls) {
+            showControls = false
+            try {
+                rootFocusRequester.requestFocus()
+            } catch (_: Exception) {}
         } else {
             onBack()
         }
@@ -159,11 +164,19 @@ fun PlayerScreen(
             .onKeyEvent { keyEvent ->
                 if (keyEvent.type == KeyEventType.KeyDown) {
                     if (!showControls) {
-                        // Any remote button press (D-Pad center, arrows, enter, play/pause) restores controls!
                         when (keyEvent.key) {
+                            Key.DirectionRight -> {
+                                // 10s forward without showing controls
+                                engine.seekRelative(10000)
+                                true
+                            }
+                            Key.DirectionLeft -> {
+                                // 10s back without showing controls
+                                engine.seekRelative(-10000)
+                                true
+                            }
                             Key.DirectionCenter, Key.Enter,
                             Key.DirectionUp, Key.DirectionDown,
-                            Key.DirectionLeft, Key.DirectionRight,
                             Key.MediaPlay, Key.MediaPause, Key.MediaPlayPause,
                             Key.Spacebar -> {
                                 showControls = true

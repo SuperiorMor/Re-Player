@@ -83,7 +83,8 @@ fun UpnpBrowseScreen(
     initialFolder: Pair<String, String>? = null,
     lastPlayedMediaId: String? = null,
     isPlayerActive: Boolean = false,
-    onFolderLoaded: () -> Unit = {}
+    onFolderLoaded: () -> Unit = {},
+    onConsumeLastPlayedMediaId: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -118,6 +119,7 @@ fun UpnpBrowseScreen(
     }
 
     fun openFolder(controlUrl: String, folderId: String, title: String) {
+        onConsumeLastPlayedMediaId()
         folderStack = folderStack + Pair(folderId, title)
         loadFolder(controlUrl, folderId)
     }
@@ -140,6 +142,7 @@ fun UpnpBrowseScreen(
     }
 
     fun navigateBack() {
+        onConsumeLastPlayedMediaId()
         if (folderStack.size > 1) {
             val parentIdx = folderStack.size - 2
             val parentFolder = folderStack[parentIdx]
@@ -364,7 +367,7 @@ fun UpnpBrowseScreen(
 
                     val itemFocusModifier = when {
                         isTarget -> Modifier.focusRequester(targetItemFocusRequester)
-                        isFirst && lastPlayedMediaId == null -> Modifier.focusRequester(firstItemFocusRequester)
+                        isFirst -> Modifier.focusRequester(firstItemFocusRequester)
                         else -> Modifier
                     }
 
@@ -509,7 +512,7 @@ fun UpnpBrowseScreen(
 
                     val itemFocusModifier = when {
                         isTarget -> Modifier.focusRequester(targetItemFocusRequester)
-                        isFirst && lastPlayedMediaId == null -> Modifier.focusRequester(firstItemFocusRequester)
+                        isFirst -> Modifier.focusRequester(firstItemFocusRequester)
                         else -> Modifier
                     }
 
@@ -612,31 +615,37 @@ fun UpnpBrowseScreen(
     // When returning from player (isPlayerActive becomes false) and lastPlayedMediaId != null,
     // scroll directly to that item and request focus on it.
     // Otherwise, when entering a folder, focus the first item.
-    LaunchedEffect(isPlayerActive, lastPlayedMediaId, currentItems) {
-        if (!isPlayerActive) {
-            lastExitTimestamp = System.currentTimeMillis()
-            if (lastPlayedMediaId != null && currentItems.isNotEmpty()) {
-                val targetIndex = sortedItems.indexOfFirst { it.id == lastPlayedMediaId }
-                if (targetIndex >= 0) {
-                    delay(50)
-                    try {
-                        if (viewMode == ViewMode.LIST) {
-                            listState.scrollToItem(maxOf(0, targetIndex))
-                        } else {
-                            gridState.scrollToItem(maxOf(0, targetIndex))
-                        }
-                    } catch (_: Exception) {}
-                    delay(100)
-                    try {
-                        targetItemFocusRequester.requestFocus()
-                    } catch (_: Exception) {}
-                    return@LaunchedEffect
-                }
+    LaunchedEffect(isPlayerActive, lastPlayedMediaId, currentItems, isLoadingFolder) {
+        if (isPlayerActive || isLoadingFolder) return@LaunchedEffect
+
+        lastExitTimestamp = System.currentTimeMillis()
+
+        // Case A: Just returned from player with lastPlayedMediaId
+        if (lastPlayedMediaId != null && currentItems.isNotEmpty()) {
+            val targetIndex = sortedItems.indexOfFirst { it.id == lastPlayedMediaId }
+            if (targetIndex >= 0) {
+                delay(50)
+                try {
+                    if (viewMode == ViewMode.LIST) {
+                        listState.scrollToItem(maxOf(0, targetIndex))
+                    } else {
+                        gridState.scrollToItem(maxOf(0, targetIndex))
+                    }
+                } catch (_: Exception) {}
+                delay(100)
+                try {
+                    targetItemFocusRequester.requestFocus()
+                } catch (_: Exception) {}
+                onConsumeLastPlayedMediaId()
+                return@LaunchedEffect
+            } else {
+                onConsumeLastPlayedMediaId()
             }
         }
 
-        if (!isPlayerActive && currentItems.isNotEmpty() && lastPlayedMediaId == null) {
-            delay(150)
+        // Case B: Entering folder, exiting folder (Back), or first load
+        if (currentItems.isNotEmpty()) {
+            delay(120)
             try {
                 firstItemFocusRequester.requestFocus()
             } catch (_: Exception) {}

@@ -83,7 +83,8 @@ fun GoogleDriveScreen(
     initialFolder: Pair<String, String>? = null,
     lastPlayedMediaId: String? = null,
     isPlayerActive: Boolean = false,
-    onFolderLoaded: () -> Unit = {}
+    onFolderLoaded: () -> Unit = {},
+    onConsumeLastPlayedMediaId: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -91,7 +92,7 @@ fun GoogleDriveScreen(
     val driveService = remember { GoogleDriveService(authManager) }
     val favoritesManager = remember { FavoritesManager(context) }
 
-    val isAuthenticated = remember { authManager.isAuthenticated() }
+    val isAuthenticated by GoogleDriveAuthManager.sharedAuthenticatedFlow.collectAsState()
     val favorites by favoritesManager.favorites.collectAsState()
 
     var currentItems by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
@@ -117,6 +118,7 @@ fun GoogleDriveScreen(
     }
 
     fun openFolder(folderId: String, title: String) {
+        onConsumeLastPlayedMediaId()
         folderStack = folderStack + Pair(folderId, title)
         loadFolder(folderId)
     }
@@ -138,6 +140,7 @@ fun GoogleDriveScreen(
     }
 
     fun navigateBack() {
+        onConsumeLastPlayedMediaId()
         if (folderStack.size > 1) {
             val parentIdx = folderStack.size - 2
             val parentFolder = folderStack[parentIdx]
@@ -178,31 +181,37 @@ fun GoogleDriveScreen(
     // When returning from player (isPlayerActive becomes false) and lastPlayedMediaId != null,
     // scroll directly to that item and request focus on it.
     // Otherwise, when entering a folder, focus the first item.
-    LaunchedEffect(isPlayerActive, lastPlayedMediaId, currentItems) {
-        if (!isPlayerActive) {
-            lastExitTimestamp = System.currentTimeMillis()
-            if (lastPlayedMediaId != null && currentItems.isNotEmpty()) {
-                val targetIndex = sortedItems.indexOfFirst { it.id == lastPlayedMediaId }
-                if (targetIndex >= 0) {
-                    delay(50)
-                    try {
-                        if (viewMode == ViewMode.LIST) {
-                            listState.scrollToItem(maxOf(0, targetIndex))
-                        } else {
-                            gridState.scrollToItem(maxOf(0, targetIndex))
-                        }
-                    } catch (_: Exception) {}
-                    delay(100)
-                    try {
-                        targetItemFocusRequester.requestFocus()
-                    } catch (_: Exception) {}
-                    return@LaunchedEffect
-                }
+    LaunchedEffect(isPlayerActive, lastPlayedMediaId, currentItems, isLoading) {
+        if (isPlayerActive || isLoading) return@LaunchedEffect
+
+        lastExitTimestamp = System.currentTimeMillis()
+
+        // Case A: Just returned from player with lastPlayedMediaId
+        if (lastPlayedMediaId != null && currentItems.isNotEmpty()) {
+            val targetIndex = sortedItems.indexOfFirst { it.id == lastPlayedMediaId }
+            if (targetIndex >= 0) {
+                delay(50)
+                try {
+                    if (viewMode == ViewMode.LIST) {
+                        listState.scrollToItem(maxOf(0, targetIndex))
+                    } else {
+                        gridState.scrollToItem(maxOf(0, targetIndex))
+                    }
+                } catch (_: Exception) {}
+                delay(100)
+                try {
+                    targetItemFocusRequester.requestFocus()
+                } catch (_: Exception) {}
+                onConsumeLastPlayedMediaId()
+                return@LaunchedEffect
+            } else {
+                onConsumeLastPlayedMediaId()
             }
         }
 
-        if (!isPlayerActive && currentItems.isNotEmpty() && lastPlayedMediaId == null) {
-            delay(150)
+        // Case B: Entering folder, exiting folder (Back), or first load
+        if (currentItems.isNotEmpty()) {
+            delay(120)
             try {
                 firstItemFocusRequester.requestFocus()
             } catch (_: Exception) {}
@@ -383,7 +392,7 @@ fun GoogleDriveScreen(
 
                     val itemFocusModifier = when {
                         isTarget -> Modifier.focusRequester(targetItemFocusRequester)
-                        isFirst && lastPlayedMediaId == null -> Modifier.focusRequester(firstItemFocusRequester)
+                        isFirst -> Modifier.focusRequester(firstItemFocusRequester)
                         else -> Modifier
                     }
 
@@ -516,7 +525,7 @@ fun GoogleDriveScreen(
 
                     val itemFocusModifier = when {
                         isTarget -> Modifier.focusRequester(targetItemFocusRequester)
-                        isFirst && lastPlayedMediaId == null -> Modifier.focusRequester(firstItemFocusRequester)
+                        isFirst -> Modifier.focusRequester(firstItemFocusRequester)
                         else -> Modifier
                     }
 
