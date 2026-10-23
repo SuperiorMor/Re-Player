@@ -19,7 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
@@ -44,7 +44,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.replayer.BuildConfig
 import com.replayer.ui.components.TvFocusCard
 import com.replayer.ui.theme.AccentCyan
 import com.replayer.ui.theme.DarkCard
@@ -347,7 +346,7 @@ fun SettingsScreen(
                                 horizontalArrangement = Arrangement.Center,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(Icons.Default.CloudDownload, contentDescription = null, tint = AccentCyan)
+                                Icon(Icons.Default.Download, contentDescription = null, tint = AccentCyan)
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
                                     text = "Скачать и обновить",
@@ -387,15 +386,20 @@ fun SettingsScreen(
                         color = AccentCyan
                     )
                     Spacer(modifier = Modifier.height(12.dp))
-                    LinearProgressIndicator(
-                        progress = state.progress,
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(8.dp)
-                            .clip(RoundedCornerShape(4.dp)),
-                        color = AccentCyan,
-                        trackColor = DarkSurface
-                    )
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(DarkSurface)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(fraction = state.progress.coerceIn(0f, 1f))
+                                .height(8.dp)
+                                .background(AccentCyan)
+                        )
+                    }
                 }
             }
             is UpdateUiState.ReadyToInstall -> {

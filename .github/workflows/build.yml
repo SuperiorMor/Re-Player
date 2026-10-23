@@ -60,6 +60,16 @@ jobs:
         name: build-log
         path: build.log
 
+    - name: Push failure log to git branch
+      if: failure()
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git checkout -b build-log-latest
+        git add -f build.log
+        git commit -m "Build failure log"
+        git push origin build-log-latest --force || true
+
     - name: Create GitHub Release
       if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.create_release == 'true'
       uses: softprops/action-gh-release@v2

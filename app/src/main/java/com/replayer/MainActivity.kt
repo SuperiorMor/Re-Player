@@ -152,7 +152,7 @@ class MainActivity : ComponentActivity() {
                                         TvFocusCard(
                                             onClick = {
                                                 showExitDialog = false
-                                                finish()
+                                                this@MainActivity.finish()
                                             },
                                             modifier = Modifier
                                                 .weight(1f)
