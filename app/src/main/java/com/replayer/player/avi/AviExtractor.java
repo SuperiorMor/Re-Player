@@ -42,7 +42,6 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 import java.util.ArrayList;
-import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -150,7 +149,7 @@ public final class AviExtractor implements Extractor {
 
   private @State int state;
   private ExtractorOutput extractorOutput;
-  private @MonotonicNonNull AviMainHeaderChunk aviHeader;
+  private @Nullable AviMainHeaderChunk aviHeader;
   private long durationUs;
   private ChunkReader[] chunkReaders;
 
@@ -522,7 +521,6 @@ public final class AviExtractor implements Extractor {
       TrackOutput trackOutput = extractorOutput.track(streamId, trackType);
       Format format = builder.build();
       trackOutput.format(format);
-      trackOutput.durationUs(durationUs);
       this.durationUs = max(this.durationUs, durationUs);
       return new ChunkReader(
           streamId,
