@@ -59,6 +59,8 @@ import com.replayer.model.FavoriteFolder
 import com.replayer.model.MediaItem
 import com.replayer.model.MediaSourceType
 import com.replayer.model.MediaType
+import com.replayer.model.SortMode
+import com.replayer.model.ViewMode
 import com.replayer.network.gdrive.GoogleDriveAuthManager
 import com.replayer.network.gdrive.GoogleDriveService
 import com.replayer.ui.components.TvFocusCard
