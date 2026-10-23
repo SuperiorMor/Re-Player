@@ -32,12 +32,8 @@ jobs:
 
     - name: Build Debug APK
       run: |
-        gradle assembleDebug --no-daemon --console=plain 2>&1 | tee build.log || {
-          echo "==================== BUILD FAILED ===================="
-          grep -C 3 -E "e: |error:|FAILED|FAILURE" build.log || tail -n 80 build.log
-          echo "======================================================"
-          exit 1
-        }
+        set -o pipefail
+        gradle assembleDebug --no-daemon --console=plain 2>&1 | tee build.log
 
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
@@ -46,9 +42,9 @@ jobs:
         path: app/build/outputs/apk/debug/*.apk
         retention-days: 14
 
-    - name: Upload Build Log on Failure
-      if: failure()
+    - name: Upload Build Log
+      if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: build-failure-log
+        name: build-log
         path: build.log

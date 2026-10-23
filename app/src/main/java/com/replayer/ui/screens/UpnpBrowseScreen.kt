@@ -31,10 +31,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.tv.material3.MaterialTheme
-import androidx.tv.material3.Text
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import com.replayer.model.MediaItem
 import com.replayer.model.MediaType
 import com.replayer.model.UpnpDevice
@@ -46,7 +45,6 @@ import com.replayer.ui.theme.TextPrimary
 import com.replayer.ui.theme.TextSecondary
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 fun UpnpBrowseScreen(
     onPlayMedia: (MediaItem) -> Unit,

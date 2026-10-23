@@ -21,8 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.tv.material3.ExperimentalTvMaterial3Api
-import androidx.tv.material3.Text
+import androidx.compose.material3.Text
 import com.replayer.ui.theme.AccentCyan
 import com.replayer.ui.theme.SurfaceDark
 import com.replayer.ui.theme.TextSecondary
@@ -34,7 +33,6 @@ enum class NavItem(val label: String, val icon: ImageVector) {
     SETTINGS("Настройки", Icons.Default.Settings)
 }
 
-@OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 fun TvNavigationRail(
     selectedItem: NavItem,

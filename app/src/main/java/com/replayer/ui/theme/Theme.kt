@@ -1,10 +1,8 @@
-@file:OptIn(ExperimentalTvMaterial3Api::class)
 package com.replayer.ui.theme
 
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
-import androidx.tv.material3.ExperimentalTvMaterial3Api
-import androidx.tv.material3.MaterialTheme
-import androidx.tv.material3.darkColorScheme
 
 private val RePlayerColorScheme = darkColorScheme(
     background = DarkBackground,

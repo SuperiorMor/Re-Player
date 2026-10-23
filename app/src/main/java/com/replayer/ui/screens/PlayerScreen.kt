@@ -47,9 +47,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
-import androidx.tv.material3.ExperimentalTvMaterial3Api
-import androidx.tv.material3.MaterialTheme
-import androidx.tv.material3.Text
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import com.replayer.model.AudioTrackInfo
 import com.replayer.model.MediaItem
 import com.replayer.model.SubtitleTrackInfo
@@ -61,7 +60,6 @@ import com.replayer.ui.theme.TextPrimary
 import kotlinx.coroutines.delay
 
 @OptIn(UnstableApi::class)
-@kotlin.OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 fun PlayerScreen(
     mediaItem: MediaItem,
@@ -360,7 +358,6 @@ fun AudioTrackDialog(
     }
 }
 
-@OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 fun SubtitleTrackDialog(
     tracks: List<SubtitleTrackInfo>,

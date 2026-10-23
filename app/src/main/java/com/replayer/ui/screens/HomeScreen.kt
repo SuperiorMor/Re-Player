@@ -17,17 +17,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.tv.material3.MaterialTheme
-import androidx.tv.material3.Text
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import com.replayer.ui.components.NavItem
 import com.replayer.ui.components.TvFocusCard
 import com.replayer.ui.theme.AccentCyan
 import com.replayer.ui.theme.TextPrimary
 import com.replayer.ui.theme.TextSecondary
 
-@OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 fun HomeScreen(
     onNavigate: (NavItem) -> Unit,
