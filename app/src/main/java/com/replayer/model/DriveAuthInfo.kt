@@ -18,5 +18,6 @@ data class TokenResponse(
     val refresh_token: String? = null,
     val expires_in: Int? = null,
     val token_type: String? = null,
-    val error: String? = null
+    val error: String? = null,
+    val error_description: String? = null
 )
