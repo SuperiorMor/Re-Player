@@ -188,7 +188,7 @@ fun SettingsScreen(
         updateUiState = UpdateUiState.Downloading(0f)
         downloadProgress = 0f
         scope.launch {
-            val file = updateManager.downloadApk(release.downloadUrl) { progress ->
+            val file = updateManager.downloadApk(release.downloadUrl, release.fileName) { progress ->
                 downloadProgress = progress
                 updateUiState = UpdateUiState.Downloading(progress)
             }

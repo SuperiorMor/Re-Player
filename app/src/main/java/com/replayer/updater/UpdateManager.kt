@@ -107,11 +107,13 @@ class UpdateManager(private val context: Context) {
 
     suspend fun downloadApk(
         downloadUrl: String,
+        fileName: String = "RePlayer-update.apk",
         onProgress: (Float) -> Unit
     ): File? = withContext(Dispatchers.IO) {
         try {
-            val updatesDir = File(context.cacheDir, "updates").apply { mkdirs() }
-            val targetFile = File(updatesDir, "replayer-update.apk")
+            val dir = context.externalCacheDir ?: context.cacheDir
+            val updatesDir = File(dir, "updates").apply { mkdirs() }
+            val targetFile = File(updatesDir, fileName)
             if (targetFile.exists()) targetFile.delete()
 
             val request = Request.Builder().url(downloadUrl).build()

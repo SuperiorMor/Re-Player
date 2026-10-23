@@ -22,8 +22,21 @@ android {
         }
     }
 
+    signingConfigs {
+        create("replayerSigning") {
+            storeFile = file("keystore/replayer.keystore")
+            storePassword = "replayer123"
+            keyAlias = "replayer"
+            keyPassword = "replayer123"
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("replayerSigning")
+        }
         release {
+            signingConfig = signingConfigs.getByName("replayerSigning")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

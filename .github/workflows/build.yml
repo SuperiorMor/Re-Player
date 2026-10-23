@@ -45,6 +45,14 @@ jobs:
       run: |
         set -o pipefail
         gradle assembleDebug --no-daemon --console=plain 2>&1 | tee build.log
+        VERSION=$(grep 'versionName =' app/build.gradle.kts | head -n1 | cut -d'"' -f2)
+        ORIGINAL_APK=$(ls app/build/outputs/apk/debug/*.apk | head -n1)
+        TARGET_APK="app/build/outputs/apk/debug/RePlayer-v${VERSION}.apk"
+        if [ "$ORIGINAL_APK" != "$TARGET_APK" ]; then
+          cp "$ORIGINAL_APK" "$TARGET_APK"
+          rm -f "$ORIGINAL_APK"
+        fi
+        echo "Built APK: $(ls app/build/outputs/apk/debug/*.apk)"
 
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
@@ -74,7 +82,7 @@ jobs:
       if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.create_release == 'true'
       uses: softprops/action-gh-release@v2
       with:
-        files: app/build/outputs/apk/debug/app-debug.apk
+        files: app/build/outputs/apk/debug/*.apk
         generate_release_notes: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
