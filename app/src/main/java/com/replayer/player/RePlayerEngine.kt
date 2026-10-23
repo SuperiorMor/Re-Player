@@ -133,7 +133,7 @@ class RePlayerEngine(private val context: Context) {
             mediaItem.title.endsWith(".avi", ignoreCase = true) || mediaItem.uri.endsWith(".avi", ignoreCase = true) -> MimeTypes.VIDEO_AVI
             mediaItem.title.endsWith(".mkv", ignoreCase = true) || mediaItem.uri.endsWith(".mkv", ignoreCase = true) -> MimeTypes.VIDEO_MATROSKA
             mediaItem.title.endsWith(".mp4", ignoreCase = true) || mediaItem.uri.endsWith(".mp4", ignoreCase = true) -> MimeTypes.VIDEO_MP4
-            mediaItem.title.endsWith(".mov", ignoreCase = true) || mediaItem.uri.endsWith(".mov", ignoreCase = true) -> MimeTypes.VIDEO_QUICKTIME
+            mediaItem.title.endsWith(".mov", ignoreCase = true) || mediaItem.uri.endsWith(".mov", ignoreCase = true) -> "video/quicktime"
             mediaItem.title.endsWith(".ts", ignoreCase = true) || mediaItem.uri.endsWith(".ts", ignoreCase = true) -> MimeTypes.VIDEO_MP2T
             mediaItem.title.endsWith(".mp3", ignoreCase = true) || mediaItem.uri.endsWith(".mp3", ignoreCase = true) -> MimeTypes.AUDIO_MPEG
             else -> null
