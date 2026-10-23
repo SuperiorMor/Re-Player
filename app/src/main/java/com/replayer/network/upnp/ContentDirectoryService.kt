@@ -58,16 +58,19 @@ class ContentDirectoryService {
     }
 
     private fun extractResultTag(soapXml: String): String? {
-        val start = soapXml.indexOf("<Result>")
-        val end = soapXml.indexOf("</Result>")
-        if (start != -1 && end != -1) {
-            val encoded = soapXml.substring(start + 8, end)
-            return encoded.replace("&lt;", "<")
-                .replace("&gt;", ">")
-                .replace("&amp;", "&")
-                .replace("&quot;", "\"")
-        }
-        return null
+        val startIdx = soapXml.indexOf("<Result")
+        if (startIdx == -1) return null
+        val tagCloseIdx = soapXml.indexOf(">", startIdx)
+        if (tagCloseIdx == -1) return null
+        val endIdx = soapXml.indexOf("</Result>", tagCloseIdx)
+        if (endIdx == -1) return null
+
+        val encoded = soapXml.substring(tagCloseIdx + 1, endIdx)
+        return encoded.replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&amp;", "&")
+            .replace("&quot;", "\"")
+            .replace("&apos;", "'")
     }
 
     private fun parseDidlLite(didlXml: String, items: MutableList<MediaItem>, parentId: String) {
@@ -76,44 +79,59 @@ class ContentDirectoryService {
 
         var eventType = parser.eventType
         var currentItem: MutableMap<String, String>? = null
-        var currentTag = ""
+        val textBuffer = StringBuilder()
 
         while (eventType != XmlPullParser.END_DOCUMENT) {
             when (eventType) {
                 XmlPullParser.START_TAG -> {
-                    currentTag = parser.name
-                    if (currentTag == "container" || currentTag == "item") {
+                    val rawName = parser.name ?: ""
+                    val localTag = rawName.substringAfterLast(':').lowercase()
+                    textBuffer.clear()
+
+                    if (localTag == "container" || localTag == "item") {
                         currentItem = mutableMapOf()
-                        currentItem["isContainer"] = if (currentTag == "container") "true" else "false"
+                        currentItem["isContainer"] = if (localTag == "container") "true" else "false"
                         currentItem["id"] = parser.getAttributeValue(null, "id") ?: ""
                     }
                 }
                 XmlPullParser.TEXT -> {
-                    val text = parser.text.trim()
-                    if (text.isNotEmpty() && currentItem != null) {
-                        when (currentTag) {
-                            "dc:title" -> currentItem["title"] = text
-                            "res" -> currentItem["res"] = text
-                            "upnp:class" -> currentItem["class"] = text
-                        }
-                    }
+                    textBuffer.append(parser.text ?: "")
                 }
                 XmlPullParser.END_TAG -> {
-                    if ((parser.name == "container" || parser.name == "item") && currentItem != null) {
+                    val rawName = parser.name ?: ""
+                    val localTag = rawName.substringAfterLast(':').lowercase()
+                    val text = textBuffer.toString().trim()
+
+                    if (currentItem != null && text.isNotEmpty()) {
+                        when (localTag) {
+                            "title" -> currentItem["title"] = text
+                            "res" -> currentItem["res"] = text
+                            "class" -> currentItem["class"] = text
+                            "albumarturi" -> currentItem["albumArt"] = text
+                        }
+                    }
+
+                    if ((localTag == "container" || localTag == "item") && currentItem != null) {
                         val isContainer = currentItem["isContainer"] == "true"
                         val upnpClass = currentItem["class"] ?: ""
-                        val title = currentItem["title"] ?: "Unnamed"
+                        val title = currentItem["title"]?.trim()?.ifEmpty { "Unnamed" } ?: "Unnamed"
                         val id = currentItem["id"] ?: ""
                         val res = currentItem["res"] ?: ""
 
                         val mediaType = when {
                             isContainer -> MediaType.DIRECTORY
-                            upnpClass.contains("videoItem") -> MediaType.VIDEO
-                            upnpClass.contains("audioItem") -> MediaType.AUDIO
-                            upnpClass.contains("imageItem") -> MediaType.IMAGE
-                            res.endsWith(".mkv") || res.endsWith(".mp4") || res.endsWith(".avi") -> MediaType.VIDEO
-                            res.endsWith(".mp3") || res.endsWith(".flac") -> MediaType.AUDIO
-                            res.endsWith(".jpg") || res.endsWith(".png") -> MediaType.IMAGE
+                            upnpClass.contains("videoItem", ignoreCase = true) -> MediaType.VIDEO
+                            upnpClass.contains("audioItem", ignoreCase = true) -> MediaType.AUDIO
+                            upnpClass.contains("imageItem", ignoreCase = true) -> MediaType.IMAGE
+                            res.endsWith(".mkv", ignoreCase = true) || res.endsWith(".mp4", ignoreCase = true) ||
+                            res.endsWith(".avi", ignoreCase = true) || res.endsWith(".ts", ignoreCase = true) ||
+                            res.endsWith(".m2ts", ignoreCase = true) || res.endsWith(".mov", ignoreCase = true) ||
+                            res.endsWith(".webm", ignoreCase = true) -> MediaType.VIDEO
+                            res.endsWith(".mp3", ignoreCase = true) || res.endsWith(".flac", ignoreCase = true) ||
+                            res.endsWith(".m4a", ignoreCase = true) || res.endsWith(".wav", ignoreCase = true) ||
+                            res.endsWith(".aac", ignoreCase = true) || res.endsWith(".ogg", ignoreCase = true) -> MediaType.AUDIO
+                            res.endsWith(".jpg", ignoreCase = true) || res.endsWith(".jpeg", ignoreCase = true) ||
+                            res.endsWith(".png", ignoreCase = true) || res.endsWith(".webp", ignoreCase = true) -> MediaType.IMAGE
                             else -> MediaType.VIDEO
                         }
 
@@ -129,6 +147,7 @@ class ContentDirectoryService {
                         )
                         currentItem = null
                     }
+                    textBuffer.clear()
                 }
             }
             eventType = parser.next()
