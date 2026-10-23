@@ -59,6 +59,7 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -161,6 +162,26 @@ fun PlayerScreen(
             .background(Color.Black)
             .focusRequester(rootFocusRequester)
             .focusable()
+            .onPreviewKeyEvent { keyEvent ->
+                if (keyEvent.type == KeyEventType.KeyDown && (keyEvent.key == Key.Back || keyEvent.key == Key.Escape)) {
+                    if (showAudioDialog || showSubtitleDialog) {
+                        showAudioDialog = false
+                        showSubtitleDialog = false
+                        lastInteractionTime = System.currentTimeMillis()
+                        return@onPreviewKeyEvent true
+                    } else if (showControls) {
+                        showControls = false
+                        try {
+                            rootFocusRequester.requestFocus()
+                        } catch (_: Exception) {}
+                        return@onPreviewKeyEvent true
+                    } else {
+                        onBack()
+                        return@onPreviewKeyEvent true
+                    }
+                }
+                false
+            }
             .onKeyEvent { keyEvent ->
                 if (keyEvent.type == KeyEventType.KeyDown) {
                     if (!showControls) {

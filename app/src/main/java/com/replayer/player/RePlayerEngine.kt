@@ -51,11 +51,11 @@ class RePlayerEngine(private val context: Context) {
     private val loadControl = DefaultLoadControl.Builder()
         .setBufferDurationsMs(
             /* minBufferMs= */ 15_000,
-            /* maxBufferMs= */ 60_000,
-            /* bufferForPlaybackMs= */ 2_500,
-            /* bufferForPlaybackAfterRebufferMs= */ 5_000
+            /* maxBufferMs= */ 50_000,
+            /* bufferForPlaybackMs= */ 500,
+            /* bufferForPlaybackAfterRebufferMs= */ 1_000
         )
-        .setPrioritizeTimeOverSizeThresholds(true)
+        .setPrioritizeTimeOverSizeThresholds(false)
         .build()
 
     private val extractorsFactory = DefaultExtractorsFactory()
@@ -162,25 +162,31 @@ class RePlayerEngine(private val context: Context) {
             }
         }
 
-        val isAvi = mediaItem.title.endsWith(".avi", ignoreCase = true) || mediaItem.uri.endsWith(".avi", ignoreCase = true)
+        val isAvi = mediaItem.title.endsWith(".avi", ignoreCase = true) ||
+                mediaItem.uri.endsWith(".avi", ignoreCase = true) ||
+                mediaItem.format?.equals("avi", ignoreCase = true) == true
         val activeExtractorsFactory = object : ExtractorsFactory {
-            override fun createExtractors(): Array<Extractor> =
-                DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(false).createExtractors()
+            override fun createExtractors(): Array<Extractor> {
+                if (isAvi) {
+                    return arrayOf(
+                        com.replayer.player.avi.AviExtractor(),
+                        *DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(false).createExtractors()
+                    )
+                }
+                return DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(false).createExtractors()
+            }
 
             override fun createExtractors(uri: Uri, responseHeaders: Map<String, List<String>>): Array<Extractor> {
-                val cleanHeaders = if (isAvi) {
-                    responseHeaders.filterKeys { !it.equals("Content-Type", ignoreCase = true) }
-                } else {
-                    responseHeaders
-                }
-                val effectiveUri = if (isAvi && !(uri.path?.endsWith(".avi", ignoreCase = true) == true)) {
-                    Uri.parse("file:///stream.avi")
-                } else {
-                    uri
+                if (isAvi) {
+                    val cleanHeaders = responseHeaders.filterKeys { !it.equals("Content-Type", ignoreCase = true) }
+                    val defaultExtractors = DefaultExtractorsFactory()
+                        .setConstantBitrateSeekingEnabled(false)
+                        .createExtractors(uri, cleanHeaders)
+                    return arrayOf(com.replayer.player.avi.AviExtractor(), *defaultExtractors)
                 }
                 return DefaultExtractorsFactory()
                     .setConstantBitrateSeekingEnabled(false)
-                    .createExtractors(effectiveUri, cleanHeaders)
+                    .createExtractors(uri, responseHeaders)
             }
         }
 

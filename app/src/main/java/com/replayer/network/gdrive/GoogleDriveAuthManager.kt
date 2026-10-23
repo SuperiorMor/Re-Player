@@ -34,6 +34,7 @@ class GoogleDriveAuthManager(private val context: Context) {
 
         // Built-in pre-configured Client ID
         const val DEFAULT_CLIENT_ID = "673747062826-9rlftnhrpuqspo97jahao1n2172efmnh.apps.googleusercontent.com"
+        const val DEFAULT_CLIENT_SECRET = ""
     }
 
     fun getSavedAccessToken(): String? = prefs.getString("access_token", null)
@@ -45,6 +46,15 @@ class GoogleDriveAuthManager(private val context: Context) {
 
     fun saveClientId(clientId: String) {
         prefs.edit().putString("gdrive_client_id", clientId.trim()).apply()
+    }
+
+    fun getSavedClientSecret(): String {
+        val custom = prefs.getString("gdrive_client_secret", "") ?: ""
+        return if (custom.isNotBlank()) custom else DEFAULT_CLIENT_SECRET
+    }
+
+    fun saveClientSecret(secret: String) {
+        prefs.edit().putString("gdrive_client_secret", secret.trim()).apply()
     }
 
     fun saveTokens(accessToken: String, refreshToken: String?) {
@@ -98,12 +108,13 @@ class GoogleDriveAuthManager(private val context: Context) {
         intervalSec: Int = 5,
         maxRetries: Int = 120
     ): TokenResponse? = withContext(Dispatchers.IO) {
+        val effectiveSecret = clientSecret.ifBlank { getSavedClientSecret() }
         val formBuilder = FormBody.Builder()
             .add("client_id", clientId.trim())
             .add("device_code", deviceCode)
             .add("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
-        if (clientSecret.isNotBlank()) {
-            formBuilder.add("client_secret", clientSecret.trim())
+        if (effectiveSecret.isNotBlank()) {
+            formBuilder.add("client_secret", effectiveSecret.trim())
         }
         val form = formBuilder.build()
 

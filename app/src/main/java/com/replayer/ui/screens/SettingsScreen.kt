@@ -106,6 +106,7 @@ fun SettingsScreen(
     // Google Drive Client ID Dialog & Device Code
     var showClientIdDialog by remember { mutableStateOf(false) }
     var clientIdInput by remember { mutableStateOf(authManager.getSavedClientId()) }
+    var clientSecretInput by remember { mutableStateOf(authManager.getSavedClientSecret()) }
     var deviceCodeInfo by remember { mutableStateOf<DeviceCodeResponse?>(null) }
     var isPollingDriveAuth by remember { mutableStateOf(false) }
     var driveErrorMessage by remember { mutableStateOf<String?>(null) }
@@ -143,7 +144,10 @@ fun SettingsScreen(
 
     fun startDriveDeviceCodeFlow() {
         val clientId = authManager.getSavedClientId()
-        if (clientId.isBlank()) {
+        val clientSecret = authManager.getSavedClientSecret()
+        if (clientId.isBlank() || clientSecret.isBlank()) {
+            clientIdInput = clientId
+            clientSecretInput = clientSecret
             showClientIdDialog = true
             return
         }
@@ -158,12 +162,17 @@ fun SettingsScreen(
                     val token = authManager.pollForToken(
                         clientId = clientId,
                         deviceCode = info.device_code,
+                        clientSecret = clientSecret,
                         intervalSec = info.interval.coerceAtLeast(5)
                     )
                     isPollingDriveAuth = false
                     deviceCodeInfo = null
                     if (token != null && !token.access_token.isNullOrBlank()) {
                         driveErrorMessage = null
+                    } else if (token != null && !token.error_description.isNullOrBlank()) {
+                        driveErrorMessage = token.error_description
+                    } else if (token != null && !token.error.isNullOrBlank()) {
+                        driveErrorMessage = "Ошибка Google: ${token.error}"
                     } else {
                         driveErrorMessage = "Время ожидания авторизации истекло. Попробуйте снова."
                     }
@@ -471,6 +480,7 @@ fun SettingsScreen(
                             TvFocusCard(
                                 onClick = {
                                     clientIdInput = authManager.getSavedClientId()
+                                    clientSecretInput = authManager.getSavedClientSecret()
                                     showClientIdDialog = true
                                 },
                                 modifier = Modifier
@@ -478,7 +488,7 @@ fun SettingsScreen(
                                     .height(44.dp)
                             ) {
                                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    Text(text = "Свой ID", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
+                                    Text(text = "Ключи API", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
                                 }
                             }
                         }
@@ -745,7 +755,7 @@ fun SettingsScreen(
         Dialog(onDismissRequest = { showClientIdDialog = false }) {
             Box(
                 modifier = Modifier
-                    .width(520.dp)
+                    .width(540.dp)
                     .clip(RoundedCornerShape(20.dp))
                     .background(DarkCard)
                     .border(1.dp, AccentCyan.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
@@ -759,18 +769,16 @@ fun SettingsScreen(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "Для безопасного подключения Google Drive на ТВ требуется бесплатный OAuth Client ID:\n" +
-                                "1. Откройте console.cloud.google.com на телефоне или ПК\n" +
-                                "2. Создайте проект и включите 'Google Drive API'\n" +
-                                "3. В 'Учетные данные' создайте 'OAuth Client ID' (тип: 'Телевизоры и устройства с ограниченным вводом')\n" +
-                                "4. Вставьте Client ID ниже:",
+                        text = "Для подключения Google Drive требуются данные из Google Cloud Console (раздел «Учетные данные» -> TV client 1):",
                         style = MaterialTheme.typography.bodySmall,
                         color = TextSecondary,
                         lineHeight = 18.sp
                     )
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
 
+                    Text(text = "Client ID:", style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
+                    Spacer(modifier = Modifier.height(4.dp))
                     OutlinedTextField(
                         value = clientIdInput,
                         onValueChange = { clientIdInput = it },
@@ -778,6 +786,26 @@ fun SettingsScreen(
                         singleLine = true,
                         placeholder = {
                             Text("123456789-abc.apps.googleusercontent.com", color = TextSecondary.copy(alpha = 0.5f), fontSize = 12.sp)
+                        },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = AccentCyan,
+                            unfocusedBorderColor = DarkSurface,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        )
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text(text = "Client Secret (начинается на GOCSPX-):", style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    OutlinedTextField(
+                        value = clientSecretInput,
+                        onValueChange = { clientSecretInput = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        placeholder = {
+                            Text("GOCSPX-...", color = TextSecondary.copy(alpha = 0.5f), fontSize = 12.sp)
                         },
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = AccentCyan,
@@ -809,6 +837,7 @@ fun SettingsScreen(
                         TvFocusCard(
                             onClick = {
                                 authManager.saveClientId(clientIdInput)
+                                authManager.saveClientSecret(clientSecretInput)
                                 showClientIdDialog = false
                                 startDriveDeviceCodeFlow()
                             },
@@ -936,6 +965,14 @@ fun SettingsScreen(
 }
 
 private fun getFriendlyChangelog(version: String, rawChangelog: String): List<String> {
+    if (version.contains("0.2.4")) {
+        return listOf(
+            "Мгновенный «Назад»: Одно нажатие кнопки «Назад» сразу скрывает панель управления плеера без лишних кликов.",
+            "Полный запуск AVI: Устранено зависание картинки — видео в формате .avi теперь непрерывно играет со звуком.",
+            "Подключение Google Drive: Добавлена поддержка Client Secret, код больше не сбрасывается, а телевизор успешно авторизуется."
+        )
+    }
+
     if (version.contains("0.2.3")) {
         return listOf(
             "Память просмотренного: При выходе из видео курсор точно остаётся на этом файле.",
