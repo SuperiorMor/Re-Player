@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Forward10
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Replay10
+import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -39,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -46,9 +48,6 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
 import androidx.tv.material3.ExperimentalTvMaterial3Api
-import androidx.tv.material3.Icon
-import androidx.tv.material3.IconButton
-import androidx.tv.material3.IconButtonDefaults
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.replayer.model.AudioTrackInfo
@@ -57,10 +56,8 @@ import com.replayer.model.SubtitleTrackInfo
 import com.replayer.player.RePlayerEngine
 import com.replayer.ui.components.TvFocusCard
 import com.replayer.ui.theme.AccentCyan
-import com.replayer.ui.theme.DarkBackground
 import com.replayer.ui.theme.SurfaceDark
 import com.replayer.ui.theme.TextPrimary
-import com.replayer.ui.theme.TextSecondary
 import kotlinx.coroutines.delay
 
 @OptIn(UnstableApi::class)
@@ -213,53 +210,45 @@ fun PlayerScreen(
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        IconButton(
-                            onClick = { engine.seekRelative(-10000) },
-                            colors = IconButtonDefaults.colors(focusedContainerColor = AccentCyan)
-                        ) {
-                            Icon(Icons.Default.Replay10, contentDescription = "Rewind 10s")
-                        }
+                        TvPlayerIconButton(
+                            icon = Icons.Default.Replay10,
+                            contentDescription = "Rewind 10s",
+                            onClick = { engine.seekRelative(-10000) }
+                        )
 
-                        Spacer(modifier = Modifier.width(24.dp))
+                        Spacer(modifier = Modifier.width(20.dp))
 
-                        IconButton(
-                            onClick = { engine.togglePlayPause() },
-                            colors = IconButtonDefaults.colors(focusedContainerColor = AccentCyan)
-                        ) {
-                            Icon(
-                                if (playerState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                contentDescription = "Play/Pause"
-                            )
-                        }
+                        TvPlayerIconButton(
+                            icon = if (playerState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = "Play/Pause",
+                            onClick = { engine.togglePlayPause() }
+                        )
 
-                        Spacer(modifier = Modifier.width(24.dp))
+                        Spacer(modifier = Modifier.width(20.dp))
 
-                        IconButton(
-                            onClick = { engine.seekRelative(10000) },
-                            colors = IconButtonDefaults.colors(focusedContainerColor = AccentCyan)
-                        ) {
-                            Icon(Icons.Default.Forward10, contentDescription = "Forward 10s")
-                        }
+                        TvPlayerIconButton(
+                            icon = Icons.Default.Forward10,
+                            contentDescription = "Forward 10s",
+                            onClick = { engine.seekRelative(10000) }
+                        )
 
-                        Spacer(modifier = Modifier.width(48.dp))
+                        Spacer(modifier = Modifier.width(36.dp))
 
                         // Audio Track Selector Button
-                        IconButton(
-                            onClick = { showAudioDialog = true },
-                            colors = IconButtonDefaults.colors(focusedContainerColor = AccentCyan)
-                        ) {
-                            Icon(Icons.Default.Audiotrack, contentDescription = "Аудиодорожки")
-                        }
+                        TvPlayerIconButton(
+                            icon = Icons.Default.Audiotrack,
+                            contentDescription = "Аудиодорожки",
+                            onClick = { showAudioDialog = true }
+                        )
 
                         Spacer(modifier = Modifier.width(16.dp))
 
                         // Subtitle Track Selector Button
-                        IconButton(
-                            onClick = { showSubtitleDialog = true },
-                            colors = IconButtonDefaults.colors(focusedContainerColor = AccentCyan)
-                        ) {
-                            Icon(Icons.Default.ClosedCaption, contentDescription = "Субтитры")
-                        }
+                        TvPlayerIconButton(
+                            icon = Icons.Default.ClosedCaption,
+                            contentDescription = "Субтитры",
+                            onClick = { showSubtitleDialog = true }
+                        )
                     }
                 }
             }
@@ -288,6 +277,32 @@ fun PlayerScreen(
                     showSubtitleDialog = false
                 },
                 onDismiss = { showSubtitleDialog = false }
+            )
+        }
+    }
+}
+
+@Composable
+fun TvPlayerIconButton(
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    TvFocusCard(
+        onClick = onClick,
+        modifier = modifier
+            .width(52.dp)
+            .height(52.dp)
+    ) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = contentDescription,
+                tint = TextPrimary
             )
         }
     }

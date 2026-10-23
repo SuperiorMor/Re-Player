@@ -112,7 +112,7 @@ class RePlayerEngine(private val context: Context) {
             val group = tracks.groups[groupIndex]
             if (group.type == C.TRACK_TYPE_AUDIO && groupIndex == track.groupIndex) {
                 val trackGroup = group.mediaTrackGroup
-                trackSelector.parameters = trackSelector.buildUponParameters()
+                trackSelector.parameters = trackSelector.parameters.buildUpon()
                     .setOverrideForType(TrackSelectionOverride(trackGroup, listOf(track.index)))
                     .build()
                 _playerState.value = _playerState.value.copy(selectedAudioTrackId = track.id)
@@ -124,7 +124,7 @@ class RePlayerEngine(private val context: Context) {
     fun selectSubtitleTrack(track: SubtitleTrackInfo?) {
         if (track == null) {
             // Disable subtitles
-            trackSelector.parameters = trackSelector.buildUponParameters()
+            trackSelector.parameters = trackSelector.parameters.buildUpon()
                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
                 .build()
             _playerState.value = _playerState.value.copy(selectedSubtitleTrackId = null)
@@ -134,7 +134,7 @@ class RePlayerEngine(private val context: Context) {
                 val group = tracks.groups[groupIndex]
                 if (group.type == C.TRACK_TYPE_TEXT && groupIndex == track.groupIndex) {
                     val trackGroup = group.mediaTrackGroup
-                    trackSelector.parameters = trackSelector.buildUponParameters()
+                    trackSelector.parameters = trackSelector.parameters.buildUpon()
                         .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
                         .setOverrideForType(TrackSelectionOverride(trackGroup, listOf(track.index)))
                         .build()
