@@ -228,11 +228,12 @@ fun SettingsScreen(
         )
 
         if (connectedUpnpDevice != null) {
-            TvFocusCard(
-                onClick = {},
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(84.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(DarkCard)
+                    .padding(vertical = 6.dp)
             ) {
                 Row(
                     modifier = Modifier
@@ -383,15 +384,16 @@ fun SettingsScreen(
             modifier = Modifier.padding(bottom = 12.dp)
         )
 
-        TvFocusCard(
-            onClick = {},
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(if (deviceCodeInfo != null) 180.dp else 90.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(DarkCard)
+                .padding(vertical = 4.dp)
         ) {
             Column(
                 modifier = Modifier
-                    .fillMaxSize()
+                    .fillMaxWidth()
                     .padding(20.dp),
                 verticalArrangement = Arrangement.Center
             ) {
