@@ -54,6 +54,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import coil.compose.AsyncImage
 import com.replayer.data.ServerConfigManager
 import com.replayer.model.DeviceCodeResponse
 import com.replayer.model.UpnpDevice
@@ -431,9 +432,8 @@ fun SettingsScreen(
                                     )
                                 }
                             }
-                            val savedClientId = authManager.getSavedClientId()
                             Text(
-                                text = if (savedClientId.isNotBlank()) "Client ID: ${savedClientId.take(16)}..." else "OAuth Client ID: не задан",
+                                text = "Облачное хранилище видео и медиафайлов",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = TextSecondary
                             )
@@ -441,20 +441,6 @@ fun SettingsScreen(
                     }
 
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        TvFocusCard(
-                            onClick = {
-                                clientIdInput = authManager.getSavedClientId()
-                                showClientIdDialog = true
-                            },
-                            modifier = Modifier
-                                .width(150.dp)
-                                .height(44.dp)
-                        ) {
-                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text(text = "Настроить ID", style = MaterialTheme.typography.bodyMedium)
-                            }
-                        }
-
                         if (isGdriveAuthenticated) {
                             TvFocusCard(
                                 onClick = {
@@ -473,11 +459,25 @@ fun SettingsScreen(
                             TvFocusCard(
                                 onClick = { startDriveDeviceCodeFlow() },
                                 modifier = Modifier
-                                    .width(160.dp)
+                                    .width(170.dp)
                                     .height(44.dp)
                             ) {
                                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    Text(text = "Получить код", color = AccentCyan, style = MaterialTheme.typography.bodyMedium)
+                                    Text(text = "Подключить", color = AccentCyan, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                                }
+                            }
+
+                            TvFocusCard(
+                                onClick = {
+                                    clientIdInput = authManager.getSavedClientId()
+                                    showClientIdDialog = true
+                                },
+                                modifier = Modifier
+                                    .width(130.dp)
+                                    .height(44.dp)
+                            ) {
+                                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Text(text = "Свой ID", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
                                 }
                             }
                         }
@@ -489,26 +489,71 @@ fun SettingsScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
+                            .clip(RoundedCornerShape(12.dp))
                             .background(DarkSurface)
-                            .padding(12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                            .padding(16.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
+                        // QR code for quick scanning with phone camera
+                        Box(
+                            modifier = Modifier
+                                .size(110.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color.White)
+                                .padding(4.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            val qrUrl = "https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=https://www.google.com/device"
+                            AsyncImage(
+                                model = qrUrl,
+                                contentDescription = "QR-код для входа",
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(20.dp))
+
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Откройте на телефоне/ПК: google.com/device",
+                                text = "1. Наведите камеру телефона на QR-код (или откройте google.com/device)",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = TextPrimary
                             )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "2. Введите код: ",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = TextSecondary
+                                )
+                                Text(
+                                    text = deviceCodeInfo!!.user_code,
+                                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                    color = AccentCyan
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "Код подтверждения: ${deviceCodeInfo!!.user_code}",
-                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                                color = AccentCyan
+                                text = "3. Нажмите «Разрешить» на телефоне — телевизор подключится автоматически",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary
                             )
                         }
+
                         if (isPollingDriveAuth) {
-                            CircularProgressIndicator(modifier = Modifier.size(24.dp), color = AccentCyan, strokeWidth = 2.dp)
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(28.dp),
+                                    color = AccentCyan,
+                                    strokeWidth = 3.dp
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "Ожидание...",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextSecondary
+                                )
+                            }
                         }
                     }
                 }

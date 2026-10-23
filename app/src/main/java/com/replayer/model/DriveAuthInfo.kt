@@ -7,6 +7,7 @@ data class DeviceCodeResponse(
     val device_code: String,
     val user_code: String,
     val verification_url: String,
+    val verification_url_complete: String? = null,
     val expires_in: Int,
     val interval: Int
 )

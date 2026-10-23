@@ -16,7 +16,11 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import com.replayer.model.AudioTrackInfo
 import com.replayer.model.MediaItem
+import com.replayer.model.MediaSourceType
 import com.replayer.model.SubtitleTrackInfo
+import com.replayer.network.gdrive.GoogleDriveAuthManager
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -112,7 +116,25 @@ class RePlayerEngine(private val context: Context) {
             errorMessage = null
         )
 
-        exoPlayer.setMediaItem(mediaBuilder.build())
+        val finalHeaders = headers.toMutableMap()
+        if (mediaItem.sourceType == MediaSourceType.GOOGLE_DRIVE) {
+            val token = GoogleDriveAuthManager(context).getSavedAccessToken()
+            if (!token.isNullOrBlank()) {
+                finalHeaders["Authorization"] = "Bearer $token"
+            }
+        }
+
+        if (finalHeaders.isNotEmpty()) {
+            val dataSourceFactory = DefaultHttpDataSource.Factory()
+                .setAllowCrossProtocolRedirects(true)
+                .setDefaultRequestProperties(finalHeaders)
+            val mediaSourceFactory = DefaultMediaSourceFactory(context)
+                .setDataSourceFactory(dataSourceFactory)
+            exoPlayer.setMediaSource(mediaSourceFactory.createMediaSource(mediaBuilder.build()))
+        } else {
+            exoPlayer.setMediaItem(mediaBuilder.build())
+        }
+
         exoPlayer.prepare()
         exoPlayer.playWhenReady = true
     }

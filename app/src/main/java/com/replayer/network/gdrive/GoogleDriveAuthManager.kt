@@ -20,12 +20,18 @@ class GoogleDriveAuthManager(private val context: Context) {
         // Standard Google OAuth2 Device Endpoint
         private const val DEVICE_CODE_URL = "https://oauth2.googleapis.com/device/code"
         private const val TOKEN_URL = "https://oauth2.googleapis.com/token"
-        private const val SCOPE = "https://www.googleapis.com/auth/drive.readonly"
+        private const val SCOPE = "https://www.googleapis.com/auth/drive.file email profile"
+
+        // Built-in pre-configured Client ID
+        const val DEFAULT_CLIENT_ID = "673747062826-9rlftnhrpuqspo97jahao1n2172efmnh.apps.googleusercontent.com"
     }
 
     fun getSavedAccessToken(): String? = prefs.getString("access_token", null)
 
-    fun getSavedClientId(): String = prefs.getString("gdrive_client_id", "") ?: ""
+    fun getSavedClientId(): String {
+        val custom = prefs.getString("gdrive_client_id", "") ?: ""
+        return if (custom.isNotBlank()) custom else DEFAULT_CLIENT_ID
+    }
 
     fun saveClientId(clientId: String) {
         prefs.edit().putString("gdrive_client_id", clientId.trim()).apply()
@@ -43,10 +49,11 @@ class GoogleDriveAuthManager(private val context: Context) {
         prefs.edit().remove("access_token").remove("refresh_token").apply()
     }
 
-    suspend fun requestDeviceCode(clientId: String): Result<DeviceCodeResponse> = withContext(Dispatchers.IO) {
-        if (clientId.isBlank() || clientId.contains("YOUR_TV_CLIENT_ID")) {
+    suspend fun requestDeviceCode(clientId: String = getSavedClientId()): Result<DeviceCodeResponse> = withContext(Dispatchers.IO) {
+        val actualClientId = clientId.ifBlank { getSavedClientId() }
+        if (actualClientId.isBlank() || actualClientId.contains("YOUR_TV_CLIENT_ID")) {
             return@withContext Result.failure(
-                Exception("Укажите ваш OAuth 2.0 Client ID (тип: TVs and Limited Input devices) из Google Cloud Console.")
+                Exception("Client ID не настроен.")
             )
         }
 
