@@ -21,13 +21,22 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
 
+    - name: Set up Android SDK
+      uses: android-actions/setup-android@v3
+
     - name: Setup Gradle 8.10
       uses: gradle/actions/setup-gradle@v4
       with:
         gradle-version: '8.10.2'
 
     - name: Build Debug APK
-      run: gradle assembleDebug --stacktrace
+      run: |
+        gradle assembleDebug --no-daemon --console=plain 2>&1 | tee build.log || {
+          echo "==================== BUILD FAILED ===================="
+          grep -C 3 -E "e: |error:|FAILED|FAILURE" build.log || tail -n 80 build.log
+          echo "======================================================"
+          exit 1
+        }
 
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
@@ -35,3 +44,10 @@ jobs:
         name: RePlayer-debug-apk
         path: app/build/outputs/apk/debug/*.apk
         retention-days: 14
+
+    - name: Upload Build Log on Failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-failure-log
+        path: build.log
