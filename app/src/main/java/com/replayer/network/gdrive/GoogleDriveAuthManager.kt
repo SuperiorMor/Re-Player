@@ -126,8 +126,7 @@ class GoogleDriveAuthManager(private val context: Context) {
             }
         } catch (e: ApiException) {
             val msg = when (e.statusCode) {
-                10 -> "Ошибка 10: Убедитесь, что в Google Cloud Console добавлен Android-клиент с пакетом com.replayer и SHA-1: 4E:0C:8E:57:04:CB:77:F9:BE:51:8E:80:27:C8:76:7B:16:EB:69:83"
-                12500 -> "Ошибка 12500: Проверьте экран согласия OAuth в Google Cloud Console"
+                10, 12500 -> "Ошибка ${e.statusCode}: В Google Cloud Console для com.replayer должен быть SHA-1: 94:D5:63:14:00:21:6E:F3:9C:A1:98:B1:94:0A:FA:7E:0E:3A:C6:0D"
                 else -> "Ошибка входа Google (${e.statusCode}): ${e.localizedMessage}"
             }
             Result.failure(Exception(msg))
