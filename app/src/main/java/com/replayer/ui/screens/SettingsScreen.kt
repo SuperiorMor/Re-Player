@@ -4,6 +4,7 @@ import android.accounts.AccountManager
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -115,6 +116,34 @@ fun SettingsScreen(
     var savedDriveEmail by remember { mutableStateOf(authManager.getSavedAccountEmail()) }
     var driveErrorMessage by remember { mutableStateOf<String?>(null) }
     var pendingAccountName by remember { mutableStateOf<String?>(null) }
+    var requestTokenFn by remember { mutableStateOf<((String) -> Unit)?>(null) }
+
+    var pendingConsentIntent by remember { mutableStateOf<Intent?>(null) }
+
+    val consentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val account = pendingAccountName
+        if (account != null && (result.resultCode == Activity.RESULT_OK || result.resultCode == Activity.RESULT_CANCELED)) {
+            requestTokenFn?.invoke(account)
+        } else {
+            isDriveSigningIn = false
+            driveErrorMessage = "Для подключения Google Диска необходимо нажать «Разрешить»"
+        }
+    }
+
+    LaunchedEffect(pendingConsentIntent) {
+        val intent = pendingConsentIntent
+        if (intent != null) {
+            try {
+                consentLauncher.launch(intent)
+            } catch (launchEx: Exception) {
+                isDriveSigningIn = false
+                driveErrorMessage = "Не удалось открыть подтверждение: ${launchEx.localizedMessage}"
+            }
+            pendingConsentIntent = null
+        }
+    }
 
     fun requestDriveToken(accountName: String) {
         isDriveSigningIn = true
@@ -128,12 +157,7 @@ fun SettingsScreen(
                 driveErrorMessage = null
             }.onFailure { err ->
                 if (err is UserConsentRequiredException && err.consentIntent != null) {
-                    try {
-                        consentLauncher.launch(err.consentIntent)
-                    } catch (launchEx: Exception) {
-                        isDriveSigningIn = false
-                        driveErrorMessage = "Не удалось открыть подтверждение: ${launchEx.localizedMessage}"
-                    }
+                    pendingConsentIntent = err.consentIntent
                 } else {
                     isDriveSigningIn = false
                     driveErrorMessage = err.localizedMessage ?: "Ошибка получения доступа Google"
@@ -142,16 +166,8 @@ fun SettingsScreen(
         }
     }
 
-    val consentLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        val account = pendingAccountName
-        if (account != null && (result.resultCode == Activity.RESULT_OK || result.resultCode == Activity.RESULT_CANCELED)) {
-            requestDriveToken(account)
-        } else {
-            isDriveSigningIn = false
-            driveErrorMessage = "Для подключения Google Диска необходимо нажать «Разрешить»"
-        }
+    LaunchedEffect(Unit) {
+        requestTokenFn = { name -> requestDriveToken(name) }
     }
 
     val chooseAccountLauncher = rememberLauncherForActivityResult(
