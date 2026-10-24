@@ -1,7 +1,11 @@
 package com.replayer.ui.screens
 
+import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -56,10 +60,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
 import com.replayer.data.ServerConfigManager
-import com.replayer.model.DeviceCodeResponse
 import com.replayer.model.UpnpDevice
 import com.replayer.network.gdrive.GoogleDriveAuthManager
 import com.replayer.network.upnp.SsdpDiscovery
@@ -106,10 +108,43 @@ fun SettingsScreen(
     var discoveredDevices by remember { mutableStateOf<List<UpnpDevice>>(emptyList()) }
     var isScanningUpnp by remember { mutableStateOf(false) }
 
-    // Google Drive Device Code Flow
-    var deviceCodeInfo by remember { mutableStateOf<DeviceCodeResponse?>(null) }
-    var isPollingDriveAuth by remember { mutableStateOf(false) }
+    // Google Drive Sign-In state
+    var isDriveSigningIn by remember { mutableStateOf(false) }
+    var savedDriveEmail by remember { mutableStateOf(authManager.getSavedAccountEmail()) }
     var driveErrorMessage by remember { mutableStateOf<String?>(null) }
+
+    val signInLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        isDriveSigningIn = true
+        driveErrorMessage = null
+        scope.launch {
+            val authResult = authManager.handleSignInResult(result.data)
+            authResult.onSuccess {
+                savedDriveEmail = authManager.getSavedAccountEmail()
+                driveErrorMessage = null
+                isDriveSigningIn = false
+            }.onFailure { err ->
+                driveErrorMessage = err.localizedMessage ?: "Ошибка авторизации Google"
+                isDriveSigningIn = false
+            }
+        }
+    }
+
+    fun startNativeGoogleSignIn() {
+        driveErrorMessage = null
+        val act = context.findActivity()
+        if (act == null) {
+            driveErrorMessage = "Не удалось открыть окно авторизации Google"
+            return
+        }
+        try {
+            val client = authManager.getGoogleSignInClient(act)
+            signInLauncher.launch(client.signInIntent)
+        } catch (e: Exception) {
+            driveErrorMessage = "Ошибка запуска входа: ${e.localizedMessage}"
+        }
+    }
 
     // App updates state
     var updateUiState by remember { mutableStateOf<UpdateUiState>(UpdateUiState.Idle) }
@@ -148,41 +183,6 @@ fun SettingsScreen(
             discovery.discoverDevices().collect { list ->
                 discoveredDevices = list
                 isScanningUpnp = false
-            }
-        }
-    }
-
-    fun startDriveDeviceCodeFlow() {
-        val clientId = authManager.getSavedClientId()
-        val clientSecret = authManager.getSavedClientSecret()
-
-        driveErrorMessage = null
-        scope.launch {
-            val result = authManager.requestDeviceCode(clientId)
-            result.onSuccess { info ->
-                deviceCodeInfo = info
-                isPollingDriveAuth = true
-                scope.launch {
-                    val token = authManager.pollForToken(
-                        clientId = clientId,
-                        deviceCode = info.device_code,
-                        clientSecret = clientSecret,
-                        intervalSec = info.interval.coerceAtLeast(5)
-                    )
-                    isPollingDriveAuth = false
-                    deviceCodeInfo = null
-                    if (token != null && !token.access_token.isNullOrBlank()) {
-                        driveErrorMessage = null
-                    } else if (token != null && !token.error_description.isNullOrBlank()) {
-                        driveErrorMessage = token.error_description
-                    } else if (token != null && !token.error.isNullOrBlank()) {
-                        driveErrorMessage = "Ошибка Google: ${token.error}"
-                    } else {
-                        driveErrorMessage = "Время ожидания авторизации истекло. Попробуйте снова."
-                    }
-                }
-            }.onFailure { err ->
-                driveErrorMessage = err.localizedMessage ?: "Ошибка запроса кода"
             }
         }
     }
@@ -447,19 +447,27 @@ fun SettingsScreen(
                                     )
                                 }
                             }
+                            Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = "Облачное хранилище видео и медиафайлов",
+                                text = if (isGdriveAuthenticated && !savedDriveEmail.isNullOrBlank()) {
+                                    savedDriveEmail!!
+                                } else {
+                                    "Вход через аккаунт Google на ТВ — доступ ко всем вашим видео"
+                                },
                                 style = MaterialTheme.typography.bodySmall,
-                                color = TextSecondary
+                                color = if (isGdriveAuthenticated && !savedDriveEmail.isNullOrBlank()) AccentCyan else TextSecondary
                             )
                         }
                     }
+
+                    Spacer(modifier = Modifier.width(16.dp))
 
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         if (isGdriveAuthenticated) {
                             TvFocusCard(
                                 onClick = {
                                     authManager.clearAuth()
+                                    savedDriveEmail = null
                                 },
                                 modifier = Modifier
                                     .width(140.dp)
@@ -469,90 +477,33 @@ fun SettingsScreen(
                                     Text(text = "Отключить", color = Color(0xFFFF5252), style = MaterialTheme.typography.bodyMedium)
                                 }
                             }
-                        } else if (deviceCodeInfo == null) {
+                        } else {
                             TvFocusCard(
-                                onClick = { startDriveDeviceCodeFlow() },
+                                onClick = {
+                                    if (!isDriveSigningIn) {
+                                        startNativeGoogleSignIn()
+                                    }
+                                },
                                 modifier = Modifier
-                                    .width(170.dp)
+                                    .width(200.dp)
                                     .height(44.dp)
                             ) {
                                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    Text(text = "Подключить", color = AccentCyan, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                                    if (isDriveSigningIn) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(20.dp),
+                                            color = AccentCyan,
+                                            strokeWidth = 2.dp
+                                        )
+                                    } else {
+                                        Text(
+                                            text = "Войти через Google",
+                                            color = AccentCyan,
+                                            fontWeight = FontWeight.Bold,
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
+                                    }
                                 }
-                            }
-                        }
-                    }
-                }
-
-                if (deviceCodeInfo != null) {
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(DarkSurface)
-                            .padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // QR code for quick scanning with phone camera
-                        Box(
-                            modifier = Modifier
-                                .size(110.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color.White)
-                                .padding(4.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            val qrUrl = "https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=https://www.google.com/device"
-                            AsyncImage(
-                                model = qrUrl,
-                                contentDescription = "QR-код для входа",
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.width(20.dp))
-
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "1. Наведите камеру телефона на QR-код (или откройте google.com/device)",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = TextPrimary
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = "2. Введите код: ",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = TextSecondary
-                                )
-                                Text(
-                                    text = deviceCodeInfo!!.user_code,
-                                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                                    color = AccentCyan
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "3. Нажмите «Разрешить» на телефоне — телевизор подключится автоматически",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = TextSecondary
-                            )
-                        }
-
-                        if (isPollingDriveAuth) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(28.dp),
-                                    color = AccentCyan,
-                                    strokeWidth = 3.dp
-                                )
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text(
-                                    text = "Ожидание...",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = TextSecondary
-                                )
                             }
                         }
                     }
@@ -869,6 +820,14 @@ fun SettingsScreen(
 }
 
 private fun getFriendlyChangelog(version: String, rawChangelog: String): List<String> {
+    if (version.contains("0.3.0")) {
+        return listOf(
+            "Вход в Google Диск в 1 клик на ТВ: Нативная авторизация через аккаунт Google прямо на телевизоре без ввода кодов и телефона.",
+            "Полный доступ ко всем файлам: Чтение всех ваших папок и видеоархивов на Google Диске благодаря правам drive.readonly.",
+            "Мгновенное переподключение: Автоматическое фоновое обновление токена Google Play Services."
+        )
+    }
+
     if (version.contains("0.2.9")) {
         return listOf(
             "Исправление Client Secret: Скорректирован секретный ключ Google OAuth (устранена ошибка «client secret is invalid»).",
@@ -973,4 +932,13 @@ private fun getCurrentAppVersion(context: Context): String {
     } catch (e: Exception) {
         "0.1.3"
     }
+}
+
+private fun Context.findActivity(): Activity? {
+    var ctx = this
+    while (ctx is ContextWrapper) {
+        if (ctx is Activity) return ctx
+        ctx = ctx.baseContext
+    }
+    return null
 }

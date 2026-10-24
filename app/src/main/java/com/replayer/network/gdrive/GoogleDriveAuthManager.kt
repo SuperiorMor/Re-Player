@@ -1,6 +1,16 @@
 package com.replayer.network.gdrive
 
+import android.accounts.Account
+import android.app.Activity
 import android.content.Context
+import android.content.Intent
+import com.google.android.gms.auth.GoogleAuthUtil
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInAccount
+import com.google.android.gms.auth.api.signin.GoogleSignInClient
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.api.ApiException
+import com.google.android.gms.common.api.Scope
 import com.replayer.model.DeviceCodeResponse
 import com.replayer.model.TokenResponse
 import kotlinx.coroutines.Dispatchers
@@ -88,12 +98,80 @@ class GoogleDriveAuthManager(private val context: Context) {
         _isAuthenticatedFlow.value = true
     }
 
+    fun getGoogleSignInClient(activity: Activity): GoogleSignInClient {
+        val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+            .requestEmail()
+            .requestScopes(Scope("https://www.googleapis.com/auth/drive.readonly"))
+            .build()
+        return GoogleSignIn.getClient(activity, gso)
+    }
+
+    suspend fun handleSignInResult(data: Intent?): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val task = GoogleSignIn.getSignedInAccountFromIntent(data)
+            val account: GoogleSignInAccount = task.getResult(ApiException::class.java)
+            val email = account.email ?: ""
+            val androidAccount = account.account ?: Account(email, "com.google")
+            val token = GoogleAuthUtil.getToken(
+                context,
+                androidAccount,
+                "oauth2:https://www.googleapis.com/auth/drive.readonly"
+            )
+            if (!token.isNullOrBlank()) {
+                saveTokens(token, null)
+                prefs.edit().putString("account_email", email).apply()
+                Result.success(token)
+            } else {
+                Result.failure(Exception("Пустой токен авторизации"))
+            }
+        } catch (e: ApiException) {
+            val msg = when (e.statusCode) {
+                10 -> "Ошибка 10: Убедитесь, что в Google Cloud Console добавлен Android-клиент с пакетом com.replayer и SHA-1: 4E:0C:8E:57:04:CB:77:F9:BE:51:8E:80:27:C8:76:7B:16:EB:69:83"
+                12500 -> "Ошибка 12500: Проверьте экран согласия OAuth в Google Cloud Console"
+                else -> "Ошибка входа Google (${e.statusCode}): ${e.localizedMessage}"
+            }
+            Result.failure(Exception(msg))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    fun getSavedAccountEmail(): String? = prefs.getString("account_email", null)
+
     fun clearAuth() {
-        prefs.edit().remove("access_token").remove("refresh_token").apply()
+        prefs.edit().remove("access_token").remove("refresh_token").remove("account_email").apply()
         _isAuthenticatedFlow.value = false
+        try {
+            val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN).build()
+            GoogleSignIn.getClient(context, gso).signOut()
+        } catch (_: Exception) {}
     }
 
     suspend fun refreshAccessToken(): String? = withContext(Dispatchers.IO) {
+        try {
+            val account = GoogleSignIn.getLastSignedInAccount(context)
+            if (account != null) {
+                val oldToken = getSavedAccessToken()
+                if (oldToken != null) {
+                    try {
+                        GoogleAuthUtil.clearToken(context, oldToken)
+                    } catch (_: Exception) {}
+                }
+                val androidAccount = account.account ?: Account(account.email ?: "", "com.google")
+                val newToken = GoogleAuthUtil.getToken(
+                    context,
+                    androidAccount,
+                    "oauth2:https://www.googleapis.com/auth/drive.readonly"
+                )
+                if (!newToken.isNullOrBlank()) {
+                    saveTokens(newToken, null)
+                    return@withContext newToken
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("DriveAuth", "Refresh via GoogleAuthUtil failed: ${e.message}")
+        }
+
         val refreshToken = prefs.getString("refresh_token", null) ?: return@withContext null
         val clientId = getSavedClientId()
         val clientSecret = getSavedClientSecret()
