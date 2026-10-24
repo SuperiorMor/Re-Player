@@ -1,5 +1,6 @@
 package com.replayer.ui.screens
 
+import android.accounts.AccountManager
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
@@ -64,6 +65,7 @@ import kotlinx.coroutines.delay
 import com.replayer.data.ServerConfigManager
 import com.replayer.model.UpnpDevice
 import com.replayer.network.gdrive.GoogleDriveAuthManager
+import com.replayer.network.gdrive.UserConsentRequiredException
 import com.replayer.network.upnp.SsdpDiscovery
 import com.replayer.ui.components.TvFocusCard
 import com.replayer.ui.theme.AccentCyan
@@ -112,37 +114,66 @@ fun SettingsScreen(
     var isDriveSigningIn by remember { mutableStateOf(false) }
     var savedDriveEmail by remember { mutableStateOf(authManager.getSavedAccountEmail()) }
     var driveErrorMessage by remember { mutableStateOf<String?>(null) }
+    var pendingAccountName by remember { mutableStateOf<String?>(null) }
 
-    val signInLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
+    fun requestDriveToken(accountName: String) {
         isDriveSigningIn = true
         driveErrorMessage = null
+        pendingAccountName = accountName
         scope.launch {
-            val authResult = authManager.handleSignInResult(result.data)
-            authResult.onSuccess {
-                savedDriveEmail = authManager.getSavedAccountEmail()
+            val result = authManager.getAccessTokenForAccount(accountName)
+            result.onSuccess {
+                savedDriveEmail = accountName
+                isDriveSigningIn = false
                 driveErrorMessage = null
-                isDriveSigningIn = false
             }.onFailure { err ->
-                driveErrorMessage = err.localizedMessage ?: "Ошибка авторизации Google"
-                isDriveSigningIn = false
+                if (err is UserConsentRequiredException && err.consentIntent != null) {
+                    try {
+                        consentLauncher.launch(err.consentIntent)
+                    } catch (launchEx: Exception) {
+                        isDriveSigningIn = false
+                        driveErrorMessage = "Не удалось открыть подтверждение: ${launchEx.localizedMessage}"
+                    }
+                } else {
+                    isDriveSigningIn = false
+                    driveErrorMessage = err.localizedMessage ?: "Ошибка получения доступа Google"
+                }
             }
+        }
+    }
+
+    val consentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val account = pendingAccountName
+        if (account != null && (result.resultCode == Activity.RESULT_OK || result.resultCode == Activity.RESULT_CANCELED)) {
+            requestDriveToken(account)
+        } else {
+            isDriveSigningIn = false
+            driveErrorMessage = "Для подключения Google Диска необходимо нажать «Разрешить»"
+        }
+    }
+
+    val chooseAccountLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val accountName = result.data?.getStringExtra(AccountManager.KEY_ACCOUNT_NAME)
+        if (!accountName.isNullOrBlank()) {
+            requestDriveToken(accountName)
+        } else {
+            isDriveSigningIn = false
         }
     }
 
     fun startNativeGoogleSignIn() {
         driveErrorMessage = null
-        val act = context.findActivity()
-        if (act == null) {
-            driveErrorMessage = "Не удалось открыть окно авторизации Google"
-            return
-        }
+        isDriveSigningIn = true
         try {
-            val client = authManager.getGoogleSignInClient(act)
-            signInLauncher.launch(client.signInIntent)
+            val chooseIntent = authManager.getChooseAccountIntent()
+            chooseAccountLauncher.launch(chooseIntent)
         } catch (e: Exception) {
-            driveErrorMessage = "Ошибка запуска входа: ${e.localizedMessage}"
+            isDriveSigningIn = false
+            driveErrorMessage = "Не удалось открыть выбор аккаунта: ${e.localizedMessage}"
         }
     }
 
@@ -820,6 +851,14 @@ fun SettingsScreen(
 }
 
 private fun getFriendlyChangelog(version: String, rawChangelog: String): List<String> {
+    if (version.contains("0.3.1")) {
+        return listOf(
+            "Нативный выбор аккаунта Android TV: Использование системного AccountManager вместо мобильного интерфейса — устранена ошибка 12500.",
+            "Прямой запрос разрешений: Окно подтверждения доступа к Google Диску открывается на телевизоре без сбоев.",
+            "Полный доступ к вашим видео: Чтение всех папок Google Диска с автообновлением токена."
+        )
+    }
+
     if (version.contains("0.3.0")) {
         return listOf(
             "Вход в Google Диск в 1 клик на ТВ: Нативная авторизация через аккаунт Google прямо на телевизоре без ввода кодов и телефона.",

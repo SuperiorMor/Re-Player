@@ -1,10 +1,12 @@
 package com.replayer.network.gdrive
 
 import android.accounts.Account
+import android.accounts.AccountManager
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import com.google.android.gms.auth.GoogleAuthUtil
+import com.google.android.gms.auth.UserRecoverableAuthException
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.google.android.gms.auth.api.signin.GoogleSignInClient
@@ -20,6 +22,11 @@ import kotlinx.serialization.json.Json
 import okhttp3.FormBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
+
+class UserConsentRequiredException(
+    val consentIntent: Intent?,
+    val accountName: String
+) : Exception("Требуется подтвердить разрешения Google")
 
 class GoogleDriveAuthManager(private val context: Context) {
     private val client = OkHttpClient()
@@ -98,6 +105,40 @@ class GoogleDriveAuthManager(private val context: Context) {
         _isAuthenticatedFlow.value = true
     }
 
+    fun getChooseAccountIntent(): Intent {
+        return AccountManager.newChooseAccountIntent(
+            null,
+            null,
+            arrayOf("com.google"),
+            null,
+            null,
+            null,
+            null
+        )
+    }
+
+    suspend fun getAccessTokenForAccount(accountName: String): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val account = Account(accountName, "com.google")
+            val token = GoogleAuthUtil.getToken(
+                context,
+                account,
+                "oauth2:https://www.googleapis.com/auth/drive.readonly"
+            )
+            if (!token.isNullOrBlank()) {
+                saveTokens(token, null)
+                prefs.edit().putString("account_email", accountName).apply()
+                Result.success(token)
+            } else {
+                Result.failure(Exception("Пустой токен авторизации"))
+            }
+        } catch (e: UserRecoverableAuthException) {
+            Result.failure(UserConsentRequiredException(e.intent, accountName))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     fun getGoogleSignInClient(activity: Activity): GoogleSignInClient {
         val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
             .requestEmail()
@@ -138,6 +179,12 @@ class GoogleDriveAuthManager(private val context: Context) {
     fun getSavedAccountEmail(): String? = prefs.getString("account_email", null)
 
     fun clearAuth() {
+        val oldToken = getSavedAccessToken()
+        if (oldToken != null) {
+            try {
+                GoogleAuthUtil.clearToken(context, oldToken)
+            } catch (_: Exception) {}
+        }
         prefs.edit().remove("access_token").remove("refresh_token").remove("account_email").apply()
         _isAuthenticatedFlow.value = false
         try {
@@ -148,18 +195,18 @@ class GoogleDriveAuthManager(private val context: Context) {
 
     suspend fun refreshAccessToken(): String? = withContext(Dispatchers.IO) {
         try {
-            val account = GoogleSignIn.getLastSignedInAccount(context)
-            if (account != null) {
+            val email = getSavedAccountEmail()
+            if (!email.isNullOrBlank()) {
                 val oldToken = getSavedAccessToken()
                 if (oldToken != null) {
                     try {
                         GoogleAuthUtil.clearToken(context, oldToken)
                     } catch (_: Exception) {}
                 }
-                val androidAccount = account.account ?: Account(account.email ?: "", "com.google")
+                val account = Account(email, "com.google")
                 val newToken = GoogleAuthUtil.getToken(
                     context,
-                    androidAccount,
+                    account,
                     "oauth2:https://www.googleapis.com/auth/drive.readonly"
                 )
                 if (!newToken.isNullOrBlank()) {
