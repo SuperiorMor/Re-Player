@@ -869,6 +869,14 @@ fun SettingsScreen(
 }
 
 private fun getFriendlyChangelog(version: String, rawChangelog: String): List<String> {
+    if (version.contains("0.2.9")) {
+        return listOf(
+            "Исправление Client Secret: Скорректирован секретный ключ Google OAuth (устранена ошибка «client secret is invalid»).",
+            "Очистка устаревших ключей: Автоматически удалены старые несоответствующие ключи от предыдущих версий.",
+            "Надёжная авторизация: Вход через QR-код на телефоне теперь без ошибок передаёт токен на телевизор."
+        )
+    }
+
     if (version.contains("0.2.8")) {
         return listOf(
             "Google Drive: Вшиты новые параметры подключения (Desktop Client) с поддержкой прямого доступа ко всему диску.",

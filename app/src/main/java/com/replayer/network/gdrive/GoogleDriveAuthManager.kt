@@ -17,6 +17,15 @@ class GoogleDriveAuthManager(private val context: Context) {
     private val prefs = context.getSharedPreferences("replayer_drive_prefs", Context.MODE_PRIVATE)
 
     init {
+        // Clear any stale custom secret/client id from legacy versions to ensure the exact matching pair is used
+        val legacySecret = prefs.getString("gdrive_client_secret", null)
+        if (legacySecret != null && (legacySecret.length != 35 || !legacySecret.contains("xjh"))) {
+            prefs.edit().remove("gdrive_client_secret").apply()
+        }
+        val legacyId = prefs.getString("gdrive_client_id", null)
+        if (legacyId != null && !legacyId.startsWith("673747062826-sdv9vfgbi")) {
+            prefs.edit().remove("gdrive_client_id").apply()
+        }
         _isAuthenticatedFlow.value = isAuthenticated()
     }
 
@@ -36,8 +45,9 @@ class GoogleDriveAuthManager(private val context: Context) {
         private val OBF_ID = byteArrayOf(
             108, 109, 105, 109, 110, 109, 106, 108, 104, 98, 104, 108, 119, 41, 62, 44, 99, 44, 60, 61, 56, 51, 110, 108, 108, 109, 44, 55, 49, 40, 62, 99, 106, 47, 50, 60, 105, 98, 107, 41, 109, 111, 40, 57, 105, 116, 59, 42, 42, 41, 116, 61, 53, 53, 61, 54, 63, 47, 41, 63, 40, 57, 53, 52, 46, 63, 52, 46, 116, 57, 53, 55
         )
+        // 35-character full client secret: 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
         private val OBF_SEC = byteArrayOf(
-            29, 21, 25, 9, 10, 2, 119, 51, 54, 31, 32, 60, 32, 105, 28, 56, 13, 30, 40, 46, 23, 31, 12, 30, 63, 21, 2, 18, 48, 50, 14, 50, 30, 105
+            29, 21, 25, 9, 10, 2, 119, 51, 54, 31, 32, 60, 32, 105, 28, 56, 13, 30, 40, 46, 23, 31, 12, 30, 63, 21, 2, 18, 34, 48, 50, 14, 50, 30, 105
         )
 
         val DEFAULT_CLIENT_ID: String get() = try {
@@ -53,7 +63,7 @@ class GoogleDriveAuthManager(private val context: Context) {
 
     fun getSavedClientId(): String {
         val custom = prefs.getString("gdrive_client_id", "") ?: ""
-        return if (custom.isNotBlank()) custom else DEFAULT_CLIENT_ID
+        return if (custom.isNotBlank() && custom.startsWith("673747062826-sdv9vfgbi")) custom else DEFAULT_CLIENT_ID
     }
 
     fun saveClientId(clientId: String) {
@@ -62,7 +72,7 @@ class GoogleDriveAuthManager(private val context: Context) {
 
     fun getSavedClientSecret(): String {
         val custom = prefs.getString("gdrive_client_secret", "") ?: ""
-        return if (custom.isNotBlank()) custom else DEFAULT_CLIENT_SECRET
+        return if (custom.isNotBlank() && custom.length == 35 && custom.contains("xjh")) custom else DEFAULT_CLIENT_SECRET
     }
 
     fun saveClientSecret(secret: String) {
