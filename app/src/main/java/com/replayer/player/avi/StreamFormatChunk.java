@@ -123,16 +123,23 @@ import org.jspecify.annotations.Nullable;
       case 0x3334504d: // MP43
         return MimeTypes.VIDEO_MP43;
       case 0x34363248: // H264
-      case 0x31637661: // avc1
+      case 0x34363268: // h264
       case 0x31435641: // AVC1
+      case 0x31637661: // avc1
+      case 0x34363258: // X264
+      case 0x34363278: // x264
         return MimeTypes.VIDEO_H264;
-      case 0x44495633: // 3VID
-      case 0x78766964: // divx
       case 0x58564944: // DIVX
+      case 0x78766964: // divx
       case 0x30355844: // DX50
-      case 0x34504d46: // FMP4
-      case 0x64697678: // xvid
+      case 0x30357864: // dx50
       case 0x44495658: // XVID
+      case 0x64697678: // xvid
+      case 0x5634504d: // MP4V
+      case 0x7634706d: // mp4v
+      case 0x34504d46: // FMP4
+      case 0x34706d66: // fmp4
+      case 0x44495633: // 3VID
         return MimeTypes.VIDEO_MP4V;
       case 0x47504a4d: // MJPG
       case 0x67706a6d: // mjpg

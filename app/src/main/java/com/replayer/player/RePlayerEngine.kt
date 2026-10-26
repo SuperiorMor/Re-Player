@@ -47,6 +47,15 @@ class RePlayerEngine(private val context: Context) {
     private val renderersFactory = DefaultRenderersFactory(context)
         .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
         .setEnableDecoderFallback(true)
+        .setMediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunnelingDecoder ->
+            val decoders = MediaCodecSelector.DEFAULT.getDecoderInfos(mimeType, requiresSecureDecoder, requiresTunnelingDecoder)
+            if (mimeType == MimeTypes.VIDEO_MP4V) {
+                // Prioritize software decoders for MPEG4 / XviD / DivX as TV hardware decoders often have severe quirks
+                decoders.sortedBy { if (it.softwareOnly) 0 else 1 }
+            } else {
+                decoders
+            }
+        }
 
     private val loadControl = DefaultLoadControl.Builder()
         .setBufferDurationsMs(
@@ -58,8 +67,12 @@ class RePlayerEngine(private val context: Context) {
         .setPrioritizeTimeOverSizeThresholds(false)
         .build()
 
-    private val extractorsFactory = DefaultExtractorsFactory()
-        .setConstantBitrateSeekingEnabled(false)
+    private val extractorsFactory = ExtractorsFactory {
+        arrayOf(
+            com.replayer.player.avi.AviExtractor(),
+            *DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(false).createExtractors()
+        )
+    }
 
     private val baseHttpDataSourceFactory = DefaultHttpDataSource.Factory()
         .setAllowCrossProtocolRedirects(true)
@@ -135,10 +148,11 @@ class RePlayerEngine(private val context: Context) {
 
         val isAvi = mediaItem.title.endsWith(".avi", ignoreCase = true) ||
                 mediaItem.uri.endsWith(".avi", ignoreCase = true) ||
-                mediaItem.format?.equals("avi", ignoreCase = true) == true
+                mediaItem.format?.equals("avi", ignoreCase = true) == true ||
+                mediaItem.mimeType?.contains("avi", ignoreCase = true) == true ||
+                mediaItem.mimeType?.contains("msvideo", ignoreCase = true) == true
 
-        // Ensure container MIME type is explicitly specified (crucial for AVI and DLNA streams)
-        // Check file extension FIRST because DLNA servers often misreport AVI as video/mpeg
+        // Ensure container MIME type is explicitly specified (crucial for AVI, Google Drive, and DLNA streams)
         val detectedMimeType = when {
             isAvi -> MimeTypes.VIDEO_AVI
             mediaItem.title.endsWith(".mkv", ignoreCase = true) || mediaItem.uri.endsWith(".mkv", ignoreCase = true) -> MimeTypes.VIDEO_MATROSKA
@@ -160,48 +174,46 @@ class RePlayerEngine(private val context: Context) {
 
         val finalHeaders = headers.toMutableMap()
         if (mediaItem.sourceType == MediaSourceType.GOOGLE_DRIVE) {
-            val token = GoogleDriveAuthManager(context).getSavedAccessToken()
-            if (!token.isNullOrBlank()) {
-                finalHeaders["Authorization"] = "Bearer $token"
+            val authMgr = GoogleDriveAuthManager(context)
+            val currentAccessToken = authMgr.getValidAccessTokenBlocking() ?: authMgr.getSavedAccessToken()
+            if (!currentAccessToken.isNullOrBlank()) {
+                finalHeaders["Authorization"] = "Bearer $currentAccessToken"
             }
         }
+
         val activeExtractorsFactory = object : ExtractorsFactory {
             override fun createExtractors(): Array<Extractor> {
-                if (isAvi) {
-                    return arrayOf(
-                        com.replayer.player.avi.AviExtractor(),
-                        *DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(false).createExtractors()
-                    )
-                }
-                return DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(false).createExtractors()
+                return arrayOf(
+                    com.replayer.player.avi.AviExtractor(),
+                    *DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(false).createExtractors()
+                )
             }
 
             override fun createExtractors(uri: Uri, responseHeaders: Map<String, List<String>>): Array<Extractor> {
-                if (isAvi) {
-                    val cleanHeaders = responseHeaders.filterKeys { !it.equals("Content-Type", ignoreCase = true) }
-                    val defaultExtractors = DefaultExtractorsFactory()
-                        .setConstantBitrateSeekingEnabled(false)
-                        .createExtractors(uri, cleanHeaders)
-                    return arrayOf(com.replayer.player.avi.AviExtractor(), *defaultExtractors)
+                val cleanHeaders = if (isAvi) {
+                    responseHeaders.filterKeys { !it.equals("Content-Type", ignoreCase = true) }
+                } else {
+                    responseHeaders
                 }
-                return DefaultExtractorsFactory()
+                val defaultExtractors = DefaultExtractorsFactory()
                     .setConstantBitrateSeekingEnabled(false)
-                    .createExtractors(uri, responseHeaders)
+                    .createExtractors(uri, cleanHeaders)
+                return arrayOf(com.replayer.player.avi.AviExtractor(), *defaultExtractors)
             }
         }
 
         val exoMediaItem = mediaBuilder.build()
-        val dataSourceFactory = if (finalHeaders.isNotEmpty()) {
-            val customHttpFactory = DefaultHttpDataSource.Factory()
-                .setAllowCrossProtocolRedirects(true)
-                .setConnectTimeoutMs(15000)
-                .setReadTimeoutMs(30000)
-                .setUserAgent("RePlayer-TV")
-                .setDefaultRequestProperties(finalHeaders)
-            DefaultDataSource.Factory(context, customHttpFactory)
-        } else {
-            defaultDataSourceFactory
+        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+            .setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(15000)
+            .setReadTimeoutMs(30000)
+            .setUserAgent("RePlayer-TV")
+
+        if (finalHeaders.isNotEmpty()) {
+            httpDataSourceFactory.setDefaultRequestProperties(finalHeaders)
         }
+
+        val dataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
         val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory, activeExtractorsFactory)
         exoPlayer.setMediaSource(mediaSourceFactory.createMediaSource(exoMediaItem))
 

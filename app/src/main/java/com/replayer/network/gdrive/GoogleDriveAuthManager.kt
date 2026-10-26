@@ -96,13 +96,42 @@ class GoogleDriveAuthManager(private val context: Context) {
         prefs.edit().putString("gdrive_client_secret", secret.trim()).apply()
     }
 
-    fun saveTokens(accessToken: String, refreshToken: String?) {
-        prefs.edit().apply {
-            putString("access_token", accessToken)
-            if (refreshToken != null) putString("refresh_token", refreshToken)
-            apply()
+    fun saveTokens(accessToken: String, refreshToken: String?, expiresInSec: Int? = null) {
+        val editor = prefs.edit().putString("access_token", accessToken)
+        if (!refreshToken.isNullOrBlank()) {
+            editor.putString("refresh_token", refreshToken)
         }
+        if (expiresInSec != null && expiresInSec > 0) {
+            val expiresAtMs = System.currentTimeMillis() + (expiresInSec * 1000L)
+            editor.putLong("expires_at", expiresAtMs)
+        }
+        editor.apply()
         _isAuthenticatedFlow.value = true
+    }
+
+    fun isTokenExpired(bufferMs: Long = 60_000L): Boolean {
+        val expiresAt = prefs.getLong("expires_at", 0L)
+        if (expiresAt <= 0L) return false
+        return System.currentTimeMillis() + bufferMs >= expiresAt
+    }
+
+    suspend fun getValidAccessToken(): String? = withContext(Dispatchers.IO) {
+        val token = getSavedAccessToken()
+        if (token.isNullOrBlank()) return@withContext null
+        if (!isTokenExpired()) return@withContext token
+        val refreshed = refreshAccessToken()
+        refreshed ?: token
+    }
+
+    fun getValidAccessTokenBlocking(): String? {
+        val token = getSavedAccessToken()
+        if (token.isNullOrBlank()) return null
+        if (!isTokenExpired()) return token
+        return runCatching {
+            kotlinx.coroutines.runBlocking(Dispatchers.IO) {
+                refreshAccessToken()
+            }
+        }.getOrNull() ?: token
     }
 
     fun getChooseAccountIntent(): Intent {
@@ -126,7 +155,7 @@ class GoogleDriveAuthManager(private val context: Context) {
                 "oauth2:https://www.googleapis.com/auth/drive.readonly"
             )
             if (!token.isNullOrBlank()) {
-                saveTokens(token, null)
+                saveTokens(token, null, expiresInSec = 3600)
                 prefs.edit().putString("account_email", accountName).apply()
                 Result.success(token)
             } else {
@@ -159,7 +188,7 @@ class GoogleDriveAuthManager(private val context: Context) {
                 "oauth2:https://www.googleapis.com/auth/drive.readonly"
             )
             if (!token.isNullOrBlank()) {
-                saveTokens(token, null)
+                saveTokens(token, null, expiresInSec = 3600)
                 prefs.edit().putString("account_email", email).apply()
                 Result.success(token)
             } else {
@@ -185,7 +214,12 @@ class GoogleDriveAuthManager(private val context: Context) {
                 GoogleAuthUtil.clearToken(context, oldToken)
             } catch (_: Exception) {}
         }
-        prefs.edit().remove("access_token").remove("refresh_token").remove("account_email").apply()
+        prefs.edit()
+            .remove("access_token")
+            .remove("refresh_token")
+            .remove("expires_at")
+            .remove("account_email")
+            .apply()
         _isAuthenticatedFlow.value = false
         try {
             val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN).build()
@@ -210,7 +244,7 @@ class GoogleDriveAuthManager(private val context: Context) {
                     "oauth2:https://www.googleapis.com/auth/drive.readonly"
                 )
                 if (!newToken.isNullOrBlank()) {
-                    saveTokens(newToken, null)
+                    saveTokens(newToken, null, expiresInSec = 3600)
                     return@withContext newToken
                 }
             }
@@ -240,7 +274,7 @@ class GoogleDriveAuthManager(private val context: Context) {
             }
             val tokenResp = json.decodeFromString<TokenResponse>(body)
             if (!tokenResp.access_token.isNullOrBlank()) {
-                saveTokens(tokenResp.access_token, tokenResp.refresh_token ?: refreshToken)
+                saveTokens(tokenResp.access_token, tokenResp.refresh_token ?: refreshToken, tokenResp.expires_in)
                 return@withContext tokenResp.access_token
             }
         } catch (e: Exception) {
@@ -326,16 +360,22 @@ class GoogleDriveAuthManager(private val context: Context) {
                 val body = response.body?.string() ?: continue
                 android.util.Log.d("DriveAuth", "Poll ($retries): code=${response.code}, body=$body")
 
-                val tokenResp = json.decodeFromString<TokenResponse>(body)
+                val tokenResp = try {
+                    json.decodeFromString<TokenResponse>(body)
+                } catch (e: Exception) {
+                    android.util.Log.w("DriveAuth", "Poll JSON parse error: ${e.message}")
+                    null
+                }
 
-                if (!tokenResp.access_token.isNullOrBlank()) {
-                    saveTokens(tokenResp.access_token, tokenResp.refresh_token)
+                if (tokenResp != null && !tokenResp.access_token.isNullOrBlank()) {
+                    saveTokens(tokenResp.access_token, tokenResp.refresh_token, tokenResp.expires_in)
                     return@withContext tokenResp
                 }
 
-                when (tokenResp.error) {
+                val errorCode = tokenResp?.error
+                when (errorCode) {
                     "authorization_pending" -> {
-                        // User is still authorizing on phone, keep polling
+                        // User is still authorizing on phone / browser; keep polling
                     }
                     "slow_down" -> {
                         // Rate limit: increase polling interval by 5 seconds
@@ -345,7 +385,7 @@ class GoogleDriveAuthManager(private val context: Context) {
                         return@withContext tokenResp
                     }
                     else -> {
-                        if (tokenResp.error != null) {
+                        if (errorCode != null) {
                             return@withContext tokenResp
                         }
                     }

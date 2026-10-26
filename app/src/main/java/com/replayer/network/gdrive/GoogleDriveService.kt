@@ -99,7 +99,7 @@ class GoogleDriveService(private val authManager: GoogleDriveAuthManager) {
 
     suspend fun listFolder(folderId: String = "root"): List<MediaItem> = withContext(Dispatchers.IO) {
         lastErrorMessage = null
-        var token = authManager.getSavedAccessToken()
+        var token = authManager.getValidAccessToken() ?: authManager.getSavedAccessToken()
         if (token.isNullOrBlank()) {
             lastErrorMessage = "Требуется авторизация"
             return@withContext emptyList()
@@ -193,8 +193,8 @@ class GoogleDriveService(private val authManager: GoogleDriveAuthManager) {
                 val ext = name.substringAfterLast('.', "").uppercase()
                 val format = if (ext.isNotEmpty() && ext.length <= 5) ext else null
 
-                // Streaming URL with alt=media
-                val streamUrl = "https://www.googleapis.com/drive/v3/files/$id?alt=media"
+                // Streaming URL with alt=media and acknowledgeAbuse for large video files
+                val streamUrl = "https://www.googleapis.com/drive/v3/files/$id?alt=media&acknowledgeAbuse=true"
 
                 items.add(
                     MediaItem(

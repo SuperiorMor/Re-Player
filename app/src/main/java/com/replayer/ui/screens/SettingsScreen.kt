@@ -867,6 +867,14 @@ fun SettingsScreen(
 }
 
 private fun getFriendlyChangelog(version: String, rawChangelog: String): List<String> {
+    if (version.contains("0.3.2")) {
+        return listOf(
+            "Стабильный стриминг Google Drive: Динамическое внедрение Bearer-токена в ExoPlayer и поддержка больших видеофайлов (acknowledgeAbuse).",
+            "Умное автообновление токена: Плеер и файловый менеджер автоматически обновляют истекающий токен без разрыва соединения.",
+            "Плавное воспроизведение AVI: Точный маппинг кодеков Xvid, DivX, MP4V, DX50, FMP4, H264 и программный fallback видеодекодера."
+        )
+    }
+
     if (version.contains("0.3.1")) {
         return listOf(
             "Нативный выбор аккаунта Android TV: Использование системного AccountManager вместо мобильного интерфейса — устранена ошибка 12500.",
