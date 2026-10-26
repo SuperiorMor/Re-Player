@@ -34,15 +34,6 @@ class GoogleDriveAuthManager(private val context: Context) {
     private val prefs = context.getSharedPreferences("replayer_drive_prefs", Context.MODE_PRIVATE)
 
     init {
-        // Clear any stale custom secret/client id from legacy versions to ensure the exact matching pair is used
-        val legacySecret = prefs.getString("gdrive_client_secret", null)
-        if (legacySecret != null && (legacySecret.length != 35 || !legacySecret.contains("xjh"))) {
-            prefs.edit().remove("gdrive_client_secret").apply()
-        }
-        val legacyId = prefs.getString("gdrive_client_id", null)
-        if (legacyId != null && !legacyId.startsWith("673747062826-sdv9vfgbi")) {
-            prefs.edit().remove("gdrive_client_id").apply()
-        }
         _isAuthenticatedFlow.value = isAuthenticated()
     }
 
@@ -79,8 +70,8 @@ class GoogleDriveAuthManager(private val context: Context) {
     fun getSavedAccessToken(): String? = prefs.getString("access_token", null)
 
     fun getSavedClientId(): String {
-        val custom = prefs.getString("gdrive_client_id", "") ?: ""
-        return if (custom.isNotBlank() && custom.startsWith("673747062826-sdv9vfgbi")) custom else DEFAULT_CLIENT_ID
+        val custom = prefs.getString("gdrive_client_id", "")?.trim() ?: ""
+        return custom.ifBlank { DEFAULT_CLIENT_ID }
     }
 
     fun saveClientId(clientId: String) {
@@ -88,8 +79,8 @@ class GoogleDriveAuthManager(private val context: Context) {
     }
 
     fun getSavedClientSecret(): String {
-        val custom = prefs.getString("gdrive_client_secret", "") ?: ""
-        return if (custom.isNotBlank() && custom.length == 35 && custom.contains("xjh")) custom else DEFAULT_CLIENT_SECRET
+        val custom = prefs.getString("gdrive_client_secret", "")?.trim() ?: ""
+        return custom.ifBlank { DEFAULT_CLIENT_SECRET }
     }
 
     fun saveClientSecret(secret: String) {
@@ -132,6 +123,50 @@ class GoogleDriveAuthManager(private val context: Context) {
                 refreshAccessToken()
             }
         }.getOrNull() ?: token
+    }
+
+    fun isGooglePlayServicesAvailable(): Boolean {
+        return try {
+            val result = com.google.android.gms.common.GoogleApiAvailability.getInstance()
+                .isGooglePlayServicesAvailable(context)
+            result == com.google.android.gms.common.ConnectionResult.SUCCESS
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    suspend fun exchangeAuthCode(
+        authCode: String,
+        clientId: String = getSavedClientId(),
+        clientSecret: String = getSavedClientSecret(),
+        redirectUri: String = "urn:ietf:wg:oauth:2.0:oob"
+    ): Result<TokenResponse> = withContext(Dispatchers.IO) {
+        val form = FormBody.Builder()
+            .add("code", authCode.trim())
+            .add("client_id", clientId.trim())
+            .add("client_secret", clientSecret.trim())
+            .add("redirect_uri", redirectUri.trim())
+            .add("grant_type", "authorization_code")
+            .build()
+
+        val request = Request.Builder().url(TOKEN_URL).post(form).build()
+        try {
+            val response = client.newCall(request).execute()
+            val body = response.body?.string() ?: ""
+            if (!response.isSuccessful) {
+                return@withContext Result.failure(Exception("Ошибка Google OAuth (${response.code}): $body"))
+            }
+            val tokenResp = json.decodeFromString<TokenResponse>(body)
+            if (!tokenResp.access_token.isNullOrBlank()) {
+                saveTokens(tokenResp.access_token, tokenResp.refresh_token, tokenResp.expires_in)
+                saveClientId(clientId)
+                saveClientSecret(clientSecret)
+                return@withContext Result.success(tokenResp)
+            }
+            Result.failure(Exception("Пустой токен в ответе Google"))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 
     fun getChooseAccountIntent(): Intent {

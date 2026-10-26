@@ -51,7 +51,13 @@ class RePlayerEngine(private val context: Context) {
             val decoders = MediaCodecSelector.DEFAULT.getDecoderInfos(mimeType, requiresSecureDecoder, requiresTunnelingDecoder)
             if (mimeType == MimeTypes.VIDEO_MP4V) {
                 // Prioritize software decoders for MPEG4 / XviD / DivX as TV hardware decoders often have severe quirks
-                decoders.sortedBy { if (it.softwareOnly) 0 else 1 }
+                decoders.sortedBy {
+                    val isSoftware = it.softwareOnly ||
+                            it.name.contains("google", ignoreCase = true) ||
+                            it.name.contains("android", ignoreCase = true) ||
+                            it.name.contains("sw", ignoreCase = true)
+                    if (isSoftware) 0 else 1
+                }
             } else {
                 decoders
             }

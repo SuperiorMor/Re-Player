@@ -43,6 +43,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -62,10 +63,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
 import com.replayer.data.ServerConfigManager
 import com.replayer.model.UpnpDevice
 import com.replayer.network.gdrive.GoogleDriveAuthManager
+import com.replayer.network.gdrive.LocalPairingServer
 import com.replayer.network.gdrive.UserConsentRequiredException
 import com.replayer.network.upnp.SsdpDiscovery
 import com.replayer.ui.components.TvFocusCard
@@ -112,11 +115,39 @@ fun SettingsScreen(
     var isScanningUpnp by remember { mutableStateOf(false) }
 
     // Google Drive Sign-In state
+    val hasGms = remember { authManager.isGooglePlayServicesAvailable() }
     var isDriveSigningIn by remember { mutableStateOf(false) }
     var savedDriveEmail by remember { mutableStateOf(authManager.getSavedAccountEmail()) }
     var driveErrorMessage by remember { mutableStateOf<String?>(null) }
     var pendingAccountName by remember { mutableStateOf<String?>(null) }
     var requestTokenFn by remember { mutableStateOf<((String) -> Unit)?>(null) }
+
+    // Pairing dialog & Manual Keys dialog state
+    var showPairingDialog by remember { mutableStateOf(false) }
+    var showKeysDialog by remember { mutableStateOf(false) }
+    var clientIdInput by remember { mutableStateOf(authManager.getSavedClientId()) }
+    var clientSecretInput by remember { mutableStateOf(authManager.getSavedClientSecret()) }
+    var tokenInput by remember { mutableStateOf("") }
+    var pairingServer by remember { mutableStateOf<LocalPairingServer?>(null) }
+
+    DisposableEffect(showPairingDialog) {
+        if (showPairingDialog) {
+            val server = LocalPairingServer(context, authManager) { email ->
+                savedDriveEmail = email ?: authManager.getSavedAccountEmail()
+                showPairingDialog = false
+                isDriveSigningIn = false
+                driveErrorMessage = null
+            }
+            server.start()
+            pairingServer = server
+            onDispose {
+                server.stop()
+                pairingServer = null
+            }
+        } else {
+            onDispose { }
+        }
+    }
 
     var pendingConsentIntent by remember { mutableStateOf<Intent?>(null) }
 
@@ -178,6 +209,8 @@ fun SettingsScreen(
             requestDriveToken(accountName)
         } else {
             isDriveSigningIn = false
+            driveErrorMessage = "На ТВ нет учетной записи Google. Откройте вход через телефон (QR-код)."
+            showPairingDialog = true
         }
     }
 
@@ -189,7 +222,18 @@ fun SettingsScreen(
             chooseAccountLauncher.launch(chooseIntent)
         } catch (e: Exception) {
             isDriveSigningIn = false
-            driveErrorMessage = "Не удалось открыть выбор аккаунта: ${e.localizedMessage}"
+            driveErrorMessage = "Не удалось открыть выбор аккаунта: ${e.localizedMessage}. Откройте вход через телефон."
+            showPairingDialog = true
+        }
+    }
+
+    fun handleConnectDriveClick() {
+        driveErrorMessage = null
+        if (!hasGms) {
+            // Yandex TV / AOSP without GMS: directly open QR-code / Web Pairing
+            showPairingDialog = true
+        } else {
+            startNativeGoogleSignIn()
         }
     }
 
@@ -528,11 +572,11 @@ fun SettingsScreen(
                             TvFocusCard(
                                 onClick = {
                                     if (!isDriveSigningIn) {
-                                        startNativeGoogleSignIn()
+                                        handleConnectDriveClick()
                                     }
                                 },
                                 modifier = Modifier
-                                    .width(200.dp)
+                                    .width(220.dp)
                                     .height(44.dp)
                             ) {
                                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -544,10 +588,46 @@ fun SettingsScreen(
                                         )
                                     } else {
                                         Text(
-                                            text = "Войти через Google",
+                                            text = if (hasGms) "Войти через аккаунт ТВ" else "Подключить через телефон",
                                             color = AccentCyan,
                                             fontWeight = FontWeight.Bold,
                                             style = MaterialTheme.typography.bodyMedium
+                                        )
+                                    }
+                                }
+                            }
+
+                            TvFocusCard(
+                                onClick = {
+                                    clientIdInput = authManager.getSavedClientId()
+                                    clientSecretInput = authManager.getSavedClientSecret()
+                                    showKeysDialog = true
+                                },
+                                modifier = Modifier
+                                    .width(160.dp)
+                                    .height(44.dp)
+                            ) {
+                                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = "Ключи API / Токен",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = TextSecondary
+                                    )
+                                }
+                            }
+
+                            if (hasGms) {
+                                TvFocusCard(
+                                    onClick = { showPairingDialog = true },
+                                    modifier = Modifier
+                                        .width(120.dp)
+                                        .height(44.dp)
+                                ) {
+                                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                        Text(
+                                            text = "QR-код",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = TextSecondary
                                         )
                                     }
                                 }
@@ -864,9 +944,283 @@ fun SettingsScreen(
             }
         }
     }
+
+    // ---------------------------------------------------------
+    // Dialog: Google Drive Web / QR-code Pairing (for Yandex TV & Android TV)
+    // ---------------------------------------------------------
+    if (showPairingDialog) {
+        Dialog(onDismissRequest = { showPairingDialog = false }) {
+            Box(
+                modifier = Modifier
+                    .width(620.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(DarkCard)
+                    .border(2.dp, AccentCyan.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
+                    .padding(28.dp)
+            ) {
+                Column {
+                    Text(
+                        text = "Подключение Google Drive к ТВ",
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                        color = TextPrimary
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Для работы на Яндекс ТВ и Android TV без сервисов Google Play:",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(DarkSurface)
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // QR Code
+                        val pUrl = pairingServer?.pairingUrl ?: "http://127.0.0.1:8765"
+                        val qrApiUrl = "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=" +
+                                java.net.URLEncoder.encode(pUrl, "UTF-8")
+
+                        Box(
+                            modifier = Modifier
+                                .size(130.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color.White)
+                                .padding(6.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            AsyncImage(
+                                model = qrApiUrl,
+                                contentDescription = "QR-код подключения",
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(18.dp))
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "1. Наведите камеру телефона на QR-код",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = TextPrimary
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Или откройте в браузере телефона / ПК:",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary
+                            )
+                            Text(
+                                text = pUrl,
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                color = AccentCyan
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "2. На открывшейся странице подтвердите вход или вставьте ключи — ТВ подключится автоматически.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary,
+                                lineHeight = 18.sp
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TvFocusCard(
+                            onClick = {
+                                showPairingDialog = false
+                                showKeysDialog = true
+                            },
+                            modifier = Modifier
+                                .width(180.dp)
+                                .height(44.dp)
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text("Ввести ключи на ТВ", color = TextSecondary)
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.width(12.dp))
+
+                        TvFocusCard(
+                            onClick = { showPairingDialog = false },
+                            modifier = Modifier
+                                .width(120.dp)
+                                .height(44.dp)
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text("Закрыть", color = AccentCyan, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ---------------------------------------------------------
+    // Dialog: Direct API Keys & Token Configuration on TV
+    // ---------------------------------------------------------
+    if (showKeysDialog) {
+        Dialog(onDismissRequest = { showKeysDialog = false }) {
+            Box(
+                modifier = Modifier
+                    .width(580.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(DarkCard)
+                    .border(1.dp, AccentCyan.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
+                    .padding(24.dp)
+            ) {
+                Column {
+                    Text(
+                        text = "Ключи API Google Drive",
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                        color = TextPrimary
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Введите Client ID и Secret из Google Cloud Console (тип: Desktop или Web), либо готовый Refresh Token / Access Token:",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary,
+                        lineHeight = 16.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    OutlinedTextField(
+                        value = clientIdInput,
+                        onValueChange = { clientIdInput = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("Client ID", color = TextSecondary) },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = AccentCyan,
+                            unfocusedBorderColor = DarkSurface,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        )
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    OutlinedTextField(
+                        value = clientSecretInput,
+                        onValueChange = { clientSecretInput = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("Client Secret", color = TextSecondary) },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = AccentCyan,
+                            unfocusedBorderColor = DarkSurface,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        )
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    OutlinedTextField(
+                        value = tokenInput,
+                        onValueChange = { tokenInput = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("Refresh Token или Код авторизации (необязательно)", color = TextSecondary) },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = AccentCyan,
+                            unfocusedBorderColor = DarkSurface,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        )
+                    )
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        TvFocusCard(
+                            onClick = { showKeysDialog = false },
+                            modifier = Modifier
+                                .width(110.dp)
+                                .height(44.dp)
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text("Отмена", color = TextSecondary)
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.width(12.dp))
+
+                        TvFocusCard(
+                            onClick = {
+                                if (clientIdInput.isNotBlank()) authManager.saveClientId(clientIdInput)
+                                if (clientSecretInput.isNotBlank()) authManager.saveClientSecret(clientSecretInput)
+
+                                val trimmedToken = tokenInput.trim()
+                                if (trimmedToken.isNotBlank()) {
+                                    if (trimmedToken.startsWith("1//") || trimmedToken.startsWith("ya29.")) {
+                                        authManager.saveTokens(
+                                            accessToken = if (trimmedToken.startsWith("ya29.")) trimmedToken else "valid_via_refresh",
+                                            refreshToken = if (trimmedToken.startsWith("1//")) trimmedToken else null,
+                                            expiresInSec = 3600
+                                        )
+                                        scope.launch {
+                                            authManager.refreshAccessToken()
+                                        }
+                                        showKeysDialog = false
+                                    } else {
+                                        scope.launch {
+                                            val res = authManager.exchangeAuthCode(trimmedToken, clientIdInput, clientSecretInput)
+                                            if (res.isSuccess) {
+                                                showKeysDialog = false
+                                            } else {
+                                                driveErrorMessage = res.exceptionOrNull()?.localizedMessage ?: "Ошибка обмена кода"
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    showKeysDialog = false
+                                    showPairingDialog = true
+                                }
+                            },
+                            modifier = Modifier
+                                .width(160.dp)
+                                .height(44.dp)
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text("Сохранить", color = AccentCyan, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 private fun getFriendlyChangelog(version: String, rawChangelog: String): List<String> {
+    if (version.contains("0.3.3")) {
+        return listOf(
+            "Подключение Google Drive для Яндекс ТВ и Android TV: Встроенный локальный веб-сервер и QR-код для моментального входа через телефон или браузер без сервисов Google Play.",
+            "Прямой ввод ключей на ТВ: Возможность ввести Client ID, Client Secret или Refresh Token прямо с пульта телевизора.",
+            "Исправление звука и видео в AVI: Полностью переработан расчёт таймстемпов аудиодорожек в ChunkReader — устранены скрежет звука и зависание кадров.",
+            "Аппаратный и программный fallback видео: Автоматический выбор софтверных декодеров для старых кодеков XviD и DivX."
+        )
+    }
+
     if (version.contains("0.3.2")) {
         return listOf(
             "Стабильный стриминг Google Drive: Динамическое внедрение Bearer-токена в ExoPlayer и поддержка больших видеофайлов (acknowledgeAbuse).",

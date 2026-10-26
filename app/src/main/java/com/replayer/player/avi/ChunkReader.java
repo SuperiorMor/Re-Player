@@ -100,7 +100,15 @@ import java.util.Arrays;
     int chunkType = trackType == TRACK_TYPE_VIDEO ? CHUNK_TYPE_VIDEO_COMPRESSED : CHUNK_TYPE_AUDIO;
     chunkId = getChunkIdFourCc(id, chunkType);
     long headerDuration = streamHeaderChunk.getDurationUs();
-    durationUs = headerDuration > 0 ? headerDuration : (movieDurationUs > 0 ? movieDurationUs : C.TIME_UNSET);
+    if (trackType == TRACK_TYPE_AUDIO) {
+      if (movieDurationUs > 0 && (headerDuration <= 0 || Math.abs(headerDuration - movieDurationUs) > movieDurationUs / 2)) {
+        durationUs = movieDurationUs;
+      } else {
+        durationUs = headerDuration > 0 ? headerDuration : (movieDurationUs > 0 ? movieDurationUs : C.TIME_UNSET);
+      }
+    } else {
+      durationUs = headerDuration > 0 ? headerDuration : (movieDurationUs > 0 ? movieDurationUs : C.TIME_UNSET);
+    }
     this.trackOutput = trackOutput;
     alternativeChunkId =
         trackType == TRACK_TYPE_VIDEO ? getChunkIdFourCc(id, CHUNK_TYPE_VIDEO_UNCOMPRESSED) : -1;
@@ -135,14 +143,16 @@ import java.util.Arrays;
   }
 
   public long getFrameDurationUs() {
-    if (streamHeaderChunk.rate > 0 && streamHeaderChunk.scale > 0) {
+    if (isVideo() && streamHeaderChunk.rate > 0 && streamHeaderChunk.scale > 0) {
       long duration = Util.scaleLargeTimestamp(
           1,
           (long) streamHeaderChunk.scale * C.MICROS_PER_SECOND,
           streamHeaderChunk.rate);
       return duration > 0 ? duration : 40_000L;
     }
-    long chunkDur = getChunkTimestampUs(/* chunkIndex= */ 1);
+    long count = chunkCount > 0 ? chunkCount : 1;
+    long totalDuration = durationUs > 0 ? durationUs : 0;
+    long chunkDur = count > 0 ? totalDuration / count : 40_000L;
     return chunkDur > 0 ? chunkDur : 40_000L;
   }
 
@@ -165,11 +175,11 @@ import java.util.Arrays;
   }
 
   public boolean isVideo() {
-    return (chunkId & CHUNK_TYPE_VIDEO_COMPRESSED) == CHUNK_TYPE_VIDEO_COMPRESSED;
+    return streamHeaderChunk.getTrackType() == TRACK_TYPE_VIDEO;
   }
 
   public boolean isAudio() {
-    return (chunkId & CHUNK_TYPE_AUDIO) == CHUNK_TYPE_AUDIO;
+    return streamHeaderChunk.getTrackType() == TRACK_TYPE_AUDIO;
   }
 
   /** Prepares for parsing a chunk with the given {@code size}. */
@@ -235,7 +245,7 @@ import java.util.Arrays;
   }
 
   private long getChunkTimestampUs(int chunkIndex) {
-    if (streamHeaderChunk.rate > 0 && streamHeaderChunk.scale > 0) {
+    if (isVideo() && streamHeaderChunk.rate > 0 && streamHeaderChunk.scale > 0) {
       return Util.scaleLargeTimestamp(
           chunkIndex,
           (long) streamHeaderChunk.scale * C.MICROS_PER_SECOND,
