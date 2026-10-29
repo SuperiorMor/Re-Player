@@ -2,6 +2,12 @@
 """
 Re:Player Google Drive OAuth Helper for Mac & PC
 Авторизация Google Drive в 1 клик через браузер компьютера
+
+Использование:
+  1. Создайте OAuth 2.0 Client ID (тип: Desktop) в Google Cloud Console.
+  2. Разрешите в нём redirect URI: http://127.0.0.1:8089
+  3. Запустите: python tools/auth_gdrive.py
+  4. Скопируйте Client ID, Client Secret и Refresh Token на pairing-страницу ТВ.
 """
 
 import http.server
@@ -155,10 +161,13 @@ def main():
             print(f"\nRefresh Token:\n{refresh_token}\n")
     else:
         print("\n" + "=" * 60)
-        print("Вставьте этот Refresh Token на телевизоре в 'Ключи API / Токен':")
-        print(f"{refresh_token}")
+        print("Скопируйте три значения ниже на pairing-страницу ТВ:")
+        print(f"  Client ID:     {client_id}")
+        print(f"  Client Secret: {client_secret}")
+        print(f"  Refresh Token: {refresh_token}")
         print("=" * 60)
 
 
 if __name__ == "__main__":
     main()
+

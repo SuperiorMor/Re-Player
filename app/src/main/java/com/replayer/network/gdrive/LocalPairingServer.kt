@@ -51,12 +51,11 @@ class LocalPairingServer(
         isRunning = true
         localIp = getLocalIpAddress()
 
-        // 1. Start local TCP HTTP Server
+        // 1. Локальный TCP HTTP сервер
         scope.launch {
             try {
                 serverSocket = ServerSocket(port)
-            } catch (e: Exception) {
-                // Try fallback port
+            } catch (_: Exception) {
                 port = 8766
                 serverSocket = try { ServerSocket(port) } catch (_: Exception) { null }
             }
@@ -66,13 +65,13 @@ class LocalPairingServer(
                 try {
                     val clientSocket = serverSocket!!.accept()
                     launch { handleClient(clientSocket) }
-                } catch (e: Exception) {
+                } catch (_: Exception) {
                     if (!isRunning) break
                 }
             }
         }
 
-        // 2. Start cloud relay polling via ntfy.sh (fallback if phone is not on local Wi-Fi)
+        // 2. Cloud relay polling via ntfy.sh (fallback для LTE)
         pollJob = scope.launch {
             val topicUrl = "https://ntfy.sh/replayer_pair_$sessionId/raw?poll=1"
             var attempts = 0
@@ -114,7 +113,7 @@ class LocalPairingServer(
             val method = parts[0]
             val path = parts[1]
 
-            // Read headers to determine Content-Length
+            // Считываем заголовки для Content-Length
             var contentLength = 0
             var line: String?
             while (reader.readLine().also { line = it } != null) {
@@ -124,27 +123,47 @@ class LocalPairingServer(
                 }
             }
 
-            if (method.equals("POST", ignoreCase = true) && path.startsWith("/api/save")) {
-                val bodyChars = CharArray(contentLength)
-                var readTotal = 0
-                while (readTotal < contentLength) {
-                    val read = reader.read(bodyChars, readTotal, contentLength - readTotal)
-                    if (read == -1) break
-                    readTotal += read
+            when {
+                method.equals("POST", ignoreCase = true) && path.startsWith("/api/save") -> {
+                    val bodyChars = CharArray(contentLength)
+                    var readTotal = 0
+                    while (readTotal < contentLength) {
+                        val read = reader.read(bodyChars, readTotal, contentLength - readTotal)
+                        if (read == -1) break
+                        readTotal += read
+                    }
+                    val success = handleIncomingPayload(String(bodyChars))
+                    sendJson(
+                        out,
+                        if (success) 200 else 400,
+                        if (success) """{"status":"ok","message":"Google Drive успешно подключен на ТВ!"}"""
+                        else """{"status":"error","message":"Не удалось сохранить токен"}"""
+                    )
                 }
-                val body = String(bodyChars)
-                val success = handleIncomingPayload(body)
-                sendHttpResponse(
-                    out,
-                    if (success) 200 else 400,
-                    "application/json",
-                    if (success) """{"status":"ok","message":"Google Drive успешно подключен на ТВ!"}"""
-                    else """{"status":"error","message":"Не удалось сохранить токен"}"""
-                )
-            } else {
-                // Serve mobile pairing web page
-                val html = getPairingHtml(sessionId, authManager.getSavedClientId(), authManager.getSavedClientSecret())
-                sendHttpResponse(out, 200, "text/html; charset=utf-8", html)
+                method.equals("POST", ignoreCase = true) && path.startsWith("/api/token") -> {
+                    val bodyChars = CharArray(contentLength)
+                    var readTotal = 0
+                    while (readTotal < contentLength) {
+                        val read = reader.read(bodyChars, readTotal, contentLength - readTotal)
+                        if (read == -1) break
+                        readTotal += read
+                    }
+                    val success = handleIncomingTokensJson(String(bodyChars))
+                    sendJson(
+                        out,
+                        if (success) 200 else 400,
+                        if (success) """{"status":"ok"}""" else """{"status":"error"}"""
+                    )
+                }
+                else -> {
+                    // Serve mobile pairing web page
+                    val html = getPairingHtml(
+                        sessionId,
+                        authManager.getSavedClientId(),
+                        authManager.getSavedClientSecret()
+                    )
+                    sendHttpResponse(out, 200, "text/html; charset=utf-8", html)
+                }
             }
         } catch (e: Exception) {
             Log.w("PairingServer", "Client error: ${e.message}")
@@ -169,22 +188,9 @@ class LocalPairingServer(
                 val clientSecret = params["client_secret"]?.trim() ?: ""
                 val refreshToken = params["refresh_token"]?.trim() ?: ""
                 val accessToken = params["access_token"]?.trim() ?: ""
-                val authCode = params["auth_code"]?.trim() ?: ""
 
                 if (clientId.isNotBlank()) authManager.saveClientId(clientId)
                 if (clientSecret.isNotBlank()) authManager.saveClientSecret(clientSecret)
-
-                if (authCode.isNotBlank()) {
-                    scope.launch {
-                        val result = authManager.exchangeAuthCode(authCode, clientId, clientSecret)
-                        if (result.isSuccess) {
-                            withContext(Dispatchers.Main) {
-                                onPaired(authManager.getSavedAccountEmail())
-                            }
-                        }
-                    }
-                    return true
-                }
 
                 if (accessToken.isNotBlank() || refreshToken.isNotBlank()) {
                     authManager.saveTokens(
@@ -224,7 +230,11 @@ class LocalPairingServer(
 
             if (!authCode.isNullOrBlank()) {
                 scope.launch {
-                    val result = authManager.exchangeAuthCode(authCode, clientId ?: authManager.getSavedClientId(), clientSecret ?: authManager.getSavedClientSecret())
+                    val result = authManager.exchangeAuthCode(
+                        authCode,
+                        clientId ?: authManager.getSavedClientId(),
+                        clientSecret ?: authManager.getSavedClientSecret()
+                    )
                     if (result.isSuccess) {
                         withContext(Dispatchers.Main) {
                             onPaired(authManager.getSavedAccountEmail())
@@ -255,6 +265,10 @@ class LocalPairingServer(
             Log.e("PairingServer", "handleIncomingTokensJson error: ${e.message}")
             false
         }
+    }
+
+    private fun sendJson(out: OutputStream, code: Int, body: String) {
+        sendHttpResponse(out, code, "application/json", body)
     }
 
     private fun sendHttpResponse(out: OutputStream, code: Int, contentType: String, content: String) {
@@ -290,6 +304,17 @@ class LocalPairingServer(
         return "127.0.0.1"
     }
 
+    /**
+     * Pairing-страница. OOB (urn:ietf:wg:oauth:2.0:oob) убран — Google закрыл его в 2022.
+     *
+     * Основной путь: запустить tools/auth_gdrive.py на компе (он сам проводит OAuth
+     * через редирект на localhost и выдаёт готовый Refresh Token), затем скопировать
+     * Client ID + Client Secret + Refresh Token на эту страницу и отправить на ТВ.
+     *
+     * Важно: Refresh Token привязан к тому Client ID, который его выдал.
+     * Поэтому Client ID/Secret с этой страницы ОБЯЗАТЕЛЬНО должны совпадать
+     * с теми, что использовались в auth_gdrive.py.
+     */
     private fun getPairingHtml(session: String, initialClientId: String, initialClientSecret: String): String {
         return """
 <!DOCTYPE html>
@@ -314,38 +339,26 @@ class LocalPairingServer(
             background-color: #13161F;
             border: 1px solid rgba(6, 182, 212, 0.25);
             border-radius: 16px;
-            max-width: 520px;
+            max-width: 560px;
             width: 100%;
             padding: 28px;
             box-shadow: 0 10px 40px rgba(0,0,0,0.6);
         }
-        .logo {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            margin-bottom: 20px;
-        }
+        .logo { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
         .logo-icon {
-            width: 36px;
-            height: 36px;
+            width: 36px; height: 36px;
             background: linear-gradient(135deg, #06B6D4, #38BDF8);
             border-radius: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            color: #090A0E;
-            font-size: 18px;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: bold; color: #090A0E; font-size: 18px;
         }
         h1 { font-size: 20px; font-weight: 700; color: #F8FAFC; }
-        .subtitle { font-size: 14px; color: #94A3B8; margin-bottom: 24px; line-height: 1.4; }
+        .subtitle { font-size: 14px; color: #94A3B8; margin-bottom: 20px; line-height: 1.45; }
         .status-badge {
             background: rgba(6, 182, 212, 0.15);
             color: #06B6D4;
-            padding: 6px 12px;
-            border-radius: 8px;
-            font-size: 13px;
-            margin-bottom: 20px;
+            padding: 6px 12px; border-radius: 8px;
+            font-size: 13px; margin-bottom: 20px;
             display: inline-block;
         }
         label { display: block; font-size: 13px; font-weight: 600; color: #CBD5E1; margin-bottom: 6px; }
@@ -363,50 +376,16 @@ class LocalPairingServer(
         }
         input[type="text"]:focus { border-color: #06B6D4; }
         .btn {
-            display: block;
-            width: 100%;
+            display: block; width: 100%;
             background: linear-gradient(135deg, #06B6D4, #0284C7);
-            color: #090A0E;
-            font-weight: 700;
-            font-size: 15px;
-            padding: 14px;
-            border-radius: 10px;
-            border: none;
-            cursor: pointer;
-            text-align: center;
-            text-decoration: none;
-            margin-top: 8px;
-            margin-bottom: 16px;
+            color: #090A0E; font-weight: 700; font-size: 15px;
+            padding: 14px; border-radius: 10px;
+            border: none; cursor: pointer;
+            text-align: center; text-decoration: none;
+            margin-top: 8px; margin-bottom: 16px;
             transition: opacity 0.2s;
         }
         .btn:hover { opacity: 0.9; }
-        .btn-secondary {
-            background: #1E293B;
-            color: #F8FAFC;
-            border: 1px solid #475569;
-        }
-        .divider {
-            text-align: center;
-            margin: 20px 0;
-            position: relative;
-        }
-        .divider::before {
-            content: "";
-            position: absolute;
-            left: 0;
-            top: 50%;
-            width: 100%;
-            height: 1px;
-            background: #334155;
-        }
-        .divider span {
-            background: #13161F;
-            position: relative;
-            padding: 0 12px;
-            color: #64748B;
-            font-size: 12px;
-            text-transform: uppercase;
-        }
         .info-box {
             background: rgba(30, 41, 59, 0.5);
             border-left: 3px solid #06B6D4;
@@ -415,7 +394,15 @@ class LocalPairingServer(
             font-size: 13px;
             color: #94A3B8;
             margin-bottom: 18px;
-            line-height: 1.4;
+            line-height: 1.55;
+        }
+        .info-box b { color: #E2E8F0; }
+        .info-box code {
+            background: rgba(6,182,212,0.12);
+            color: #06B6D4;
+            padding: 1px 6px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
         }
         .success-box {
             display: none;
@@ -437,26 +424,24 @@ class LocalPairingServer(
             <h1>Re:Player TV</h1>
         </div>
         <div class="status-badge">Сессия ТВ: $session</div>
-        <p class="subtitle">Подключение Google Drive к телевизору без сервисов Google Play (для Яндекс ТВ и Android TV).</p>
+        <p class="subtitle">Подключение Google Drive к телевизору. Работает на Яндекс ТВ, Android TV и приставках без сервисов Google Play.</p>
 
         <div class="info-box">
-            <b>Шаг 1:</b> Нажмите кнопку ниже, чтобы открыть официальную страницу Google и разрешить просмотр Google Диска.
+            <b>Как получить токен (1 минута):</b><br>
+            1) На компьютере запустите <code>python tools/auth_gdrive.py</code> из репозитория Re:Player.<br>
+            2) Скрипт откроет браузер, вы разрешите доступ к Диску и получите <b>Refresh Token</b>.<br>
+            3) Скопируйте все три значения ниже и нажмите «Подключить к ТВ».<br><br>
+            <b>ВАЖНО:</b> Client ID и Client Secret должны быть точно такими же, как вы вводили в <code>auth_gdrive.py</code>. Refresh Token привязан к этому Client ID.
         </div>
 
-        <button type="button" class="btn btn-secondary" onclick="openGoogleAuth()">1. Открыть страницу входа Google</button>
+        <label for="clientId">Client ID (обязательно):</label>
+        <input type="text" id="clientId" value="$initialClientId" placeholder="...apps.googleusercontent.com">
 
-        <div id="authSection" style="margin-top: 12px;">
-            <label for="authCode">2. Вставьте полученный код от Google (или Refresh Token):</label>
-            <input type="text" id="authCode" placeholder="4/0A... или 1//04...">
-        </div>
-
-        <div class="divider"><span>Или ключи Google Cloud</span></div>
-
-        <label for="clientId">Client ID (OAuth 2.0 Client):</label>
-        <input type="text" id="clientId" value="$initialClientId" placeholder="Ваш_ID.apps.googleusercontent.com">
-
-        <label for="clientSecret">Client Secret:</label>
+        <label for="clientSecret">Client Secret (обязательно):</label>
         <input type="text" id="clientSecret" value="$initialClientSecret" placeholder="GOCSPX-...">
+
+        <label for="refreshToken">Refresh Token (обязательно, начинается с 1//):</label>
+        <input type="text" id="refreshToken" placeholder="1//04...">
 
         <button type="button" class="btn" onclick="sendToTv()">🚀 Подключить к ТВ</button>
 
@@ -466,58 +451,50 @@ class LocalPairingServer(
     </div>
 
     <script>
-        function openGoogleAuth() {
-            var cid = document.getElementById('clientId').value.trim();
-            if (!cid) {
-                alert('Пожалуйста, укажите Client ID в поле ниже');
-                return;
-            }
-            var scope = encodeURIComponent('https://www.googleapis.com/auth/drive.readonly email profile');
-            var redirect = encodeURIComponent('urn:ietf:wg:oauth:2.0:oob');
-            var authUrl = 'https://accounts.google.com/o/oauth2/v2/auth?client_id=' + encodeURIComponent(cid) +
-                '&redirect_uri=' + redirect +
-                '&response_type=code' +
-                '&scope=' + scope +
-                '&access_type=offline' +
-                '&prompt=consent';
-            window.open(authUrl, '_blank');
-        }
-
         function sendToTv() {
-            var authCode = document.getElementById('authCode').value.trim();
             var clientId = document.getElementById('clientId').value.trim();
             var clientSecret = document.getElementById('clientSecret').value.trim();
+            var refreshToken = document.getElementById('refreshToken').value.trim();
+
+            if (!clientId) {
+                alert('Введите Client ID — он нужен, чтобы ТВ мог обновлять токен.');
+                return;
+            }
+            if (!clientSecret) {
+                alert('Введите Client Secret — он нужен, чтобы ТВ мог обновлять токен.');
+                return;
+            }
+            if (!refreshToken) {
+                alert('Введите Refresh Token (начинается с 1//).');
+                return;
+            }
 
             var payload = {
                 client_id: clientId,
                 client_secret: clientSecret,
+                refresh_token: refreshToken,
                 session: '$session'
             };
-
-            if (authCode.startsWith('1//') || authCode.startsWith('ya29.')) {
-                payload.refresh_token = authCode;
-            } else if (authCode) {
-                payload.auth_code = authCode;
-            }
-
             var jsonPayload = JSON.stringify(payload);
 
-            // 1. Send directly to local TV server
-            fetch('/api/save', {
+            // 1. Напрямую на локальный сервер ТВ (если телефон в одной Wi-Fi сети)
+            fetch('/api/token', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: jsonPayload
             }).then(function(res) {
                 return res.json();
-            }).then(function(data) {
+            }).then(function() {
                 document.getElementById('successBox').style.display = 'block';
-            }).catch(function(err) {
-                // 2. Fallback to ntfy cloud broker if local fails
+            }).catch(function() {
+                // 2. Fallback через ntfy.sh (если телефон в LTE)
                 fetch('https://ntfy.sh/replayer_pair_$session', {
                     method: 'POST',
                     body: jsonPayload
                 }).then(function() {
                     document.getElementById('successBox').style.display = 'block';
+                }).catch(function() {
+                    alert('Не удалось передать токен. Проверьте, что телефон в одной Wi-Fi с ТВ.');
                 });
             });
         }
@@ -527,3 +504,4 @@ class LocalPairingServer(
         """.trimIndent()
     }
 }
+

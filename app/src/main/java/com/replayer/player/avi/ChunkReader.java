@@ -115,7 +115,11 @@ import java.util.Arrays;
     firstIndexChunkOffset = C.INDEX_UNSET;
     keyFrameOffsets = new long[INITIAL_INDEX_SIZE];
     keyFrameIndices = new int[INITIAL_INDEX_SIZE];
-    chunkCount = streamHeaderChunk.length > 0 ? streamHeaderChunk.length : 1;
+    // [FIX-1] НЕ используем streamHeaderChunk.length как chunkCount по умолчанию:
+    // для аудио-дорожки это количество PCM-сэмплов (в ~1000 раз больше реальных чанков),
+    // что ломает расчёт таймстемпов. Реальное число чанков установит commitIndex().
+    // Защита от «samples as chunks» также реализована в getChunkTimestampUs().
+    chunkCount = 0;
   }
 
   public void appendIndexChunk(long offset, boolean isKeyFrame) {
@@ -150,10 +154,19 @@ import java.util.Arrays;
           streamHeaderChunk.rate);
       return duration > 0 ? duration : 40_000L;
     }
-    long count = chunkCount > 0 ? chunkCount : 1;
+    // [FIX-1] Для аудио: линейная интерполяция только если chunkCount реалистичен.
+    // Иначе — по rate/scale или дефолт 26 мс.
     long totalDuration = durationUs > 0 ? durationUs : 0;
-    long chunkDur = count > 0 ? totalDuration / count : 40_000L;
-    return chunkDur > 0 ? chunkDur : 40_000L;
+    if (totalDuration > 0 && chunkCount > 0 && chunkCount <= totalDuration / 10_000L) {
+      long chunkDur = totalDuration / chunkCount;
+      return chunkDur > 0 ? chunkDur : 26_000L;
+    }
+    if (streamHeaderChunk.rate > 0 && streamHeaderChunk.scale > 0) {
+      long chunkDurUs =
+          (long) streamHeaderChunk.scale * C.MICROS_PER_SECOND / streamHeaderChunk.rate;
+      if (chunkDurUs >= 10_000L && chunkDurUs <= 100_000L) return chunkDurUs;
+    }
+    return 26_000L;
   }
 
   public void commitIndex() {
@@ -162,6 +175,8 @@ import java.util.Arrays;
     if (indexChunkCount > 0) {
       chunkCount = indexChunkCount;
     } else if (streamHeaderChunk.length > 0) {
+      // [FIX-1] Оставляем для видео (dwLength = число кадров). Для аудио метод
+      // getChunkTimestampUs() сам обнаружит «samples as chunks» и переключится на rate/scale.
       chunkCount = streamHeaderChunk.length;
     }
   }
@@ -245,15 +260,36 @@ import java.util.Arrays;
   }
 
   private long getChunkTimestampUs(int chunkIndex) {
+    // ---- VIDEO: честная формула по frame rate (dwRate / dwScale) ----
     if (isVideo() && streamHeaderChunk.rate > 0 && streamHeaderChunk.scale > 0) {
       return Util.scaleLargeTimestamp(
           chunkIndex,
           (long) streamHeaderChunk.scale * C.MICROS_PER_SECOND,
           streamHeaderChunk.rate);
     }
-    long count = chunkCount > 0 ? chunkCount : 1;
+
+    // ---- AUDIO ----
+    // [FIX-1] dwLength для аудио в AVI — это количество PCM-сэмплов, а НЕ чанков.
+    // Поэтому chunkCount может быть завышен в ~samplesPerChunk раз (×1000+),
+    // и линейная интерполяция даёт таймстемпы в ~1000 раз меньше нужных.
+    //
+    // Используем такой порядок выбора:
+    //   1) если chunkCount похож на реальное число чанков — линейная интерполяция;
+    //   2) иначе — если rate/scale дают разумную длительность чанка (10..100 мс) — по ним;
+    //   3) иначе — дефолт 26 000 мкс (типичный MP3/AC3 frame в 1152 сэмпла @ 44.1 кГц).
     long totalDuration = durationUs > 0 ? durationUs : 0;
-    return totalDuration * chunkIndex / count;
+    if (totalDuration > 0 && chunkCount > 0 && chunkCount <= totalDuration / 10_000L) {
+      // chunkCount <= 100 чанков/сек — реалистично для аудио
+      return totalDuration * chunkIndex / chunkCount;
+    }
+    if (streamHeaderChunk.rate > 0 && streamHeaderChunk.scale > 0) {
+      long chunkDurUs =
+          (long) streamHeaderChunk.scale * C.MICROS_PER_SECOND / streamHeaderChunk.rate;
+      if (chunkDurUs >= 10_000L && chunkDurUs <= 100_000L) {
+        return chunkIndex * chunkDurUs;
+      }
+    }
+    return chunkIndex * 26_000L;
   }
 
   private SeekPoint getSeekPoint(int keyFrameIndex) {
@@ -267,3 +303,4 @@ import java.util.Arrays;
     return (('0' + ones) << 8) | ('0' + tens) | chunkType;
   }
 }
+

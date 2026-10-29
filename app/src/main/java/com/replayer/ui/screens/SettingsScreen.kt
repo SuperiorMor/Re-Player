@@ -192,6 +192,9 @@ fun SettingsScreen(
                 } else {
                     isDriveSigningIn = false
                     driveErrorMessage = err.localizedMessage ?: "Ошибка получения доступа Google"
+                    // [FIX-4] Auto-fallback: если нативная авторизация упала (12500/10/etc),
+                    // сразу открываем pairing-окно, чтобы пользователь не застрял в тупике.
+                    showPairingDialog = true
                 }
             }
         }
@@ -230,9 +233,11 @@ fun SettingsScreen(
     fun handleConnectDriveClick() {
         driveErrorMessage = null
         if (!hasGms) {
-            // Yandex TV / AOSP without GMS: directly open QR-code / Web Pairing
+            // Яндекс ТВ / AOSP: сразу pairing (Refresh Token через tools/auth_gdrive.py)
             showPairingDialog = true
         } else {
+            // GMS: пробуем нативный account chooser;
+            // при любой ошибке 12500/10 — автоматически падаем в pairing.
             startNativeGoogleSignIn()
         }
     }
@@ -1023,7 +1028,7 @@ fun SettingsScreen(
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                text = "2. На открывшейся странице подтвердите вход или вставьте ключи — ТВ подключится автоматически.",
+                                text = "2. На открывшейся странице запустите tools/auth_gdrive.py на компе, скопируйте Client ID + Secret + Refresh Token и отправьте на ТВ.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = TextSecondary,
                                 lineHeight = 18.sp
@@ -1212,6 +1217,15 @@ fun SettingsScreen(
 }
 
 private fun getFriendlyChangelog(version: String, rawChangelog: String): List<String> {
+    if (version.contains("0.3.4")) {
+        return listOf(
+            "AVI: исправлена синхронизация звука и видео для файлов без idx1-индекса — устранено ~1000-кратное ускорение аудио.",
+            "AVI: добавлена поддержка кодеков DivX 3.11 (DIV1/DIV2/DIV3), XviD (XVID), DX50, 3ivx, MJPG и MPEG-1/2.",
+            "Google Drive: убрана мёртвая OOB-авторизация; подключение через Refresh Token (tools/auth_gdrive.py) теперь работает стабильно.",
+            "Google Drive: при ошибке нативного входа (12500/10) автоматически открывается pairing-окно — не нужно возвращаться в настройки."
+        )
+    }
+
     if (version.contains("0.3.3")) {
         return listOf(
             "Подключение Google Drive для Яндекс ТВ и Android TV: Встроенный локальный веб-сервер и QR-код для моментального входа через телефон или браузер без сервисов Google Play.",
@@ -1345,9 +1359,9 @@ private fun getFriendlyChangelog(version: String, rawChangelog: String): List<St
 private fun getCurrentAppVersion(context: Context): String {
     return try {
         val pInfo = context.packageManager.getPackageInfo(context.packageName, 0)
-        pInfo.versionName ?: "0.1.3"
+        pInfo.versionName ?: "0.3.4"
     } catch (e: Exception) {
-        "0.1.3"
+        "0.3.4"
     }
 }
 
@@ -1359,3 +1373,4 @@ private fun Context.findActivity(): Activity? {
     }
     return null
 }
+

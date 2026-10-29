@@ -13,8 +13,8 @@ android {
         applicationId = "com.replayer"
         minSdk = 24
         targetSdk = 35
-        versionCode = 19
-        versionName = "0.3.3"
+        versionCode = 20
+        versionName = "0.3.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -100,3 +100,4 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.play.services.auth)
 }
+
