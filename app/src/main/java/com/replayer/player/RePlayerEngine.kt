@@ -40,9 +40,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-// Safe fallback extension in case NextRenderersFactory doesn't declare a no-arg build()
-private fun NextRenderersFactory.build(): NextRenderersFactory = this
-
 @OptIn(UnstableApi::class)
 class RePlayerEngine(private val context: Context) {
 
@@ -51,7 +48,6 @@ class RePlayerEngine(private val context: Context) {
     private val renderersFactory = NextRenderersFactory(context)
         .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
         .setEnableDecoderFallback(true)
-        .build()
 
     private val loadControl = DefaultLoadControl.Builder()
         .setBufferDurationsMs(
