@@ -1307,6 +1307,14 @@ fun SettingsScreen(
 }
 
 private fun getFriendlyChangelog(version: String, rawChangelog: String): List<String> {
+    if (version.contains("0.5")) {
+        return listOf(
+            "Полный переход на плеерный движок LibVLC: встроенный нативный FFmpeg гарантирует 100% плавное воспроизведение любых AVI (DivX, Xvid) и идеальную синхронизацию звука.",
+            "Аппаратное и программное декодирование: плавная картинка и чистый звук на любых ТВ без задержек и артефактов.",
+            "Прямое воспроизведение Google Drive и DLNA: мгновенный старт потокового видео с выбором звуковых дорожек и субтитров."
+        )
+    }
+
     if (version.contains("0.4")) {
         return listOf(
             "Точный расчёт времени аудиочанков в AVI: устранена рассинхронизация звука через накопление реального времени сэмплов в ChunkReader.",
@@ -1457,9 +1465,9 @@ private fun getFriendlyChangelog(version: String, rawChangelog: String): List<St
 private fun getCurrentAppVersion(context: Context): String {
     return try {
         val pInfo = context.packageManager.getPackageInfo(context.packageName, 0)
-        pInfo.versionName ?: "0.4.2"
+        pInfo.versionName ?: "0.5.0"
     } catch (e: Exception) {
-        "0.4.2"
+        "0.5.0"
     }
 }
 

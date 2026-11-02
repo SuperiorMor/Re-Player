@@ -13,8 +13,8 @@ android {
         applicationId = "com.replayer"
         minSdk = 24
         targetSdk = 35
-        versionCode = 23
-        versionName = "0.4.2"
+        versionCode = 24
+        versionName = "0.5.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -51,8 +51,7 @@ android {
     kotlinOptions {
         jvmTarget = "17"
         freeCompilerArgs += listOf(
-            "-opt-in=androidx.tv.material3.ExperimentalTvMaterial3Api",
-            "-opt-in=androidx.media3.common.util.UnstableApi"
+            "-opt-in=androidx.tv.material3.ExperimentalTvMaterial3Api"
         )
     }
     buildFeatures {
@@ -87,15 +86,8 @@ dependencies {
     implementation(libs.androidx.tv.foundation)
     implementation(libs.androidx.tv.material)
 
-    // Media3 (ExoPlayer + FFmpeg software audio decoders)
-    implementation(libs.androidx.media3.exoplayer)
-    implementation(libs.androidx.media3.ui)
-    implementation(libs.androidx.media3.common)
-    implementation(libs.androidx.media3.datasource)
-    implementation(libs.androidx.media3.extractor)
-    implementation(libs.media3.ffmpeg)
-    // Nextlib для софт-декодинга видео AVI/DivX/Xvid:
-    implementation("io.github.anilbeesetti.nextlib:nextlib-media3ext:0.8.4")
+    // LibVLC for robust multi-format playback (all AVI, DivX, Xvid, MKV, MP4, etc.)
+    implementation("org.videolan.android:libvlc-all:3.5.1")
 
     // Networking, JSON, Image loading
     implementation(libs.kotlinx.coroutines.android)

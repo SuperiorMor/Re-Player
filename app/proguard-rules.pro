@@ -1,2 +1,2 @@
--keep class androidx.media3.** { *; }
--keep interface androidx.media3.** { *; }
+-keep class org.videolan.libvlc.** { *; }
+-dontwarn org.videolan.libvlc.**

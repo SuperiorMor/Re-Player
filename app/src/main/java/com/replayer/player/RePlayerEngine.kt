@@ -2,34 +2,11 @@ package com.replayer.player
 
 import android.content.Context
 import android.net.Uri
-import androidx.annotation.OptIn
-import androidx.media3.extractor.Extractor
-import androidx.media3.common.C
-import androidx.media3.common.MediaItem as ExoMediaItem
-import androidx.media3.common.PlaybackException
-import androidx.media3.common.Player
-import androidx.media3.common.TrackSelectionOverride
-import androidx.media3.common.Tracks
-import androidx.media3.common.util.UnstableApi
-import androidx.media3.common.AudioAttributes
-import androidx.media3.exoplayer.DefaultLoadControl
-import androidx.media3.exoplayer.DefaultRenderersFactory
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import com.replayer.model.AudioTrackInfo
 import com.replayer.model.MediaItem
 import com.replayer.model.MediaSourceType
 import com.replayer.model.SubtitleTrackInfo
 import com.replayer.network.gdrive.GoogleDriveAuthManager
-import androidx.media3.common.MimeTypes
-import androidx.media3.datasource.DefaultDataSource
-import androidx.media3.datasource.DefaultHttpDataSource
-import androidx.media3.extractor.DefaultExtractorsFactory
-import androidx.media3.extractor.ExtractorsFactory
-import androidx.media3.extractor.avi.AviExtractor
-import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
-import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
-import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.NextRenderersFactory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -39,310 +16,223 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import org.videolan.libvlc.LibVLC
+import org.videolan.libvlc.Media
+import org.videolan.libvlc.MediaPlayer
+import org.videolan.libvlc.util.VLCVideoLayout
 
-@OptIn(UnstableApi::class)
 class RePlayerEngine(private val context: Context) {
 
-    private val trackSelector = DefaultTrackSelector(context)
-
-    private val renderersFactory = NextRenderersFactory(context)
-        .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
-        .setEnableDecoderFallback(true)
-
-    private val loadControl = DefaultLoadControl.Builder()
-        .setBufferDurationsMs(
-            /* minBufferMs= */ 15_000,
-            /* maxBufferMs= */ 50_000,
-            /* bufferForPlaybackMs= */ 500,
-            /* bufferForPlaybackAfterRebufferMs= */ 1_000
+    private val libVlc: LibVLC = LibVLC(
+        context,
+        arrayListOf(
+            "--no-drop-late-frames",
+            "--no-skip-frames",
+            "--audio-time-stretch"
         )
-        .setPrioritizeTimeOverSizeThresholds(false)
-        .build()
+    )
 
-    private val extractorsFactory = ExtractorsFactory {
-        arrayOf(
-            com.replayer.player.avi.AviExtractor(),
-            *DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(false).createExtractors()
-        )
-    }
-
-    private val baseHttpDataSourceFactory = DefaultHttpDataSource.Factory()
-        .setAllowCrossProtocolRedirects(true)
-        .setConnectTimeoutMs(15000)
-        .setReadTimeoutMs(30000)
-        .setUserAgent("RePlayer-TV")
-
-    private val defaultDataSourceFactory = DefaultDataSource.Factory(context, baseHttpDataSourceFactory)
-    private val defaultMediaSourceFactory = DefaultMediaSourceFactory(defaultDataSourceFactory, extractorsFactory)
-
-    val exoPlayer: ExoPlayer = ExoPlayer.Builder(context, renderersFactory)
-        .setTrackSelector(trackSelector)
-        .setLoadControl(loadControl)
-        .setMediaSourceFactory(defaultMediaSourceFactory)
-        .setSeekBackIncrementMs(10000)
-        .setSeekForwardIncrementMs(10000)
-        .setAudioAttributes(
-            AudioAttributes.Builder()
-                .setUsage(C.USAGE_MEDIA)
-                .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
-                .build(),
-            true
-        )
-        .build().apply {
-            volume = 1.0f
-        }
+    val mediaPlayer: MediaPlayer = MediaPlayer(libVlc)
 
     private val _playerState = MutableStateFlow(RePlayerState())
     val playerState: StateFlow<RePlayerState> = _playerState.asStateFlow()
 
     private val scope = CoroutineScope(Dispatchers.Main)
     private var progressJob: Job? = null
+    private var currentLayout: VLCVideoLayout? = null
 
     init {
-        exoPlayer.addListener(object : Player.Listener {
-            override fun onIsPlayingChanged(isPlaying: Boolean) {
-                _playerState.value = _playerState.value.copy(isPlaying = isPlaying)
-                if (isPlaying) startProgressTracking() else stopProgressTracking()
-            }
-
-            override fun onPlaybackStateChanged(playbackState: Int) {
-                val isBuffering = playbackState == Player.STATE_BUFFERING
-                val exoDuration = exoPlayer.duration
-                val duration = if (exoDuration > 0) {
-                    exoDuration
-                } else {
-                    _playerState.value.durationMs
+        mediaPlayer.setEventListener { event ->
+            when (event.type) {
+                MediaPlayer.Event.Playing -> {
+                    _playerState.value = _playerState.value.copy(
+                        isPlaying = true,
+                        isBuffering = false
+                    )
+                    updateTracks()
+                    startProgressTracking()
                 }
-                _playerState.value = _playerState.value.copy(
-                    isBuffering = isBuffering,
-                    durationMs = duration
-                )
+                MediaPlayer.Event.Paused -> {
+                    _playerState.value = _playerState.value.copy(isPlaying = false)
+                    stopProgressTracking()
+                }
+                MediaPlayer.Event.Stopped, MediaPlayer.Event.EndReached -> {
+                    _playerState.value = _playerState.value.copy(
+                        isPlaying = false,
+                        isBuffering = false
+                    )
+                    stopProgressTracking()
+                }
+                MediaPlayer.Event.Buffering -> {
+                    val isBuffering = event.buffering < 100f
+                    _playerState.value = _playerState.value.copy(isBuffering = isBuffering)
+                }
+                MediaPlayer.Event.TimeChanged -> {
+                    val time = event.timeChanged
+                    val length = if (mediaPlayer.length > 0) mediaPlayer.length else _playerState.value.durationMs
+                    _playerState.value = _playerState.value.copy(
+                        currentPositionMs = time,
+                        durationMs = length
+                    )
+                }
+                MediaPlayer.Event.LengthChanged -> {
+                    _playerState.value = _playerState.value.copy(
+                        durationMs = event.lengthChanged
+                    )
+                    updateTracks()
+                }
+                MediaPlayer.Event.ESAdded, MediaPlayer.Event.ESDeleted, MediaPlayer.Event.ESSelected -> {
+                    updateTracks()
+                }
+                MediaPlayer.Event.EncounteredError -> {
+                    _playerState.value = _playerState.value.copy(
+                        errorMessage = "Ошибка воспроизведения",
+                        isPlaying = false,
+                        isBuffering = false
+                    )
+                    stopProgressTracking()
+                }
             }
+        }
+    }
 
-            override fun onTracksChanged(tracks: Tracks) {
-                extractTracks(tracks)
-            }
+    fun attachVideoLayout(layout: VLCVideoLayout) {
+        currentLayout = layout
+        try {
+            mediaPlayer.detachViews()
+            mediaPlayer.attachViews(layout, null, true, false)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
 
-            override fun onPlayerError(error: PlaybackException) {
-                _playerState.value = _playerState.value.copy(
-                    errorMessage = error.localizedMessage ?: "Playback error",
-                    isPlaying = false,
-                    isBuffering = false
-                )
-            }
-        })
+    fun detachVideoLayout() {
+        try {
+            mediaPlayer.detachViews()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        currentLayout = null
     }
 
     fun play(mediaItem: MediaItem, headers: Map<String, String> = emptyMap()) {
-        val mediaBuilder = ExoMediaItem.Builder()
-            .setUri(mediaItem.uri)
-            .setMediaId(mediaItem.id)
-
-        val isAvi = mediaItem.title.endsWith(".avi", ignoreCase = true) ||
-                mediaItem.uri.endsWith(".avi", ignoreCase = true) ||
-                mediaItem.format?.equals("avi", ignoreCase = true) == true ||
-                mediaItem.mimeType?.contains("avi", ignoreCase = true) == true ||
-                mediaItem.mimeType?.contains("msvideo", ignoreCase = true) == true
-
-        // Ensure container MIME type is explicitly specified (crucial for AVI, Google Drive, and DLNA streams)
-        val detectedMimeType = when {
-            isAvi -> MimeTypes.VIDEO_AVI
-            mediaItem.title.endsWith(".mkv", ignoreCase = true) || mediaItem.uri.endsWith(".mkv", ignoreCase = true) -> MimeTypes.VIDEO_MATROSKA
-            mediaItem.title.endsWith(".mp4", ignoreCase = true) || mediaItem.uri.endsWith(".mp4", ignoreCase = true) -> MimeTypes.VIDEO_MP4
-            mediaItem.title.endsWith(".mov", ignoreCase = true) || mediaItem.uri.endsWith(".mov", ignoreCase = true) -> "video/quicktime"
-            mediaItem.title.endsWith(".ts", ignoreCase = true) || mediaItem.uri.endsWith(".ts", ignoreCase = true) -> MimeTypes.VIDEO_MP2T
-            mediaItem.title.endsWith(".mp3", ignoreCase = true) || mediaItem.uri.endsWith(".mp3", ignoreCase = true) -> MimeTypes.AUDIO_MPEG
-            mediaItem.mimeType?.isNotBlank() == true && mediaItem.mimeType != "application/octet-stream" -> mediaItem.mimeType
-            else -> null
-        }
-        if (detectedMimeType != null) {
-            mediaBuilder.setMimeType(detectedMimeType)
-        }
-
         _playerState.value = _playerState.value.copy(
             currentMediaTitle = mediaItem.title,
             errorMessage = null
         )
 
-        val finalHeaders = headers.toMutableMap()
+        var streamUri = Uri.parse(mediaItem.uri)
         if (mediaItem.sourceType == MediaSourceType.GOOGLE_DRIVE) {
             val authMgr = GoogleDriveAuthManager(context)
-            val currentAccessToken = authMgr.getValidAccessTokenBlocking() ?: authMgr.getSavedAccessToken()
-            if (!currentAccessToken.isNullOrBlank()) {
-                finalHeaders["Authorization"] = "Bearer $currentAccessToken"
+            val token = authMgr.getValidAccessTokenBlocking() ?: authMgr.getSavedAccessToken()
+            if (!token.isNullOrBlank()) {
+                streamUri = streamUri.buildUpon().appendQueryParameter("access_token", token).build()
             }
         }
 
-        val activeExtractorsFactory = object : ExtractorsFactory {
-            override fun createExtractors(): Array<Extractor> {
-                return arrayOf(
-                    com.replayer.player.avi.AviExtractor(),
-                    *DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(false).createExtractors()
-                )
-            }
-
-            override fun createExtractors(uri: Uri, responseHeaders: Map<String, List<String>>): Array<Extractor> {
-                val cleanHeaders = if (isAvi) {
-                    responseHeaders.filterKeys { !it.equals("Content-Type", ignoreCase = true) }
-                } else {
-                    responseHeaders
+        val media = Media(libVlc, streamUri).apply {
+            setHWDecoderEnabled(true, false)
+            addOption(":network-caching=15000")
+            addOption(":file-caching=2000")
+            addOption(":live-caching=2000")
+            addOption(":http-user-agent=RePlayer-TV")
+            for ((key, value) in headers) {
+                if (key.equals("Authorization", ignoreCase = true)) {
+                    addOption(":http-custom-headers=$key: $value")
                 }
-                val defaultExtractors = DefaultExtractorsFactory()
-                    .setConstantBitrateSeekingEnabled(false)
-                    .createExtractors(uri, cleanHeaders)
-                return arrayOf(com.replayer.player.avi.AviExtractor(), *defaultExtractors)
             }
         }
 
-        val exoMediaItem = mediaBuilder.build()
-        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
-            .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(15000)
-            .setReadTimeoutMs(30000)
-            .setUserAgent("RePlayer-TV")
+        mediaPlayer.media = media
+        media.release()
 
-        if (finalHeaders.isNotEmpty()) {
-            httpDataSourceFactory.setDefaultRequestProperties(finalHeaders)
+        currentLayout?.let { layout ->
+            try {
+                mediaPlayer.detachViews()
+                mediaPlayer.attachViews(layout, null, true, false)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
 
-        val dataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
-        val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory, activeExtractorsFactory)
-        exoPlayer.setMediaSource(mediaSourceFactory.createMediaSource(exoMediaItem))
-
-        exoPlayer.prepare()
-        exoPlayer.playWhenReady = true
+        mediaPlayer.play()
     }
 
     fun togglePlayPause() {
-        if (exoPlayer.isPlaying) {
-            exoPlayer.pause()
+        if (mediaPlayer.isPlaying) {
+            mediaPlayer.pause()
         } else {
-            exoPlayer.play()
+            mediaPlayer.play()
         }
     }
 
     fun seekRelative(deltaMs: Long) {
-        val duration = if (exoPlayer.duration > 0) exoPlayer.duration else _playerState.value.durationMs
-        val target = (exoPlayer.currentPosition + deltaMs).coerceIn(0, duration.coerceAtLeast(0L))
-        exoPlayer.seekTo(target)
+        val duration = if (mediaPlayer.length > 0) mediaPlayer.length else _playerState.value.durationMs
+        val target = (mediaPlayer.time + deltaMs).coerceIn(0L, duration.coerceAtLeast(0L))
+        mediaPlayer.time = target
         _playerState.value = _playerState.value.copy(currentPositionMs = target)
     }
 
     fun seekTo(positionMs: Long) {
-        val duration = if (exoPlayer.duration > 0) exoPlayer.duration else _playerState.value.durationMs
-        val target = positionMs.coerceIn(0, duration.coerceAtLeast(0L))
-        exoPlayer.seekTo(target)
+        val duration = if (mediaPlayer.length > 0) mediaPlayer.length else _playerState.value.durationMs
+        val target = positionMs.coerceIn(0L, duration.coerceAtLeast(0L))
+        mediaPlayer.time = target
         _playerState.value = _playerState.value.copy(currentPositionMs = target)
     }
 
     fun selectAudioTrack(track: AudioTrackInfo) {
-        val tracks = exoPlayer.currentTracks
-        for (groupIndex in 0 until tracks.groups.size) {
-            val group = tracks.groups[groupIndex]
-            if (group.type == C.TRACK_TYPE_AUDIO && groupIndex == track.groupIndex) {
-                val trackGroup = group.mediaTrackGroup
-                exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters.buildUpon()
-                    .setOverrideForType(TrackSelectionOverride(trackGroup, listOf(track.index)))
-                    .build()
-                _playerState.value = _playerState.value.copy(selectedAudioTrackId = track.id)
-                break
-            }
-        }
+        mediaPlayer.setAudioTrack(track.index)
+        _playerState.value = _playerState.value.copy(selectedAudioTrackId = track.id)
+        updateTracks()
     }
 
     fun selectSubtitleTrack(track: SubtitleTrackInfo?) {
         if (track == null) {
-            // Disable subtitles
-            exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters.buildUpon()
-                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
-                .build()
+            mediaPlayer.setSpuTrack(-1)
             _playerState.value = _playerState.value.copy(selectedSubtitleTrackId = null)
         } else {
-            val tracks = exoPlayer.currentTracks
-            for (groupIndex in 0 until tracks.groups.size) {
-                val group = tracks.groups[groupIndex]
-                if (group.type == C.TRACK_TYPE_TEXT && groupIndex == track.groupIndex) {
-                    val trackGroup = group.mediaTrackGroup
-                    exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters.buildUpon()
-                        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-                        .setOverrideForType(TrackSelectionOverride(trackGroup, listOf(track.index)))
-                        .build()
-                    _playerState.value = _playerState.value.copy(selectedSubtitleTrackId = track.id)
-                    break
-                }
-            }
+            mediaPlayer.setSpuTrack(track.index)
+            _playerState.value = _playerState.value.copy(selectedSubtitleTrackId = track.id)
         }
+        updateTracks()
     }
 
-    private fun extractTracks(tracks: Tracks) {
-        val audioList = mutableListOf<AudioTrackInfo>()
-        val subList = mutableListOf<SubtitleTrackInfo>()
-        var selectedAudioId: String? = null
-        var selectedSubId: String? = null
+    private fun updateTracks() {
+        val currentAudioId = mediaPlayer.audioTrack
+        val audioTracksDesc = mediaPlayer.audioTracks ?: emptyArray()
+        val audioList = audioTracksDesc.filter { it.id != -1 }.map { track ->
+            AudioTrackInfo(
+                id = track.id.toString(),
+                index = track.id,
+                groupIndex = 0,
+                language = null,
+                label = track.name ?: "Track ${track.id}",
+                codec = null,
+                channelCount = 2,
+                sampleRate = 44100,
+                isSelected = track.id == currentAudioId
+            )
+        }
 
-        for (gIdx in 0 until tracks.groups.size) {
-            val group = tracks.groups[gIdx]
-            val trackGroup = group.mediaTrackGroup
-
-            when (group.type) {
-                C.TRACK_TYPE_AUDIO -> {
-                    for (tIdx in 0 until group.length) {
-                        val format = trackGroup.getFormat(tIdx)
-                        val id = "audio_${gIdx}_${tIdx}"
-                        val isSelected = group.isTrackSelected(tIdx)
-                        if (isSelected) selectedAudioId = id
-
-                        val lang = format.language ?: "und"
-                        val channels = format.channelCount
-                        val codec = format.sampleMimeType?.substringAfter("/")?.uppercase() ?: "AUDIO"
-                        val label = format.label ?: "Track ${tIdx + 1} ($lang $channels.ch $codec)"
-
-                        audioList.add(
-                            AudioTrackInfo(
-                                id = id,
-                                index = tIdx,
-                                groupIndex = gIdx,
-                                language = format.language,
-                                label = label,
-                                codec = codec,
-                                channelCount = channels,
-                                sampleRate = format.sampleRate,
-                                isSelected = isSelected
-                            )
-                        )
-                    }
-                }
-                C.TRACK_TYPE_TEXT -> {
-                    for (tIdx in 0 until group.length) {
-                        val format = trackGroup.getFormat(tIdx)
-                        val id = "sub_${gIdx}_${tIdx}"
-                        val isSelected = group.isTrackSelected(tIdx)
-                        if (isSelected) selectedSubId = id
-
-                        val lang = format.language ?: "und"
-                        val label = format.label ?: "Subtitle ${tIdx + 1} ($lang)"
-
-                        subList.add(
-                            SubtitleTrackInfo(
-                                id = id,
-                                index = tIdx,
-                                groupIndex = gIdx,
-                                language = format.language,
-                                label = label,
-                                mimeType = format.sampleMimeType,
-                                isSelected = isSelected
-                            )
-                        )
-                    }
-                }
-            }
+        val currentSpuId = mediaPlayer.spuTrack
+        val spuTracksDesc = mediaPlayer.spuTracks ?: emptyArray()
+        val subList = spuTracksDesc.filter { it.id != -1 }.map { track ->
+            SubtitleTrackInfo(
+                id = track.id.toString(),
+                index = track.id,
+                groupIndex = 0,
+                language = null,
+                label = track.name ?: "Subtitle ${track.id}",
+                mimeType = null,
+                isSelected = track.id == currentSpuId
+            )
         }
 
         _playerState.value = _playerState.value.copy(
             audioTracks = audioList,
             subtitleTracks = subList,
-            selectedAudioTrackId = selectedAudioId,
-            selectedSubtitleTrackId = selectedSubId
+            selectedAudioTrackId = if (currentAudioId != -1) currentAudioId.toString() else null,
+            selectedSubtitleTrackId = if (currentSpuId != -1) currentSpuId.toString() else null
         )
     }
 
@@ -350,10 +240,14 @@ class RePlayerEngine(private val context: Context) {
         progressJob?.cancel()
         progressJob = scope.launch {
             while (isActive) {
-                _playerState.value = _playerState.value.copy(
-                    currentPositionMs = exoPlayer.currentPosition.coerceAtLeast(0L),
-                    durationMs = exoPlayer.duration.coerceAtLeast(0L)
-                )
+                val t = mediaPlayer.time
+                val len = mediaPlayer.length
+                if (t >= 0) {
+                    _playerState.value = _playerState.value.copy(
+                        currentPositionMs = t,
+                        durationMs = if (len > 0) len else _playerState.value.durationMs
+                    )
+                }
                 delay(500)
             }
         }
@@ -366,6 +260,13 @@ class RePlayerEngine(private val context: Context) {
 
     fun release() {
         stopProgressTracking()
-        exoPlayer.release()
+        try {
+            mediaPlayer.stop()
+            mediaPlayer.detachViews()
+            mediaPlayer.release()
+            libVlc.release()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 }

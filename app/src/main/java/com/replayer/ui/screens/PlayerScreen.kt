@@ -3,7 +3,6 @@ package com.replayer.ui.screens
 import android.app.Activity
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
-import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
@@ -67,8 +66,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.media3.common.util.UnstableApi
-import androidx.media3.ui.PlayerView
+import org.videolan.libvlc.util.VLCVideoLayout
 import com.replayer.model.AudioTrackInfo
 import com.replayer.model.MediaItem
 import com.replayer.model.SubtitleTrackInfo
@@ -82,7 +80,6 @@ import com.replayer.ui.theme.TextPrimary
 import com.replayer.ui.theme.TextSecondary
 import kotlinx.coroutines.delay
 
-@OptIn(UnstableApi::class)
 @Composable
 fun PlayerScreen(
     mediaItem: MediaItem,
@@ -213,15 +210,14 @@ fun PlayerScreen(
                 } else false
             }
     ) {
-        // Video Surface
+        // Video Surface via LibVLC
         AndroidView(
             factory = { ctx ->
-                PlayerView(ctx).apply {
-                    player = engine.exoPlayer
-                    useController = false
+                VLCVideoLayout(ctx).apply {
                     keepScreenOn = true
                     isFocusable = false
                     isFocusableInTouchMode = false
+                    engine.attachVideoLayout(this)
                 }
             },
             modifier = Modifier
