@@ -121,21 +121,10 @@ fun PlayerScreen(
 
     // Focus management: when controls are shown, focus play button; when hidden, focus root box
     LaunchedEffect(showControls) {
-        if (showControls) {
-            delay(100)
-            try {
-                playButtonFocusRequester.requestFocus()
-            } catch (_: Exception) {
-                // Ignore focus request failure
-            }
-        } else {
-            delay(50)
-            try {
-                rootFocusRequester.requestFocus()
-            } catch (_: Exception) {
-                // Ignore focus request failure
-            }
-        }
+        delay(100)
+        try {
+            if (showControls) playButtonFocusRequester.requestFocus() else rootFocusRequester.requestFocus()
+        } catch (_: Exception) {}
     }
 
     BackHandler(enabled = true) {

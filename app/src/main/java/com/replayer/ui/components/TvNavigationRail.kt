@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
@@ -32,7 +31,6 @@ import com.replayer.ui.theme.TextSecondary
 enum class NavItem(val label: String, val icon: ImageVector) {
     HOME("Главная", Icons.Default.Home),
     UPNP("UPnP / DLNA", Icons.Default.Folder),
-    GDRIVE("Google Drive", Icons.Default.Cloud),
     SETTINGS("Настройки", Icons.Default.Settings)
 }
 

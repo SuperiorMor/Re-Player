@@ -4,9 +4,7 @@ import android.content.Context
 import android.net.Uri
 import com.replayer.model.AudioTrackInfo
 import com.replayer.model.MediaItem
-import com.replayer.model.MediaSourceType
 import com.replayer.model.SubtitleTrackInfo
-import com.replayer.network.gdrive.GoogleDriveAuthManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -22,21 +20,13 @@ import org.videolan.libvlc.MediaPlayer
 import org.videolan.libvlc.util.VLCVideoLayout
 
 class RePlayerEngine(private val context: Context) {
-
     private val libVlc: LibVLC = LibVLC(
         context,
-        arrayListOf(
-            "--no-drop-late-frames",
-            "--no-skip-frames",
-            "--audio-time-stretch"
-        )
+        arrayListOf("--no-drop-late-frames", "--no-skip-frames", "--audio-time-stretch")
     )
-
     val mediaPlayer: MediaPlayer = MediaPlayer(libVlc)
-
     private val _playerState = MutableStateFlow(RePlayerState())
     val playerState: StateFlow<RePlayerState> = _playerState.asStateFlow()
-
     private val scope = CoroutineScope(Dispatchers.Main)
     private var progressJob: Job? = null
     private var currentLayout: VLCVideoLayout? = null
@@ -45,10 +35,7 @@ class RePlayerEngine(private val context: Context) {
         mediaPlayer.setEventListener { event ->
             when (event.type) {
                 MediaPlayer.Event.Playing -> {
-                    _playerState.value = _playerState.value.copy(
-                        isPlaying = true,
-                        isBuffering = false
-                    )
+                    _playerState.value = _playerState.value.copy(isPlaying = true, isBuffering = false)
                     updateTracks()
                     startProgressTracking()
                 }
@@ -57,28 +44,19 @@ class RePlayerEngine(private val context: Context) {
                     stopProgressTracking()
                 }
                 MediaPlayer.Event.Stopped, MediaPlayer.Event.EndReached -> {
-                    _playerState.value = _playerState.value.copy(
-                        isPlaying = false,
-                        isBuffering = false
-                    )
+                    _playerState.value = _playerState.value.copy(isPlaying = false, isBuffering = false)
                     stopProgressTracking()
                 }
                 MediaPlayer.Event.Buffering -> {
-                    val isBuffering = event.buffering < 100f
-                    _playerState.value = _playerState.value.copy(isBuffering = isBuffering)
+                    _playerState.value = _playerState.value.copy(isBuffering = event.buffering < 100f)
                 }
                 MediaPlayer.Event.TimeChanged -> {
                     val time = event.timeChanged
                     val length = if (mediaPlayer.length > 0) mediaPlayer.length else _playerState.value.durationMs
-                    _playerState.value = _playerState.value.copy(
-                        currentPositionMs = time,
-                        durationMs = length
-                    )
+                    _playerState.value = _playerState.value.copy(currentPositionMs = time, durationMs = length)
                 }
                 MediaPlayer.Event.LengthChanged -> {
-                    _playerState.value = _playerState.value.copy(
-                        durationMs = event.lengthChanged
-                    )
+                    _playerState.value = _playerState.value.copy(durationMs = event.lengthChanged)
                     updateTracks()
                 }
                 MediaPlayer.Event.ESAdded, MediaPlayer.Event.ESDeleted, MediaPlayer.Event.ESSelected -> {
@@ -99,71 +77,39 @@ class RePlayerEngine(private val context: Context) {
     fun attachVideoLayout(layout: VLCVideoLayout) {
         currentLayout = layout
         try {
-            mediaPlayer.detachViews()
-            mediaPlayer.attachViews(layout, null, true, false)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
-
-    fun detachVideoLayout() {
-        try {
-            mediaPlayer.detachViews()
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-        currentLayout = null
-    }
-
-    fun play(mediaItem: MediaItem, headers: Map<String, String> = emptyMap()) {
-        _playerState.value = _playerState.value.copy(
-            currentMediaTitle = mediaItem.title,
-            errorMessage = null
-        )
-
-        var streamUri = Uri.parse(mediaItem.uri)
-        if (mediaItem.sourceType == MediaSourceType.GOOGLE_DRIVE) {
-            val authMgr = GoogleDriveAuthManager(context)
-            val token = authMgr.getValidAccessTokenBlocking() ?: authMgr.getSavedAccessToken()
-            if (!token.isNullOrBlank()) {
-                streamUri = streamUri.buildUpon().appendQueryParameter("access_token", token).build()
+            if (!mediaPlayer.vlcVout.areViewsAttached()) {
+                mediaPlayer.attachViews(layout, null, true, false)
             }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
+    }
 
+    fun play(mediaItem: MediaItem) {
+        _playerState.value = _playerState.value.copy(currentMediaTitle = mediaItem.title, errorMessage = null)
+        val streamUri = Uri.parse(mediaItem.uri)
         val media = Media(libVlc, streamUri).apply {
             setHWDecoderEnabled(true, false)
             addOption(":network-caching=15000")
             addOption(":file-caching=2000")
-            addOption(":live-caching=2000")
-            addOption(":http-user-agent=RePlayer-TV")
-            for ((key, value) in headers) {
-                if (key.equals("Authorization", ignoreCase = true)) {
-                    addOption(":http-custom-headers=$key: $value")
-                }
-            }
         }
-
         mediaPlayer.media = media
         media.release()
 
         currentLayout?.let { layout ->
             try {
-                mediaPlayer.detachViews()
-                mediaPlayer.attachViews(layout, null, true, false)
+                if (!mediaPlayer.vlcVout.areViewsAttached()) {
+                    mediaPlayer.attachViews(layout, null, true, false)
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
         }
-
         mediaPlayer.play()
     }
 
     fun togglePlayPause() {
-        if (mediaPlayer.isPlaying) {
-            mediaPlayer.pause()
-        } else {
-            mediaPlayer.play()
-        }
+        if (mediaPlayer.isPlaying) mediaPlayer.pause() else mediaPlayer.play()
     }
 
     fun seekRelative(deltaMs: Long) {
@@ -181,9 +127,12 @@ class RePlayerEngine(private val context: Context) {
     }
 
     fun selectAudioTrack(track: AudioTrackInfo) {
-        mediaPlayer.setAudioTrack(track.index)
-        _playerState.value = _playerState.value.copy(selectedAudioTrackId = track.id)
-        updateTracks()
+        // ИСПРАВЛЕНИЕ: Передаем именно ID трека, а не его индекс в массиве
+        if (track.index != -1) {
+            mediaPlayer.setAudioTrack(track.index)
+            _playerState.value = _playerState.value.copy(selectedAudioTrackId = track.id)
+            updateTracks()
+        }
     }
 
     fun selectSubtitleTrack(track: SubtitleTrackInfo?) {
@@ -200,7 +149,7 @@ class RePlayerEngine(private val context: Context) {
     private fun updateTracks() {
         val currentAudioId = mediaPlayer.audioTrack
         val audioTracksDesc = mediaPlayer.audioTracks ?: emptyArray()
-        val audioList = audioTracksDesc.filter { it.id != -1 }.map { track ->
+        val audioList = audioTracksDesc.map { track ->
             AudioTrackInfo(
                 id = track.id.toString(),
                 index = track.id,
@@ -216,7 +165,7 @@ class RePlayerEngine(private val context: Context) {
 
         val currentSpuId = mediaPlayer.spuTrack
         val spuTracksDesc = mediaPlayer.spuTracks ?: emptyArray()
-        val subList = spuTracksDesc.filter { it.id != -1 }.map { track ->
+        val subList = spuTracksDesc.map { track ->
             SubtitleTrackInfo(
                 id = track.id.toString(),
                 index = track.id,
@@ -261,6 +210,8 @@ class RePlayerEngine(private val context: Context) {
     fun release() {
         stopProgressTracking()
         try {
+            // ИСПРАВЛЕНИЕ ВЫЛЕТОВ: Сначала отключаем слушатель и отсоединяем вьюху, потом убиваем плеер
+            mediaPlayer.setEventListener(null)
             mediaPlayer.stop()
             mediaPlayer.detachViews()
             mediaPlayer.release()

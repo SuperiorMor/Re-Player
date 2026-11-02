@@ -42,7 +42,6 @@ import com.replayer.model.MediaSourceType
 import com.replayer.ui.components.NavItem
 import com.replayer.ui.components.TvFocusCard
 import com.replayer.ui.components.TvNavigationRail
-import com.replayer.ui.screens.GoogleDriveScreen
 import com.replayer.ui.screens.HomeScreen
 import com.replayer.ui.screens.PlayerScreen
 import com.replayer.ui.screens.SettingsScreen
@@ -63,7 +62,6 @@ class MainActivity : ComponentActivity() {
                 var activeMediaItem by remember { mutableStateOf<MediaItem?>(null) }
                 var showExitDialog by remember { mutableStateOf(false) }
                 var initialUpnpFolder by remember { mutableStateOf<Pair<String, String>?>(null) }
-                var initialGdriveFolder by remember { mutableStateOf<Pair<String, String>?>(null) }
                 var lastPlayedMediaId by remember { mutableStateOf<String?>(null) }
 
                 // Exit confirmation dialog on Home screen
@@ -85,7 +83,6 @@ class MainActivity : ComponentActivity() {
                             onItemSelected = {
                                 selectedNav = it
                                 initialUpnpFolder = null
-                                initialGdriveFolder = null
                             }
                         )
 
@@ -96,9 +93,6 @@ class MainActivity : ComponentActivity() {
                                         if (fav.sourceType == MediaSourceType.UPNP_DLNA) {
                                             initialUpnpFolder = Pair(fav.id, fav.title)
                                             selectedNav = NavItem.UPNP
-                                        } else if (fav.sourceType == MediaSourceType.GOOGLE_DRIVE) {
-                                            initialGdriveFolder = Pair(fav.id, fav.title)
-                                            selectedNav = NavItem.GDRIVE
                                         }
                                     }
                                 )
@@ -113,19 +107,6 @@ class MainActivity : ComponentActivity() {
                                     lastPlayedMediaId = lastPlayedMediaId,
                                     isPlayerActive = (activeMediaItem != null),
                                     onFolderLoaded = { initialUpnpFolder = null },
-                                    onConsumeLastPlayedMediaId = { lastPlayedMediaId = null }
-                                )
-                                NavItem.GDRIVE -> GoogleDriveScreen(
-                                    onPlayMedia = {
-                                        lastPlayedMediaId = it.id
-                                        activeMediaItem = it
-                                    },
-                                    onNavigateToSettings = { selectedNav = NavItem.SETTINGS },
-                                    onBackToHome = { selectedNav = NavItem.HOME },
-                                    initialFolder = initialGdriveFolder,
-                                    lastPlayedMediaId = lastPlayedMediaId,
-                                    isPlayerActive = (activeMediaItem != null),
-                                    onFolderLoaded = { initialGdriveFolder = null },
                                     onConsumeLastPlayedMediaId = { lastPlayedMediaId = null }
                                 )
                                 NavItem.SETTINGS -> SettingsScreen(

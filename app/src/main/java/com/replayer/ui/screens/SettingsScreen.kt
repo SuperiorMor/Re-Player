@@ -1,62 +1,24 @@
 package com.replayer.ui.screens
 
-import android.accounts.AccountManager
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
-import android.content.Intent
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Cloud
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.SystemUpdate
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -64,22 +26,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
-import kotlinx.coroutines.delay
 import com.replayer.data.ServerConfigManager
 import com.replayer.model.UpnpDevice
-import com.replayer.network.gdrive.GoogleDriveAuthManager
-import com.replayer.network.gdrive.LocalPairingServer
-import com.replayer.network.gdrive.UserConsentRequiredException
 import com.replayer.network.upnp.SsdpDiscovery
 import com.replayer.ui.components.TvFocusCard
-import com.replayer.ui.theme.AccentCyan
-import com.replayer.ui.theme.DarkCard
-import com.replayer.ui.theme.DarkSurface
-import com.replayer.ui.theme.TextPrimary
-import com.replayer.ui.theme.TextSecondary
+import com.replayer.ui.theme.*
 import com.replayer.updater.ReleaseInfo
 import com.replayer.updater.UpdateCheckResult
 import com.replayer.updater.UpdateManager
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -102,170 +57,15 @@ fun SettingsScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val serverConfigManager = remember { ServerConfigManager(context) }
-    val authManager = remember { GoogleDriveAuthManager(context) }
     val discovery = remember { SsdpDiscovery(context) }
     val updateManager = remember { UpdateManager(context) }
     val currentVersion = remember { getCurrentAppVersion(context) }
 
     val connectedUpnpDevice by serverConfigManager.connectedUpnpDevice.collectAsState()
-    val isGdriveAuthenticated by GoogleDriveAuthManager.sharedAuthenticatedFlow.collectAsState()
 
     // UPnP scanning state
     var discoveredDevices by remember { mutableStateOf<List<UpnpDevice>>(emptyList()) }
     var isScanningUpnp by remember { mutableStateOf(false) }
-
-    // Google Drive Sign-In state
-    val hasGms = remember { authManager.isGooglePlayServicesAvailable() }
-    var isDriveSigningIn by remember { mutableStateOf(false) }
-    var savedDriveEmail by remember { mutableStateOf(authManager.getSavedAccountEmail()) }
-    var driveErrorMessage by remember { mutableStateOf<String?>(null) }
-    var pendingAccountName by remember { mutableStateOf<String?>(null) }
-    var requestTokenFn by remember { mutableStateOf<((String) -> Unit)?>(null) }
-
-    // Pairing dialog & Manual Keys dialog state
-    var showPairingDialog by remember { mutableStateOf(false) }
-    var showKeysDialog by remember { mutableStateOf(false) }
-    var showDeviceCodeDialog by remember { mutableStateOf(false) }
-    var deviceCodeData by remember { mutableStateOf<com.replayer.model.DeviceCodeResponse?>(null) }
-    var isPollingToken by remember { mutableStateOf(false) }
-    var clientIdInput by remember { mutableStateOf(authManager.getSavedClientId()) }
-    var clientSecretInput by remember { mutableStateOf(authManager.getSavedClientSecret()) }
-    var tokenInput by remember { mutableStateOf("") }
-    var pairingServer by remember { mutableStateOf<LocalPairingServer?>(null) }
-
-    DisposableEffect(showPairingDialog) {
-        if (showPairingDialog) {
-            val server = LocalPairingServer(context, authManager) { email ->
-                savedDriveEmail = email ?: authManager.getSavedAccountEmail()
-                showPairingDialog = false
-                isDriveSigningIn = false
-                driveErrorMessage = null
-            }
-            server.start()
-            pairingServer = server
-            onDispose {
-                server.stop()
-                pairingServer = null
-            }
-        } else {
-            onDispose { }
-        }
-    }
-
-    var pendingConsentIntent by remember { mutableStateOf<Intent?>(null) }
-
-    val consentLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        val account = pendingAccountName
-        if (account != null && (result.resultCode == Activity.RESULT_OK || result.resultCode == Activity.RESULT_CANCELED)) {
-            requestTokenFn?.invoke(account)
-        } else {
-            isDriveSigningIn = false
-            driveErrorMessage = "Для подключения Google Диска необходимо нажать «Разрешить»"
-        }
-    }
-
-    LaunchedEffect(pendingConsentIntent) {
-        val intent = pendingConsentIntent
-        if (intent != null) {
-            try {
-                consentLauncher.launch(intent)
-            } catch (launchEx: Exception) {
-                isDriveSigningIn = false
-                driveErrorMessage = "Не удалось открыть подтверждение: ${launchEx.localizedMessage}"
-            }
-            pendingConsentIntent = null
-        }
-    }
-
-    fun requestDriveToken(accountName: String) {
-        isDriveSigningIn = true
-        driveErrorMessage = null
-        pendingAccountName = accountName
-        scope.launch {
-            val result = authManager.getAccessTokenForAccount(accountName)
-            result.onSuccess {
-                savedDriveEmail = accountName
-                isDriveSigningIn = false
-                driveErrorMessage = null
-            }.onFailure { err ->
-                if (err is UserConsentRequiredException && err.consentIntent != null) {
-                    pendingConsentIntent = err.consentIntent
-                } else {
-                    isDriveSigningIn = false
-                    driveErrorMessage = err.localizedMessage ?: "Ошибка получения доступа Google"
-                    // [FIX-4] Auto-fallback: если нативная авторизация упала (12500/10/etc),
-                    // сразу открываем pairing-окно, чтобы пользователь не застрял в тупике.
-                    showPairingDialog = true
-                }
-            }
-        }
-    }
-
-    LaunchedEffect(Unit) {
-        requestTokenFn = { name -> requestDriveToken(name) }
-    }
-
-    val chooseAccountLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        val accountName = result.data?.getStringExtra(AccountManager.KEY_ACCOUNT_NAME)
-        if (!accountName.isNullOrBlank()) {
-            requestDriveToken(accountName)
-        } else {
-            isDriveSigningIn = false
-            driveErrorMessage = "На ТВ нет учетной записи Google. Откройте вход через телефон (QR-код)."
-            showPairingDialog = true
-        }
-    }
-
-    fun startNativeGoogleSignIn() {
-        driveErrorMessage = null
-        isDriveSigningIn = true
-        try {
-            val chooseIntent = authManager.getChooseAccountIntent()
-            chooseAccountLauncher.launch(chooseIntent)
-        } catch (e: Exception) {
-            isDriveSigningIn = false
-            driveErrorMessage = "Не удалось открыть выбор аккаунта: ${e.localizedMessage}. Откройте вход через телефон."
-            showPairingDialog = true
-        }
-    }
-
-    fun handleConnectDriveClick() {
-        driveErrorMessage = null
-        isDriveSigningIn = true
-        scope.launch {
-            val clientId = authManager.getSavedClientId()
-            val result = authManager.requestDeviceCode(clientId)
-            result.onSuccess { codeResp ->
-                deviceCodeData = codeResp
-                showDeviceCodeDialog = true
-                isPollingToken = true
-                
-                // Запускаем поллинг токена в фоне
-                val tokenResp = authManager.pollForToken(
-                    clientId = clientId,
-                    deviceCode = codeResp.device_code,
-                    intervalSec = codeResp.interval
-                )
-                isPollingToken = false
-                if (tokenResp?.access_token != null) {
-                    showDeviceCodeDialog = false
-                    savedDriveEmail = "Подключено"
-                    isDriveSigningIn = false
-                } else {
-                    driveErrorMessage = "Не удалось получить токен. Попробуйте снова."
-                    isDriveSigningIn = false
-                    showDeviceCodeDialog = false
-                }
-            }.onFailure { err ->
-                isDriveSigningIn = false
-                driveErrorMessage = "Ошибка: ${err.message}"
-            }
-        }
-    }
 
     // App updates state
     var updateUiState by remember { mutableStateOf<UpdateUiState>(UpdateUiState.Idle) }
@@ -348,14 +148,14 @@ fun SettingsScreen(
             style = MaterialTheme.typography.displayLarge
         )
         Text(
-            text = "Подключение медиа-серверов и системные параметры",
-            style = MaterialTheme.typography.bodyLarge,
+            text = "Управление сетевыми серверами DLNA / UPnP и обновлениями",
+            style = MaterialTheme.typography.bodyMedium,
             color = TextSecondary,
-            modifier = Modifier.padding(top = 4.dp, bottom = 24.dp)
+            modifier = Modifier.padding(bottom = 24.dp)
         )
 
         // ---------------------------------------------------------
-        // 1. DLNA / UPnP Серверы
+        // 1. Серверы DLNA / UPnP
         // ---------------------------------------------------------
         Text(
             text = "Серверы DLNA / UPnP",
@@ -364,62 +164,61 @@ fun SettingsScreen(
             modifier = Modifier.padding(bottom = 12.dp)
         )
 
-        if (connectedUpnpDevice != null) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(DarkCard)
-                    .padding(vertical = 6.dp)
+        // Connected Device Card
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(DarkCard)
+                .padding(20.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 20.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(AccentCyan.copy(alpha = 0.15f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.Folder, contentDescription = null, tint = AccentCyan)
-                        }
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = connectedUpnpDevice!!.friendlyName,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = TextPrimary
-                                )
-                                Spacer(modifier = Modifier.width(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (connectedUpnpDevice != null) AccentCyan.copy(alpha = 0.15f) else DarkSurface),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Folder,
+                            contentDescription = null,
+                            tint = if (connectedUpnpDevice != null) AccentCyan else TextSecondary
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = connectedUpnpDevice?.friendlyName ?: "Сервер не выбран",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = TextPrimary
+                            )
+                            if (connectedUpnpDevice != null) {
+                                Spacer(modifier = Modifier.width(8.dp))
                                 Box(
                                     modifier = Modifier
+                                        .size(8.dp)
                                         .clip(RoundedCornerShape(4.dp))
-                                        .background(AccentCyan.copy(alpha = 0.2f))
-                                        .padding(horizontal = 8.dp, vertical = 2.dp)
-                                ) {
-                                    Text(
-                                        text = "Подключено",
-                                        color = AccentCyan,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
+                                        .background(AccentCyan)
+                                )
                             }
-                            Text(
-                                text = connectedUpnpDevice!!.location,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = TextSecondary
-                            )
                         }
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = connectedUpnpDevice?.location ?: "Выберите сервер из списка найденных в локальной сети",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary
+                        )
                     }
+                }
 
+                if (connectedUpnpDevice != null) {
                     TvFocusCard(
                         onClick = { serverConfigManager.disconnectUpnpDevice() },
                         modifier = Modifier
@@ -432,19 +231,35 @@ fun SettingsScreen(
                     }
                 }
             }
-        } else {
-            // Discovered devices list
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Discovered Devices Section
+        Text(
+            text = "Доступные медиасерверы в сети",
+            style = MaterialTheme.typography.titleMedium,
+            color = TextSecondary,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(DarkCard)
+                .padding(16.dp)
+        ) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (discoveredDevices.isEmpty()) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(DarkCard)
-                            .padding(20.dp)
+                            .padding(vertical = 24.dp),
+                        contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = if (isScanningUpnp) "Поиск серверов в локальной сети..." else "Серверы не найдены. Убедитесь, что DLNA включен на роутере/ПК.",
+                            text = if (isScanningUpnp) "Поиск серверов в локальной сети..." else "Серверы не найдены. Убедитесь, что ПК или NAS включены и находятся в одной сети Wi-Fi.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = TextSecondary
                         )
@@ -512,175 +327,7 @@ fun SettingsScreen(
         Spacer(modifier = Modifier.height(28.dp))
 
         // ---------------------------------------------------------
-        // 2. Google Drive Хранилище
-        // ---------------------------------------------------------
-        Text(
-            text = "Google Drive",
-            style = MaterialTheme.typography.titleLarge,
-            color = TextPrimary,
-            modifier = Modifier.padding(bottom = 12.dp)
-        )
-
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(DarkCard)
-                .padding(vertical = 4.dp)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(20.dp),
-                verticalArrangement = Arrangement.Center
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Color(0xFF4285F4).copy(alpha = 0.15f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.Cloud, contentDescription = null, tint = Color(0xFF4285F4))
-                        }
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(text = "Google Drive", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .background(if (isGdriveAuthenticated) AccentCyan.copy(alpha = 0.2f) else DarkSurface)
-                                        .padding(horizontal = 8.dp, vertical = 2.dp)
-                                ) {
-                                    Text(
-                                        text = if (isGdriveAuthenticated) "Подключено" else "Не подключено",
-                                        color = if (isGdriveAuthenticated) AccentCyan else TextSecondary,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = if (isGdriveAuthenticated && !savedDriveEmail.isNullOrBlank()) {
-                                    savedDriveEmail!!
-                                } else {
-                                    "Вход через аккаунт Google на ТВ — доступ ко всем вашим видео"
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = if (isGdriveAuthenticated && !savedDriveEmail.isNullOrBlank()) AccentCyan else TextSecondary
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.width(16.dp))
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        if (isGdriveAuthenticated) {
-                            TvFocusCard(
-                                onClick = {
-                                    authManager.clearAuth()
-                                    savedDriveEmail = null
-                                },
-                                modifier = Modifier
-                                    .width(140.dp)
-                                    .height(44.dp)
-                            ) {
-                                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    Text(text = "Отключить", color = Color(0xFFFF5252), style = MaterialTheme.typography.bodyMedium)
-                                }
-                            }
-                        } else {
-                            TvFocusCard(
-                                onClick = {
-                                    if (!isDriveSigningIn) {
-                                        handleConnectDriveClick()
-                                    }
-                                },
-                                modifier = Modifier
-                                    .width(220.dp)
-                                    .height(44.dp)
-                            ) {
-                                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    if (isDriveSigningIn) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(20.dp),
-                                            color = AccentCyan,
-                                            strokeWidth = 2.dp
-                                        )
-                                    } else {
-                                        Text(
-                                            text = "Подключить Google Drive",
-                                            color = AccentCyan,
-                                            fontWeight = FontWeight.Bold,
-                                            style = MaterialTheme.typography.bodyMedium
-                                        )
-                                    }
-                                }
-                            }
-
-                            TvFocusCard(
-                                onClick = {
-                                    clientIdInput = authManager.getSavedClientId()
-                                    clientSecretInput = authManager.getSavedClientSecret()
-                                    showKeysDialog = true
-                                },
-                                modifier = Modifier
-                                    .width(160.dp)
-                                    .height(44.dp)
-                            ) {
-                                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    Text(
-                                        text = "Ключи API / Токен",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = TextSecondary
-                                    )
-                                }
-                            }
-
-                            if (hasGms) {
-                                TvFocusCard(
-                                    onClick = { showPairingDialog = true },
-                                    modifier = Modifier
-                                        .width(120.dp)
-                                        .height(44.dp)
-                                ) {
-                                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                        Text(
-                                            text = "QR-код",
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = TextSecondary
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        if (driveErrorMessage != null) {
-            Text(
-                text = driveErrorMessage!!,
-                color = Color(0xFFFF5252),
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(top = 8.dp)
-            )
-        }
-
-        Spacer(modifier = Modifier.height(28.dp))
-
-        // ---------------------------------------------------------
-        // 3. Обновление приложения
+        // 2. Обновление приложения
         // ---------------------------------------------------------
         Text(
             text = "Обновление приложения",
@@ -759,37 +406,38 @@ fun SettingsScreen(
                         TvFocusCard(
                             onClick = {},
                             modifier = Modifier
-                                .width(140.dp)
+                                .width(170.dp)
                                 .height(44.dp)
                         ) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                CircularProgressIndicator(modifier = Modifier.size(20.dp), color = AccentCyan, strokeWidth = 2.dp)
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    color = AccentCyan,
+                                    strokeWidth = 2.dp
+                                )
                             }
                         }
                     }
+
                     is UpdateUiState.Available -> {
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Orange "Что нового?" Button in Player Style
                             TvFocusCard(
                                 onClick = {
                                     changelogRelease = state.release
                                     showChangelogDialog = true
                                 },
-                                focusBorderColor = Color(0xFFFF7A00),
-                                backgroundColor = Color(0x28FF7A00),
                                 modifier = Modifier
-                                    .width(160.dp)
+                                    .width(150.dp)
                                     .height(44.dp)
                             ) {
                                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                     Text(
-                                        text = "Что нового?",
-                                        color = Color(0xFFFF9500),
-                                        fontWeight = FontWeight.Bold,
-                                        style = MaterialTheme.typography.bodyMedium
+                                        text = "Что нового",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = TextSecondary
                                     )
                                 }
                             }
@@ -797,67 +445,76 @@ fun SettingsScreen(
                             TvFocusCard(
                                 onClick = { startDownload(state.release) },
                                 modifier = Modifier
-                                    .width(130.dp)
+                                    .width(150.dp)
                                     .height(44.dp)
+                                    .focusRequester(updateActionFocusRequester)
                             ) {
                                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    Text(text = "Скачать", color = AccentCyan, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                                    Text(
+                                        text = "Загрузить",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = AccentCyan,
+                                        fontWeight = FontWeight.Bold
+                                    )
                                 }
                             }
                         }
                     }
+
                     is UpdateUiState.Downloading -> {
-                        TvFocusCard(
-                            onClick = {},
-                            modifier = Modifier
-                                .width(130.dp)
-                                .height(44.dp)
-                                .focusRequester(updateActionFocusRequester)
+                        Column(
+                            modifier = Modifier.width(170.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Row(
-                                modifier = Modifier.fillMaxSize(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center
-                            ) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(20.dp),
-                                    color = AccentCyan,
-                                    strokeWidth = 2.dp
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "${(state.progress * 100).toInt()}%",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = AccentCyan
-                                )
-                            }
+                            LinearProgressIndicator(
+                                progress = { downloadProgress },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(8.dp)
+                                    .clip(RoundedCornerShape(4.dp)),
+                                color = AccentCyan,
+                                trackColor = DarkSurface
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "${(downloadProgress * 100).toInt()}%",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = AccentCyan
+                            )
                         }
                     }
+
                     is UpdateUiState.ReadyToInstall -> {
                         TvFocusCard(
                             onClick = { updateManager.installApk(state.apkFile) },
                             modifier = Modifier
-                                .width(160.dp)
+                                .width(170.dp)
                                 .height(44.dp)
                                 .focusRequester(updateActionFocusRequester)
                         ) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text(text = "Установить", color = AccentCyan, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    text = "Установить",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = AccentCyan,
+                                    fontWeight = FontWeight.Bold
+                                )
                             }
                         }
                     }
+
                     else -> {
                         TvFocusCard(
                             onClick = { startCheckUpdates() },
                             modifier = Modifier
-                                .width(140.dp)
+                                .width(170.dp)
                                 .height(44.dp)
                         ) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Text(
-                                    text = if (updateUiState is UpdateUiState.Error) "Повторить" else "Проверить",
-                                    color = AccentCyan,
-                                    style = MaterialTheme.typography.bodyMedium
+                                    text = "Проверить сейчас",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = TextPrimary
                                 )
                             }
                         }
@@ -868,16 +525,17 @@ fun SettingsScreen(
     }
 
     // ---------------------------------------------------------
-    // Dialog: "Что нового?" in Player Style
+    // Changelog Dialog
     // ---------------------------------------------------------
     if (showChangelogDialog && changelogRelease != null) {
+        val release = changelogRelease!!
         Dialog(onDismissRequest = { showChangelogDialog = false }) {
             Box(
                 modifier = Modifier
-                    .width(620.dp)
+                    .width(520.dp)
                     .clip(RoundedCornerShape(20.dp))
                     .background(DarkCard)
-                    .border(2.dp, Color(0xFFFF7A00), RoundedCornerShape(20.dp))
+                    .border(1.dp, AccentCyan.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
                     .padding(28.dp)
             ) {
                 Column {
@@ -886,182 +544,67 @@ fun SettingsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column {
                             Text(
-                                text = "Re:",
-                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, fontSize = 24.sp),
-                                color = AccentCyan
+                                text = "Что нового в ${release.tagName}",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                color = TextPrimary
                             )
                             Text(
-                                text = "Player",
-                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, fontSize = 24.sp),
-                                color = Color(0xFFFF7A00)
+                                text = "Обновление готово к установке",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary
                             )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(Color(0x33FF7A00))
-                                    .padding(horizontal = 8.dp, vertical = 3.dp)
-                            ) {
-                                Text(
-                                    text = "v${changelogRelease!!.versionName}",
-                                    color = Color(0xFFFF9500),
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(AccentCyan.copy(alpha = 0.15f))
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = release.tagName,
+                                color = AccentCyan,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = "Главные улучшения этого обновления:",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = TextSecondary
-                    )
-
                     Spacer(modifier = Modifier.height(18.dp))
 
-                    val items = getFriendlyChangelog(changelogRelease!!.versionName, changelogRelease!!.changelog)
-                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                        items.forEach { item ->
+                    val changelogItems = remember(release) {
+                        getFriendlyChangelog(release.tagName, release.changelog)
+                    }
+
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        changelogItems.forEach { item ->
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.Top
                             ) {
-                                Text(
-                                    text = "•",
-                                    color = Color(0xFFFF7A00),
-                                    fontSize = 20.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(end = 12.dp)
+                                Box(
+                                    modifier = Modifier
+                                        .padding(top = 6.dp)
+                                        .size(6.dp)
+                                        .clip(RoundedCornerShape(3.dp))
+                                        .background(AccentCyan)
                                 )
+                                Spacer(modifier = Modifier.width(10.dp))
                                 Text(
                                     text = item,
-                                    style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 22.sp),
-                                    color = TextPrimary
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = TextPrimary,
+                                    lineHeight = 20.sp
                                 )
                             }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(26.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
-                    ) {
-                        TvFocusCard(
-                            onClick = { showChangelogDialog = false },
-                            focusBorderColor = Color(0xFFFF7A00),
-                            backgroundColor = Color(0x33FF7A00),
-                            modifier = Modifier
-                                .width(140.dp)
-                                .height(44.dp)
-                        ) {
-                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text(
-                                    text = "Понятно",
-                                    color = Color(0xFFFF9500),
-                                    fontWeight = FontWeight.Bold,
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // ---------------------------------------------------------
-    // Dialog: Google Drive Web / QR-code Pairing (for Yandex TV & Android TV)
-    // ---------------------------------------------------------
-    if (showPairingDialog) {
-        Dialog(onDismissRequest = { showPairingDialog = false }) {
-            Box(
-                modifier = Modifier
-                    .width(620.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(DarkCard)
-                    .border(2.dp, AccentCyan.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
-                    .padding(28.dp)
-            ) {
-                Column {
-                    Text(
-                        text = "Подключение Google Drive к ТВ",
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                        color = TextPrimary
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Для работы на Яндекс ТВ и Android TV без сервисов Google Play:",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TextSecondary
-                    )
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(DarkSurface)
-                            .padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // QR Code
-                        val pUrl = pairingServer?.pairingUrl ?: "http://127.0.0.1:8765"
-                        val qrApiUrl = "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=" +
-                                java.net.URLEncoder.encode(pUrl, "UTF-8")
-
-                        Box(
-                            modifier = Modifier
-                                .size(130.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color.White)
-                                .padding(6.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            AsyncImage(
-                                model = qrApiUrl,
-                                contentDescription = "QR-код подключения",
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.width(18.dp))
-
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "1. Наведите камеру телефона на QR-код",
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                                color = TextPrimary
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "Или откройте в браузере телефона / ПК:",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = TextSecondary
-                            )
-                            Text(
-                                text = pUrl,
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                color = AccentCyan
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = "2. На открывшейся странице запустите tools/auth_gdrive.py на компе, скопируйте Client ID + Secret + Refresh Token и отправьте на ТВ.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = TextSecondary,
-                                lineHeight = 18.sp
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(20.dp))
+                    Spacer(modifier = Modifier.height(24.dp))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -1069,126 +612,13 @@ fun SettingsScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         TvFocusCard(
-                            onClick = {
-                                showPairingDialog = false
-                                showKeysDialog = true
-                            },
-                            modifier = Modifier
-                                .width(180.dp)
-                                .height(44.dp)
-                        ) {
-                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text("Ввести ключи на ТВ", color = TextSecondary)
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.width(12.dp))
-
-                        TvFocusCard(
-                            onClick = { showPairingDialog = false },
+                            onClick = { showChangelogDialog = false },
                             modifier = Modifier
                                 .width(120.dp)
                                 .height(44.dp)
                         ) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text("Закрыть", color = AccentCyan, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // ---------------------------------------------------------
-    // Dialog: Direct API Keys & Token Configuration on TV
-    // ---------------------------------------------------------
-    if (showKeysDialog) {
-        Dialog(onDismissRequest = { showKeysDialog = false }) {
-            Box(
-                modifier = Modifier
-                    .width(580.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(DarkCard)
-                    .border(1.dp, AccentCyan.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
-                    .padding(24.dp)
-            ) {
-                Column {
-                    Text(
-                        text = "Ключи API Google Drive",
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                        color = TextPrimary
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = "Введите Client ID и Secret из Google Cloud Console (тип: Desktop или Web), либо готовый Refresh Token / Access Token:",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TextSecondary,
-                        lineHeight = 16.sp
-                    )
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    OutlinedTextField(
-                        value = clientIdInput,
-                        onValueChange = { clientIdInput = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        label = { Text("Client ID", color = TextSecondary) },
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = AccentCyan,
-                            unfocusedBorderColor = DarkSurface,
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary
-                        )
-                    )
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    OutlinedTextField(
-                        value = clientSecretInput,
-                        onValueChange = { clientSecretInput = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        label = { Text("Client Secret", color = TextSecondary) },
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = AccentCyan,
-                            unfocusedBorderColor = DarkSurface,
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary
-                        )
-                    )
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    OutlinedTextField(
-                        value = tokenInput,
-                        onValueChange = { tokenInput = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        label = { Text("Refresh Token или Код авторизации (необязательно)", color = TextSecondary) },
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = AccentCyan,
-                            unfocusedBorderColor = DarkSurface,
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary
-                        )
-                    )
-
-                    Spacer(modifier = Modifier.height(20.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
-                    ) {
-                        TvFocusCard(
-                            onClick = { showKeysDialog = false },
-                            modifier = Modifier
-                                .width(110.dp)
-                                .height(44.dp)
-                        ) {
-                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text("Отмена", color = TextSecondary)
+                                Text("Закрыть", color = TextSecondary)
                             }
                         }
 
@@ -1196,108 +626,16 @@ fun SettingsScreen(
 
                         TvFocusCard(
                             onClick = {
-                                if (clientIdInput.isNotBlank()) authManager.saveClientId(clientIdInput)
-                                if (clientSecretInput.isNotBlank()) authManager.saveClientSecret(clientSecretInput)
-
-                                val trimmedToken = tokenInput.trim()
-                                if (trimmedToken.isNotBlank()) {
-                                    if (trimmedToken.startsWith("1//") || trimmedToken.startsWith("ya29.")) {
-                                        authManager.saveTokens(
-                                            accessToken = if (trimmedToken.startsWith("ya29.")) trimmedToken else "valid_via_refresh",
-                                            refreshToken = if (trimmedToken.startsWith("1//")) trimmedToken else null,
-                                            expiresInSec = 3600
-                                        )
-                                        scope.launch {
-                                            authManager.refreshAccessToken()
-                                        }
-                                        showKeysDialog = false
-                                    } else {
-                                        scope.launch {
-                                            val res = authManager.exchangeAuthCode(trimmedToken, clientIdInput, clientSecretInput)
-                                            if (res.isSuccess) {
-                                                showKeysDialog = false
-                                            } else {
-                                                driveErrorMessage = res.exceptionOrNull()?.localizedMessage ?: "Ошибка обмена кода"
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    showKeysDialog = false
-                                    showPairingDialog = true
-                                }
+                                showChangelogDialog = false
+                                startDownload(release)
                             },
                             modifier = Modifier
-                                .width(160.dp)
+                                .width(140.dp)
                                 .height(44.dp)
                         ) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text("Сохранить", color = AccentCyan, fontWeight = FontWeight.Bold)
+                                Text("Загрузить", color = AccentCyan, fontWeight = FontWeight.Bold)
                             }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if (showDeviceCodeDialog && deviceCodeData != null) {
-        Dialog(onDismissRequest = { 
-            showDeviceCodeDialog = false 
-            isDriveSigningIn = false
-        }) {
-            Box(
-                modifier = Modifier
-                    .width(500.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(DarkCard)
-                    .border(2.dp, AccentCyan, RoundedCornerShape(20.dp))
-                    .padding(32.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = "Подключение Google Drive",
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                        color = TextPrimary
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = "1. Откройте на телефоне:",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = TextSecondary
-                    )
-                    Text(
-                        text = deviceCodeData!!.verification_url,
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = AccentCyan
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = "2. Введите этот код:",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = TextSecondary
-                    )
-                    Text(
-                        text = deviceCodeData!!.user_code,
-                        style = MaterialTheme.typography.displayLarge.copy(fontSize = 48.sp, fontWeight = FontWeight.Bold),
-                        color = Color(0xFFFF9500)
-                    )
-                    Spacer(modifier = Modifier.height(24.dp))
-                    if (isPollingToken) {
-                        CircularProgressIndicator(color = AccentCyan)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("Ожидание подтверждения...", color = TextSecondary)
-                    }
-                    Spacer(modifier = Modifier.height(16.dp))
-                    TvFocusCard(
-                        onClick = { 
-                            showDeviceCodeDialog = false 
-                            isDriveSigningIn = false
-                        },
-                        modifier = Modifier.width(140.dp).height(44.dp)
-                    ) {
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text("Отмена", color = TextPrimary)
                         }
                     }
                 }
@@ -1307,138 +645,26 @@ fun SettingsScreen(
 }
 
 private fun getFriendlyChangelog(version: String, rawChangelog: String): List<String> {
+    if (version.contains("0.6")) {
+        return listOf(
+            "Глобальная оптимизация и стабильность: проект полностью сфокусирован на молниеносной работе с домашними серверами DLNA / UPnP.",
+            "Надёжный LibVLC: устранены вылеты при закрытии плеера и исправлено переключение звуковых дорожек.",
+            "Плавный фокус пульта: мгновенное и предсказуемое управление кнопками Android TV без потери курсора."
+        )
+    }
+
     if (version.contains("0.5")) {
         return listOf(
             "Полный переход на плеерный движок LibVLC: встроенный нативный FFmpeg гарантирует 100% плавное воспроизведение любых AVI (DivX, Xvid) и идеальную синхронизацию звука.",
             "Аппаратное и программное декодирование: плавная картинка и чистый звук на любых ТВ без задержек и артефактов.",
-            "Прямое воспроизведение Google Drive и DLNA: мгновенный старт потокового видео с выбором звуковых дорожек и субтитров."
+            "Прямое воспроизведение DLNA: мгновенный старт потокового видео с выбором звуковых дорожек и субтитров."
         )
     }
 
     if (version.contains("0.4")) {
         return listOf(
             "Точный расчёт времени аудиочанков в AVI: устранена рассинхронизация звука через накопление реального времени сэмплов в ChunkReader.",
-            "Подключение Google Drive (Device Flow): вход по коду с экрана на google.com/device — быстро и без настроек на ПК.",
-            "Автооткрытие папки Re:Player: мгновенный доступ к фильмам на вашем Google Диске."
-        )
-    }
-
-    if (version.contains("0.3.4")) {
-        return listOf(
-            "AVI: исправлена синхронизация звука и видео для файлов без idx1-индекса — устранено ~1000-кратное ускорение аудио.",
-            "AVI: добавлена поддержка кодеков DivX 3.11 (DIV1/DIV2/DIV3), XviD (XVID), DX50, 3ivx, MJPG и MPEG-1/2.",
-            "Google Drive: убрана мёртвая OOB-авторизация; подключение через Refresh Token (tools/auth_gdrive.py) теперь работает стабильно.",
-            "Google Drive: при ошибке нативного входа (12500/10) автоматически открывается pairing-окно — не нужно возвращаться в настройки."
-        )
-    }
-
-    if (version.contains("0.3.3")) {
-        return listOf(
-            "Подключение Google Drive для Яндекс ТВ и Android TV: Встроенный локальный веб-сервер и QR-код для моментального входа через телефон или браузер без сервисов Google Play.",
-            "Прямой ввод ключей на ТВ: Возможность ввести Client ID, Client Secret или Refresh Token прямо с пульта телевизора.",
-            "Исправление звука и видео в AVI: Полностью переработан расчёт таймстемпов аудиодорожек в ChunkReader — устранены скрежет звука и зависание кадров.",
-            "Аппаратный и программный fallback видео: Автоматический выбор софтверных декодеров для старых кодеков XviD и DivX."
-        )
-    }
-
-    if (version.contains("0.3.2")) {
-        return listOf(
-            "Стабильный стриминг Google Drive: Динамическое внедрение Bearer-токена в ExoPlayer и поддержка больших видеофайлов (acknowledgeAbuse).",
-            "Умное автообновление токена: Плеер и файловый менеджер автоматически обновляют истекающий токен без разрыва соединения.",
-            "Плавное воспроизведение AVI: Точный маппинг кодеков Xvid, DivX, MP4V, DX50, FMP4, H264 и программный fallback видеодекодера."
-        )
-    }
-
-    if (version.contains("0.3.1")) {
-        return listOf(
-            "Нативный выбор аккаунта Android TV: Использование системного AccountManager вместо мобильного интерфейса — устранена ошибка 12500.",
-            "Прямой запрос разрешений: Окно подтверждения доступа к Google Диску открывается на телевизоре без сбоев.",
-            "Полный доступ к вашим видео: Чтение всех папок Google Диска с автообновлением токена."
-        )
-    }
-
-    if (version.contains("0.3.0")) {
-        return listOf(
-            "Вход в Google Диск в 1 клик на ТВ: Нативная авторизация через аккаунт Google прямо на телевизоре без ввода кодов и телефона.",
-            "Полный доступ ко всем файлам: Чтение всех ваших папок и видеоархивов на Google Диске благодаря правам drive.readonly.",
-            "Мгновенное переподключение: Автоматическое фоновое обновление токена Google Play Services."
-        )
-    }
-
-    if (version.contains("0.2.9")) {
-        return listOf(
-            "Исправление Client Secret: Скорректирован секретный ключ Google OAuth (устранена ошибка «client secret is invalid»).",
-            "Очистка устаревших ключей: Автоматически удалены старые несоответствующие ключи от предыдущих версий.",
-            "Надёжная авторизация: Вход через QR-код на телефоне теперь без ошибок передаёт токен на телевизор."
-        )
-    }
-
-    if (version.contains("0.2.8")) {
-        return listOf(
-            "Google Drive: Вшиты новые параметры подключения (Desktop Client) с поддержкой прямого доступа ко всему диску.",
-            "Фокус в настройках: Кнопка «Скачать» и «Установить» больше никогда не теряют фокус и не сбрасывают курсор в боковое меню.",
-            "Воспроизведение AVI: Расчёт таймстемпов по точной спецификации AVI устраняет чёрный экран и рассинхрон звука."
-        )
-    }
-
-    if (version.contains("0.2.7")) {
-        return listOf(
-            "Стабильное воспроизведение AVI: Полностью исправлена синхронизация аудио и видео — чистый звук и плавное видео без зависаний.",
-            "Папка «Re:Player» на Google Диске: Автоматическое создание папки приложения для мгновенного доступа к вашим фильмам на ТВ.",
-            "Выразительный логотип: Логотип в боковом меню стал крупнее и чётче, радуя глаз стильным неоновым свечением."
-        )
-    }
-
-    if (version.contains("0.2.6")) {
-        return listOf(
-            "Стабильный фокус в настройках: При нажатии «Скачать» или «Проверить» фокус больше не улетает в меню на «Домой».",
-            "Чистый звук и видео в AVI: Исправлен расчёт кадров и включён надёжный программный декодер MPEG-4 — никаких артефактов и инопланетных звуков.",
-            "Загрузка файлов Google Drive: Исправлен запрос к Google API и добавлено автообновление токена — файлы и папки диска отображаются корректно."
-        )
-    }
-
-    if (version.contains("0.2.5")) {
-        return listOf(
-            "Мгновенный вход в Google Диск: Вшит секретный ключ приложения. Больше никаких настроек API — просто сканируйте QR-код телефоном, и диск сразу подключится!",
-            "Улучшенный QR-код: Код больше никогда не сбрасывается по ошибке, телевизор надёжно ожидает подтверждения с телефона.",
-            "Плавное воспроизведение AVI и удобное управление: Все исправления плеера и кнопки «Назад» активны и работают по умолчанию."
-        )
-    }
-
-    if (version.contains("0.2.4")) {
-        return listOf(
-            "Мгновенный «Назад»: Одно нажатие кнопки «Назад» сразу скрывает панель управления плеера без лишних кликов.",
-            "Полный запуск AVI: Устранено зависание картинки — видео в формате .avi теперь непрерывно играет со звуком.",
-            "Подключение Google Drive: Добавлена поддержка Client Secret, код больше не сбрасывается, а телевизор успешно авторизуется."
-        )
-    }
-
-    if (version.contains("0.2.3")) {
-        return listOf(
-            "Память просмотренного: При выходе из видео курсор точно остаётся на этом файле.",
-            "Стабильный фокус: При открытии и выходе из папок курсор больше не прыгает в боковое меню «Домой».",
-            "Google Drive без ошибок: Устранена ошибка авторизации (400 invalid_scope), подключение проходит гладко.",
-            "Восстановление AVI: Фильмы в формате .avi открываются и воспроизводятся стабильно с чистым звуком и картинкой."
-        )
-    }
-
-    if (version.contains("0.2.2")) {
-        return listOf(
-            "Послушный курсор: При открытии папок и выходе назад фокус всегда на первом файле, а не улетает в меню.",
-            "Кнопка «Назад»: Если панель плеера открыта, нажатие «Назад» просто скрывает её, не закрывая видео.",
-            "Удобная перемотка: Стрелки влево и вправо мотают на 10 сек без лишних плашек, а полоса прогресса не прыгает в начало.",
-            "Честный AVI: Фильмы в формате .avi теперь идут чисто и плавно — без шумов, заиканий и артефактов.",
-            "Google Drive без заминок: После входа на телефоне телевизор сразу открывает все твои папки и файлы."
-        )
-    }
-
-    if (version.contains("0.2.1")) {
-        return listOf(
-            "Фирменный логотип: Вместо скучного текста теперь аккуратный прозрачный логотип в боковом меню.",
-            "Поддержка AVI: Старые и редкие видео в формате .avi теперь открываются и воспроизводятся без сбоев.",
-            "Пульт не теряется: Меню плеера больше не застревает — нажми любую стрелку или ОК, и управление появится.",
-            "Умная память папок: После просмотра возвращаешься ровно в ту же папку, и курсор сразу стоит на просмотренном файле.",
-            "Быстрый выход: Одно нажатие «Назад» во время фильма сразу возвращает к списку файлов."
+            "Автооткрытие папок: мгновенный доступ к видеофайлам."
         )
     }
 
@@ -1465,9 +691,9 @@ private fun getFriendlyChangelog(version: String, rawChangelog: String): List<St
 private fun getCurrentAppVersion(context: Context): String {
     return try {
         val pInfo = context.packageManager.getPackageInfo(context.packageName, 0)
-        pInfo.versionName ?: "0.5.0"
+        pInfo.versionName ?: "0.6.0"
     } catch (e: Exception) {
-        "0.5.0"
+        "0.6.0"
     }
 }
 
@@ -1479,4 +705,3 @@ private fun Context.findActivity(): Activity? {
     }
     return null
 }
-

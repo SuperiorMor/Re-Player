@@ -146,10 +146,9 @@ fun HomeScreen(
                                         tint = AccentCyan,
                                         modifier = Modifier.size(28.dp)
                                     )
-                                    // Source badge: DLNA or Google Drive
-                                    val isGdrive = fav.sourceType == MediaSourceType.GOOGLE_DRIVE
-                                    val badgeText = if (isGdrive) "Google Drive" else "DLNA"
-                                    val badgeColor = if (isGdrive) Color(0xFF4285F4) else AccentCyan
+                                    // Source badge: DLNA
+                                    val badgeText = "DLNA"
+                                    val badgeColor = AccentCyan
                                     Box(
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(4.dp))

@@ -1,7 +1,7 @@
 ================================================================================
-PROJECT: Re:Player (Android TV Media Player v0.5.0)
+PROJECT: Re:Player (Android TV Media Player v0.6.0)
 COMPLETE SINGLE-FILE CODEBASE ARCHIVE
-Package: com.replayer | Target SDK: 35 | Compose Android TV + LibVLC
+Package: com.replayer | Target SDK: 35 | Compose Android TV + LibVLC (DLNA ONLY)
 ================================================================================
 
 ### TABLE OF CONTENTS (ALL FILES INCLUDED IN THIS ARCHIVE):
@@ -20,33 +20,27 @@ Package: com.replayer | Target SDK: 35 | Compose Android TV + LibVLC
 13. app/src/main/java/com/replayer/model/MediaSourceType.kt
 14. app/src/main/java/com/replayer/model/MediaItem.kt
 15. app/src/main/java/com/replayer/model/UpnpDevice.kt
-16. app/src/main/java/com/replayer/model/DriveAuthInfo.kt
-17. app/src/main/java/com/replayer/model/TrackInfo.kt
-18. app/src/main/java/com/replayer/model/ViewMode.kt
-19. app/src/main/java/com/replayer/model/FavoriteFolder.kt
-20. app/src/main/java/com/replayer/data/ServerConfigManager.kt
-21. app/src/main/java/com/replayer/data/FavoritesManager.kt
-22. app/src/main/java/com/replayer/network/upnp/SsdpDiscovery.kt
-23. app/src/main/java/com/replayer/network/upnp/UpnpDeviceParser.kt
-24. app/src/main/java/com/replayer/network/upnp/ContentDirectoryService.kt
-25. app/src/main/java/com/replayer/network/gdrive/GoogleDriveAuthManager.kt
-26. app/src/main/java/com/replayer/network/gdrive/GoogleDriveService.kt
-27. app/src/main/java/com/replayer/network/gdrive/LocalPairingServer.kt
-28. app/src/main/java/com/replayer/player/RePlayerEngine.kt
-29. app/src/main/java/com/replayer/player/RePlayerState.kt
-30. app/src/main/java/com/replayer/ui/components/TvFocusCard.kt
-31. app/src/main/java/com/replayer/ui/components/TvNavigationRail.kt
-32. app/src/main/java/com/replayer/ui/screens/HomeScreen.kt
-33. app/src/main/java/com/replayer/ui/screens/GoogleDriveScreen.kt
-34. app/src/main/java/com/replayer/ui/screens/UpnpBrowseScreen.kt
-35. app/src/main/java/com/replayer/ui/screens/PlayerScreen.kt
-36. app/src/main/java/com/replayer/ui/screens/SettingsScreen.kt
-37. app/src/main/java/com/replayer/ui/theme/Color.kt
-38. app/src/main/java/com/replayer/ui/theme/Theme.kt
-39. app/src/main/java/com/replayer/ui/theme/Type.kt
-40. app/src/main/java/com/replayer/updater/UpdateManager.kt
-41. .github/workflows/build.yml
-42. tools/auth_gdrive.py
+16. app/src/main/java/com/replayer/model/TrackInfo.kt
+17. app/src/main/java/com/replayer/model/ViewMode.kt
+18. app/src/main/java/com/replayer/model/FavoriteFolder.kt
+19. app/src/main/java/com/replayer/data/ServerConfigManager.kt
+20. app/src/main/java/com/replayer/data/FavoritesManager.kt
+21. app/src/main/java/com/replayer/network/upnp/SsdpDiscovery.kt
+22. app/src/main/java/com/replayer/network/upnp/UpnpDeviceParser.kt
+23. app/src/main/java/com/replayer/network/upnp/ContentDirectoryService.kt
+24. app/src/main/java/com/replayer/player/RePlayerEngine.kt
+25. app/src/main/java/com/replayer/player/RePlayerState.kt
+26. app/src/main/java/com/replayer/ui/components/TvFocusCard.kt
+27. app/src/main/java/com/replayer/ui/components/TvNavigationRail.kt
+28. app/src/main/java/com/replayer/ui/screens/HomeScreen.kt
+29. app/src/main/java/com/replayer/ui/screens/UpnpBrowseScreen.kt
+30. app/src/main/java/com/replayer/ui/screens/PlayerScreen.kt
+31. app/src/main/java/com/replayer/ui/screens/SettingsScreen.kt
+32. app/src/main/java/com/replayer/ui/theme/Color.kt
+33. app/src/main/java/com/replayer/ui/theme/Theme.kt
+34. app/src/main/java/com/replayer/ui/theme/Type.kt
+35. app/src/main/java/com/replayer/updater/UpdateManager.kt
+36. .github/workflows/build.yml
 ================================================================================
 START OF SOURCE FILES
 ================================================================================
@@ -175,8 +169,8 @@ android {
         applicationId = "com.replayer"
         minSdk = 24
         targetSdk = 35
-        versionCode = 24
-        versionName = "0.5.0"
+        versionCode = 25
+        versionName = "0.6.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -257,7 +251,6 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.okhttp.logging)
     implementation(libs.coil.compose)
-    implementation(libs.play.services.auth)
 }
 
 
@@ -444,7 +437,6 @@ import com.replayer.model.MediaSourceType
 import com.replayer.ui.components.NavItem
 import com.replayer.ui.components.TvFocusCard
 import com.replayer.ui.components.TvNavigationRail
-import com.replayer.ui.screens.GoogleDriveScreen
 import com.replayer.ui.screens.HomeScreen
 import com.replayer.ui.screens.PlayerScreen
 import com.replayer.ui.screens.SettingsScreen
@@ -465,7 +457,6 @@ class MainActivity : ComponentActivity() {
                 var activeMediaItem by remember { mutableStateOf<MediaItem?>(null) }
                 var showExitDialog by remember { mutableStateOf(false) }
                 var initialUpnpFolder by remember { mutableStateOf<Pair<String, String>?>(null) }
-                var initialGdriveFolder by remember { mutableStateOf<Pair<String, String>?>(null) }
                 var lastPlayedMediaId by remember { mutableStateOf<String?>(null) }
 
                 // Exit confirmation dialog on Home screen
@@ -487,7 +478,6 @@ class MainActivity : ComponentActivity() {
                             onItemSelected = {
                                 selectedNav = it
                                 initialUpnpFolder = null
-                                initialGdriveFolder = null
                             }
                         )
 
@@ -498,9 +488,6 @@ class MainActivity : ComponentActivity() {
                                         if (fav.sourceType == MediaSourceType.UPNP_DLNA) {
                                             initialUpnpFolder = Pair(fav.id, fav.title)
                                             selectedNav = NavItem.UPNP
-                                        } else if (fav.sourceType == MediaSourceType.GOOGLE_DRIVE) {
-                                            initialGdriveFolder = Pair(fav.id, fav.title)
-                                            selectedNav = NavItem.GDRIVE
                                         }
                                     }
                                 )
@@ -515,19 +502,6 @@ class MainActivity : ComponentActivity() {
                                     lastPlayedMediaId = lastPlayedMediaId,
                                     isPlayerActive = (activeMediaItem != null),
                                     onFolderLoaded = { initialUpnpFolder = null },
-                                    onConsumeLastPlayedMediaId = { lastPlayedMediaId = null }
-                                )
-                                NavItem.GDRIVE -> GoogleDriveScreen(
-                                    onPlayMedia = {
-                                        lastPlayedMediaId = it.id
-                                        activeMediaItem = it
-                                    },
-                                    onNavigateToSettings = { selectedNav = NavItem.SETTINGS },
-                                    onBackToHome = { selectedNav = NavItem.HOME },
-                                    initialFolder = initialGdriveFolder,
-                                    lastPlayedMediaId = lastPlayedMediaId,
-                                    isPlayerActive = (activeMediaItem != null),
-                                    onFolderLoaded = { initialGdriveFolder = null },
                                     onConsumeLastPlayedMediaId = { lastPlayedMediaId = null }
                                 )
                                 NavItem.SETTINGS -> SettingsScreen(
@@ -661,7 +635,6 @@ package com.replayer.model
 
 enum class MediaSourceType {
     UPNP_DLNA,
-    GOOGLE_DRIVE,
     LOCAL_STORAGE
 }
 
@@ -738,35 +711,6 @@ data class UpnpDevice(
     val location: String,
     val iconUrl: String? = null,
     val contentDirectoryControlUrl: String? = null
-)
-
-
-================================================================================
-FILE: app/src/main/java/com/replayer/model/DriveAuthInfo.kt
-================================================================================
-
-package com.replayer.model
-
-import kotlinx.serialization.Serializable
-
-@Serializable
-data class DeviceCodeResponse(
-    val device_code: String,
-    val user_code: String,
-    val verification_url: String,
-    val verification_url_complete: String? = null,
-    val expires_in: Int,
-    val interval: Int
-)
-
-@Serializable
-data class TokenResponse(
-    val access_token: String? = null,
-    val refresh_token: String? = null,
-    val expires_in: Int? = null,
-    val token_type: String? = null,
-    val error: String? = null,
-    val error_description: String? = null
 )
 
 
@@ -1331,1185 +1275,6 @@ class ContentDirectoryService {
 
 
 ================================================================================
-FILE: app/src/main/java/com/replayer/network/gdrive/GoogleDriveAuthManager.kt
-================================================================================
-
-package com.replayer.network.gdrive
-
-import android.accounts.Account
-import android.accounts.AccountManager
-import android.app.Activity
-import android.content.Context
-import android.content.Intent
-import com.google.android.gms.auth.GoogleAuthUtil
-import com.google.android.gms.auth.UserRecoverableAuthException
-import com.google.android.gms.auth.api.signin.GoogleSignIn
-import com.google.android.gms.auth.api.signin.GoogleSignInAccount
-import com.google.android.gms.auth.api.signin.GoogleSignInClient
-import com.google.android.gms.auth.api.signin.GoogleSignInOptions
-import com.google.android.gms.common.api.ApiException
-import com.google.android.gms.common.api.Scope
-import com.replayer.model.DeviceCodeResponse
-import com.replayer.model.TokenResponse
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.Json
-import okhttp3.FormBody
-import okhttp3.OkHttpClient
-import okhttp3.Request
-
-class UserConsentRequiredException(
-    val consentIntent: Intent?,
-    val accountName: String
-) : Exception("Требуется подтвердить разрешения Google")
-
-class GoogleDriveAuthManager(private val context: Context) {
-    private val client = OkHttpClient()
-    private val json = Json { ignoreUnknownKeys = true }
-    private val prefs = context.getSharedPreferences("replayer_drive_prefs", Context.MODE_PRIVATE)
-
-    init {
-        _isAuthenticatedFlow.value = isAuthenticated()
-    }
-
-    val isAuthenticatedFlow: kotlinx.coroutines.flow.StateFlow<Boolean> = _isAuthenticatedFlow
-
-    companion object {
-        private val _isAuthenticatedFlow = kotlinx.coroutines.flow.MutableStateFlow(false)
-        val sharedAuthenticatedFlow: kotlinx.coroutines.flow.StateFlow<Boolean> = _isAuthenticatedFlow
-
-        // Standard Google OAuth2 Device Endpoint
-        private const val DEVICE_CODE_URL = "https://oauth2.googleapis.com/device/code"
-        private const val TOKEN_URL = "https://oauth2.googleapis.com/token"
-        private const val PRIMARY_SCOPE = "https://www.googleapis.com/auth/drive.file email profile"
-        private const val FALLBACK_SCOPE = "https://www.googleapis.com/auth/drive.file email profile"
-
-        // Obfuscated built-in Google OAuth credentials to prevent raw git pattern scanning
-        private val OBF_ID = byteArrayOf(
-            108, 109, 105, 109, 110, 109, 106, 108, 104, 98, 104, 108, 119, 53, 53, 99, 56, 59, 104, 107, 46, 52, 41, 51, 59, 41, 46, 105, 50, 54, 49, 55, 104, 55, 42, 99, 106, 53, 56, 41, 43, 51, 57, 47, 59, 116, 59, 42, 42, 41, 116, 61, 53, 53, 61, 54, 63, 47, 41, 63, 40, 57, 53, 52, 46, 63, 52, 46, 116, 57, 53, 55
-        )
-        private val OBF_SEC = byteArrayOf(
-            29, 21, 25, 9, 10, 2, 119, 42, 41, 108, 45, 11, 22, 2, 41, 13, 43, 20, 119, 52, 51, 110, 34, 5, 59, 8, 62, 44, 42, 53, 29, 98, 56, 55, 9
-        )
-
-        val DEFAULT_CLIENT_ID: String get() = OBF_ID.map { (it.toInt() xor 0x5A).toChar() }.joinToString("")
-        val DEFAULT_CLIENT_SECRET: String get() = OBF_SEC.map { (it.toInt() xor 0x5A).toChar() }.joinToString("")
-    }
-
-    fun getSavedAccessToken(): String? = prefs.getString("access_token", null)
-
-    fun getSavedClientId(): String {
-        val custom = prefs.getString("gdrive_client_id", "")?.trim() ?: ""
-        if (custom.isBlank() || custom.contains("sdv9vfgbi4667vmkrd90uhf381s75rc3")) {
-            return DEFAULT_CLIENT_ID
-        }
-        return custom
-    }
-
-    fun saveClientId(clientId: String) {
-        prefs.edit().putString("gdrive_client_id", clientId.trim()).apply()
-    }
-
-    fun getSavedClientSecret(): String {
-        val custom = prefs.getString("gdrive_client_secret", "")?.trim() ?: ""
-        if (custom.isBlank() || custom.contains("ilEzfz3FbWDrtMEVDeOXHxjhThD3")) {
-            return DEFAULT_CLIENT_SECRET
-        }
-        return custom
-    }
-
-    fun saveClientSecret(secret: String) {
-        prefs.edit().putString("gdrive_client_secret", secret.trim()).apply()
-    }
-
-    fun saveTokens(accessToken: String, refreshToken: String?, expiresInSec: Int? = null) {
-        val editor = prefs.edit().putString("access_token", accessToken)
-        if (!refreshToken.isNullOrBlank()) {
-            editor.putString("refresh_token", refreshToken)
-        }
-        if (expiresInSec != null && expiresInSec > 0) {
-            val expiresAtMs = System.currentTimeMillis() + (expiresInSec * 1000L)
-            editor.putLong("expires_at", expiresAtMs)
-        }
-        editor.apply()
-        _isAuthenticatedFlow.value = true
-    }
-
-    fun isTokenExpired(bufferMs: Long = 60_000L): Boolean {
-        val expiresAt = prefs.getLong("expires_at", 0L)
-        if (expiresAt <= 0L) return false
-        return System.currentTimeMillis() + bufferMs >= expiresAt
-    }
-
-    suspend fun getValidAccessToken(): String? = withContext(Dispatchers.IO) {
-        val token = getSavedAccessToken()
-        if (token.isNullOrBlank()) return@withContext null
-        if (!isTokenExpired()) return@withContext token
-        val refreshed = refreshAccessToken()
-        refreshed ?: token
-    }
-
-    fun getValidAccessTokenBlocking(): String? {
-        val token = getSavedAccessToken()
-        if (token.isNullOrBlank()) return null
-        if (!isTokenExpired()) return token
-        return runCatching {
-            kotlinx.coroutines.runBlocking(Dispatchers.IO) {
-                refreshAccessToken()
-            }
-        }.getOrNull() ?: token
-    }
-
-    fun isGooglePlayServicesAvailable(): Boolean {
-        return try {
-            val result = com.google.android.gms.common.GoogleApiAvailability.getInstance()
-                .isGooglePlayServicesAvailable(context)
-            result == com.google.android.gms.common.ConnectionResult.SUCCESS
-        } catch (_: Exception) {
-            false
-        }
-    }
-
-    suspend fun exchangeAuthCode(
-        authCode: String,
-        clientId: String = getSavedClientId(),
-        clientSecret: String = getSavedClientSecret(),
-        redirectUri: String = "urn:ietf:wg:oauth:2.0:oob"
-    ): Result<TokenResponse> = withContext(Dispatchers.IO) {
-        val form = FormBody.Builder()
-            .add("code", authCode.trim())
-            .add("client_id", clientId.trim())
-            .add("client_secret", clientSecret.trim())
-            .add("redirect_uri", redirectUri.trim())
-            .add("grant_type", "authorization_code")
-            .build()
-
-        val request = Request.Builder().url(TOKEN_URL).post(form).build()
-        try {
-            val response = client.newCall(request).execute()
-            val body = response.body?.string() ?: ""
-            if (!response.isSuccessful) {
-                return@withContext Result.failure(Exception("Ошибка Google OAuth (${response.code}): $body"))
-            }
-            val tokenResp = json.decodeFromString<TokenResponse>(body)
-            if (!tokenResp.access_token.isNullOrBlank()) {
-                saveTokens(tokenResp.access_token, tokenResp.refresh_token, tokenResp.expires_in)
-                saveClientId(clientId)
-                saveClientSecret(clientSecret)
-                return@withContext Result.success(tokenResp)
-            }
-            Result.failure(Exception("Пустой токен в ответе Google"))
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    fun getChooseAccountIntent(): Intent {
-        return AccountManager.newChooseAccountIntent(
-            null,
-            null,
-            arrayOf("com.google"),
-            null,
-            null,
-            null,
-            null
-        )
-    }
-
-    suspend fun getAccessTokenForAccount(accountName: String): Result<String> = withContext(Dispatchers.IO) {
-        try {
-            val account = Account(accountName, "com.google")
-            val token = GoogleAuthUtil.getToken(
-                context,
-                account,
-                "oauth2:https://www.googleapis.com/auth/drive.readonly"
-            )
-            if (!token.isNullOrBlank()) {
-                saveTokens(token, null, expiresInSec = 3600)
-                prefs.edit().putString("account_email", accountName).apply()
-                Result.success(token)
-            } else {
-                Result.failure(Exception("Пустой токен авторизации"))
-            }
-        } catch (e: UserRecoverableAuthException) {
-            Result.failure(UserConsentRequiredException(e.intent, accountName))
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    fun getGoogleSignInClient(activity: Activity): GoogleSignInClient {
-        val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-            .requestEmail()
-            .requestScopes(Scope("https://www.googleapis.com/auth/drive.readonly"))
-            .build()
-        return GoogleSignIn.getClient(activity, gso)
-    }
-
-    suspend fun handleSignInResult(data: Intent?): Result<String> = withContext(Dispatchers.IO) {
-        try {
-            val task = GoogleSignIn.getSignedInAccountFromIntent(data)
-            val account: GoogleSignInAccount = task.getResult(ApiException::class.java)
-            val email = account.email ?: ""
-            val androidAccount = account.account ?: Account(email, "com.google")
-            val token = GoogleAuthUtil.getToken(
-                context,
-                androidAccount,
-                "oauth2:https://www.googleapis.com/auth/drive.readonly"
-            )
-            if (!token.isNullOrBlank()) {
-                saveTokens(token, null, expiresInSec = 3600)
-                prefs.edit().putString("account_email", email).apply()
-                Result.success(token)
-            } else {
-                Result.failure(Exception("Пустой токен авторизации"))
-            }
-        } catch (e: ApiException) {
-            val msg = when (e.statusCode) {
-                10, 12500 -> "Ошибка ${e.statusCode}: В Google Cloud Console для com.replayer должен быть SHA-1: 94:D5:63:14:00:21:6E:F3:9C:A1:98:B1:94:0A:FA:7E:0E:3A:C6:0D"
-                else -> "Ошибка входа Google (${e.statusCode}): ${e.localizedMessage}"
-            }
-            Result.failure(Exception(msg))
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    fun getSavedAccountEmail(): String? = prefs.getString("account_email", null)
-
-    fun clearAuth() {
-        val oldToken = getSavedAccessToken()
-        if (oldToken != null) {
-            try {
-                GoogleAuthUtil.clearToken(context, oldToken)
-            } catch (_: Exception) {}
-        }
-        prefs.edit()
-            .remove("access_token")
-            .remove("refresh_token")
-            .remove("expires_at")
-            .remove("account_email")
-            .apply()
-        _isAuthenticatedFlow.value = false
-        try {
-            val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN).build()
-            GoogleSignIn.getClient(context, gso).signOut()
-        } catch (_: Exception) {}
-    }
-
-    suspend fun refreshAccessToken(): String? = withContext(Dispatchers.IO) {
-        try {
-            val email = getSavedAccountEmail()
-            if (!email.isNullOrBlank()) {
-                val oldToken = getSavedAccessToken()
-                if (oldToken != null) {
-                    try {
-                        GoogleAuthUtil.clearToken(context, oldToken)
-                    } catch (_: Exception) {}
-                }
-                val account = Account(email, "com.google")
-                val newToken = GoogleAuthUtil.getToken(
-                    context,
-                    account,
-                    "oauth2:https://www.googleapis.com/auth/drive.readonly"
-                )
-                if (!newToken.isNullOrBlank()) {
-                    saveTokens(newToken, null, expiresInSec = 3600)
-                    return@withContext newToken
-                }
-            }
-        } catch (e: Exception) {
-            android.util.Log.e("DriveAuth", "Refresh via GoogleAuthUtil failed: ${e.message}")
-        }
-
-        val refreshToken = prefs.getString("refresh_token", null) ?: return@withContext null
-        val clientId = getSavedClientId()
-        val clientSecret = getSavedClientSecret()
-        if (clientId.isBlank() || clientSecret.isBlank()) return@withContext null
-
-        val form = FormBody.Builder()
-            .add("client_id", clientId.trim())
-            .add("client_secret", clientSecret.trim())
-            .add("refresh_token", refreshToken)
-            .add("grant_type", "refresh_token")
-            .build()
-
-        val request = Request.Builder().url(TOKEN_URL).post(form).build()
-        try {
-            val response = client.newCall(request).execute()
-            val body = response.body?.string() ?: return@withContext null
-            if (!response.isSuccessful) {
-                android.util.Log.e("DriveAuth", "Refresh failed (${response.code}): $body")
-                return@withContext null
-            }
-            val tokenResp = json.decodeFromString<TokenResponse>(body)
-            if (!tokenResp.access_token.isNullOrBlank()) {
-                saveTokens(tokenResp.access_token, tokenResp.refresh_token ?: refreshToken, tokenResp.expires_in)
-                return@withContext tokenResp.access_token
-            }
-        } catch (e: Exception) {
-            android.util.Log.e("DriveAuth", "Refresh exception: ${e.message}")
-        }
-        null
-    }
-
-    suspend fun requestDeviceCode(clientId: String = getSavedClientId()): Result<DeviceCodeResponse> = withContext(Dispatchers.IO) {
-        val actualClientId = clientId.ifBlank { getSavedClientId() }
-        if (actualClientId.isBlank() || actualClientId.contains("YOUR_TV_CLIENT_ID")) {
-            return@withContext Result.failure(
-                Exception("Client ID не настроен.")
-            )
-        }
-
-        val formPrimary = FormBody.Builder()
-            .add("client_id", actualClientId.trim())
-            .add("scope", PRIMARY_SCOPE)
-            .build()
-
-        val requestPrimary = Request.Builder().url(DEVICE_CODE_URL).post(formPrimary).build()
-        try {
-            val responsePrimary = client.newCall(requestPrimary).execute()
-            val bodyPrimary = responsePrimary.body?.string() ?: ""
-            if (responsePrimary.isSuccessful) {
-                val codeResp = json.decodeFromString<DeviceCodeResponse>(bodyPrimary)
-                saveClientId(actualClientId)
-                return@withContext Result.success(codeResp)
-            }
-
-            // If invalid_scope, gracefully retry with fallback scope
-            if (bodyPrimary.contains("invalid_scope")) {
-                val formFallback = FormBody.Builder()
-                    .add("client_id", actualClientId.trim())
-                    .add("scope", FALLBACK_SCOPE)
-                    .build()
-                val requestFallback = Request.Builder().url(DEVICE_CODE_URL).post(formFallback).build()
-                val responseFallback = client.newCall(requestFallback).execute()
-                val bodyFallback = responseFallback.body?.string() ?: ""
-                if (responseFallback.isSuccessful) {
-                    val codeResp = json.decodeFromString<DeviceCodeResponse>(bodyFallback)
-                    saveClientId(actualClientId)
-                    return@withContext Result.success(codeResp)
-                }
-                return@withContext Result.failure(Exception("Ошибка Google API (${responseFallback.code}): $bodyFallback"))
-            }
-
-            return@withContext Result.failure(Exception("Ошибка Google API (${responsePrimary.code}): $bodyPrimary"))
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    fun isAuthenticated(): Boolean = !getSavedAccessToken().isNullOrBlank()
-
-    suspend fun pollForToken(
-        clientId: String,
-        deviceCode: String,
-        clientSecret: String = "",
-        intervalSec: Int = 5,
-        maxRetries: Int = 120
-    ): TokenResponse? = withContext(Dispatchers.IO) {
-        val effectiveSecret = clientSecret.ifBlank { getSavedClientSecret() }
-        val formBuilder = FormBody.Builder()
-            .add("client_id", clientId.trim())
-            .add("device_code", deviceCode)
-            .add("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
-        if (effectiveSecret.isNotBlank()) {
-            formBuilder.add("client_secret", effectiveSecret.trim())
-        }
-        val form = formBuilder.build()
-
-        var currentInterval = intervalSec.coerceAtLeast(5)
-        var retries = 0
-        while (retries < maxRetries) {
-            delay(currentInterval * 1000L)
-            retries++
-
-            val request = Request.Builder().url(TOKEN_URL).post(form).build()
-            try {
-                val response = client.newCall(request).execute()
-                val body = response.body?.string() ?: continue
-                android.util.Log.d("DriveAuth", "Poll ($retries): code=${response.code}, body=$body")
-
-                val tokenResp = try {
-                    json.decodeFromString<TokenResponse>(body)
-                } catch (e: Exception) {
-                    android.util.Log.w("DriveAuth", "Poll JSON parse error: ${e.message}")
-                    null
-                }
-
-                if (tokenResp != null && !tokenResp.access_token.isNullOrBlank()) {
-                    saveTokens(tokenResp.access_token, tokenResp.refresh_token, tokenResp.expires_in)
-                    return@withContext tokenResp
-                }
-
-                val errorCode = tokenResp?.error
-                when (errorCode) {
-                    "authorization_pending" -> {
-                        // User is still authorizing on phone / browser; keep polling
-                    }
-                    "slow_down" -> {
-                        // Rate limit: increase polling interval by 5 seconds
-                        currentInterval += 5
-                    }
-                    "access_denied", "expired_token" -> {
-                        return@withContext tokenResp
-                    }
-                    else -> {
-                        if (errorCode != null) {
-                            return@withContext tokenResp
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                android.util.Log.w("DriveAuth", "Poll exception: ${e.message}")
-            }
-        }
-        null
-    }
-}
-
-
-================================================================================
-FILE: app/src/main/java/com/replayer/network/gdrive/GoogleDriveService.kt
-================================================================================
-
-package com.replayer.network.gdrive
-
-import android.util.Log
-import com.replayer.model.MediaItem
-import com.replayer.model.MediaSourceType
-import com.replayer.model.MediaType
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-
-class GoogleDriveService(private val authManager: GoogleDriveAuthManager) {
-    private val client = OkHttpClient()
-    private val json = Json { ignoreUnknownKeys = true }
-
-    var lastErrorMessage: String? = null
-        private set
-
-    suspend fun getOrCreateRePlayerFolder(token: String): MediaItem? = withContext(Dispatchers.IO) {
-        val searchUrl = "https://www.googleapis.com/drive/v3/files".toHttpUrl().newBuilder()
-            .addQueryParameter("q", "mimeType = 'application/vnd.google-apps.folder' and name = 'Re:Player' and trashed = false")
-            .addQueryParameter("fields", "files(id,name,mimeType)")
-            .addQueryParameter("pageSize", "1")
-            .addQueryParameter("supportsAllDrives", "true")
-            .addQueryParameter("includeItemsFromAllDrives", "true")
-            .build()
-
-        val searchReq = Request.Builder()
-            .url(searchUrl)
-            .addHeader("Authorization", "Bearer $token")
-            .build()
-
-        try {
-            val response = client.newCall(searchReq).execute()
-            val body = response.body?.string() ?: ""
-            if (response.isSuccessful) {
-                val rootObj = json.parseToJsonElement(body).jsonObject
-                val files = rootObj["files"]?.jsonArray
-                if (files != null && files.isNotEmpty()) {
-                    val folderObj = files[0].jsonObject
-                    val id = folderObj["id"]?.jsonPrimitive?.content ?: ""
-                    if (id.isNotBlank()) {
-                        return@withContext MediaItem(
-                            id = id,
-                            title = "Re:Player",
-                            uri = "",
-                            type = MediaType.DIRECTORY,
-                            sourceType = MediaSourceType.GOOGLE_DRIVE,
-                            parentId = "root"
-                        )
-                    }
-                }
-            }
-
-            // Folder does not exist, create it
-            val createUrl = "https://www.googleapis.com/drive/v3/files".toHttpUrl().newBuilder()
-                .addQueryParameter("supportsAllDrives", "true")
-                .build()
-
-            val jsonBody = """{"name":"Re:Player","mimeType":"application/vnd.google-apps.folder"}"""
-            val reqBody = jsonBody.toRequestBody("application/json; charset=utf-8".toMediaType())
-
-            val createReq = Request.Builder()
-                .url(createUrl)
-                .addHeader("Authorization", "Bearer $token")
-                .post(reqBody)
-                .build()
-
-            val createResp = client.newCall(createReq).execute()
-            val createBody = createResp.body?.string() ?: ""
-            if (createResp.isSuccessful) {
-                val createdObj = json.parseToJsonElement(createBody).jsonObject
-                val id = createdObj["id"]?.jsonPrimitive?.content ?: ""
-                if (id.isNotBlank()) {
-                    return@withContext MediaItem(
-                        id = id,
-                        title = "Re:Player",
-                        uri = "",
-                        type = MediaType.DIRECTORY,
-                        sourceType = MediaSourceType.GOOGLE_DRIVE,
-                        parentId = "root"
-                    )
-                }
-            } else {
-                Log.e("DriveService", "Create folder error (${createResp.code}): $createBody")
-            }
-        } catch (e: Exception) {
-            Log.e("DriveService", "Error getOrCreateRePlayerFolder: ${e.message}", e)
-        }
-        null
-    }
-
-    suspend fun listFolder(folderId: String = "root"): List<MediaItem> = withContext(Dispatchers.IO) {
-        lastErrorMessage = null
-        var token = authManager.getValidAccessToken() ?: authManager.getSavedAccessToken()
-        if (token.isNullOrBlank()) {
-            lastErrorMessage = "Требуется авторизация"
-            return@withContext emptyList()
-        }
-
-        val isRoot = folderId == "root"
-        val primaryQuery = if (isRoot) {
-            "'root' in parents and trashed = false"
-        } else {
-            "'$folderId' in parents and trashed = false"
-        }
-
-        var items = executeDriveQuery(token, primaryQuery, folderId).toMutableList()
-
-        // If token was expired (401), try refreshing token and re-execute
-        if (lastErrorMessage?.contains("401") == true) {
-            val newToken = authManager.refreshAccessToken()
-            if (!newToken.isNullOrBlank()) {
-                token = newToken
-                lastErrorMessage = null
-                items = executeDriveQuery(token, primaryQuery, folderId).toMutableList()
-            }
-        }
-
-        // If root has no items with "'root' in parents", fallback to broad query for accessible files/folders
-        if (isRoot && items.isEmpty() && lastErrorMessage == null) {
-            val broadItems = executeDriveQuery(token, "trashed = false", folderId)
-            val existingIds = items.map { it.id }.toSet()
-            for (item in broadItems) {
-                if (item.id !in existingIds) {
-                    items.add(item)
-                }
-            }
-        }
-
-        items
-    }
-
-    private fun executeDriveQuery(token: String, query: String, parentFolderId: String): List<MediaItem> {
-        val httpUrl = "https://www.googleapis.com/drive/v3/files".toHttpUrl().newBuilder()
-            .addQueryParameter("q", query)
-            .addQueryParameter("fields", "files(id,name,mimeType,size,thumbnailLink,parents)")
-            .addQueryParameter("pageSize", "100")
-            .addQueryParameter("supportsAllDrives", "true")
-            .addQueryParameter("includeItemsFromAllDrives", "true")
-            .build()
-
-        val request = Request.Builder()
-            .url(httpUrl)
-            .addHeader("Authorization", "Bearer $token")
-            .build()
-
-        val items = mutableListOf<MediaItem>()
-        try {
-            val response = client.newCall(request).execute()
-            val body = response.body?.string() ?: ""
-            if (!response.isSuccessful) {
-                Log.e("DriveService", "Drive API error (${response.code}): $body")
-                lastErrorMessage = "Ошибка Google Drive (${response.code})"
-                return emptyList()
-            }
-
-            val rootObj = json.parseToJsonElement(body).jsonObject
-            val filesArray = rootObj["files"]?.jsonArray ?: return emptyList()
-
-            for (element in filesArray) {
-                val f = element.jsonObject
-                val id = f["id"]?.jsonPrimitive?.content ?: continue
-                val name = f["name"]?.jsonPrimitive?.content ?: "Unnamed"
-                val mimeType = f["mimeType"]?.jsonPrimitive?.content ?: ""
-                val size = f["size"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L
-                val thumb = f["thumbnailLink"]?.jsonPrimitive?.content
-
-                val isFolder = mimeType == "application/vnd.google-apps.folder"
-                val lowerName = name.lowercase()
-                val mediaType = when {
-                    isFolder -> MediaType.DIRECTORY
-                    mimeType.startsWith("video/") -> MediaType.VIDEO
-                    mimeType.startsWith("audio/") -> MediaType.AUDIO
-                    mimeType.startsWith("image/") -> MediaType.IMAGE
-                    lowerName.endsWith(".mkv") || lowerName.endsWith(".avi") || lowerName.endsWith(".mp4") ||
-                    lowerName.endsWith(".mov") || lowerName.endsWith(".ts") || lowerName.endsWith(".m2ts") ||
-                    lowerName.endsWith(".webm") || lowerName.endsWith(".flv") || lowerName.endsWith(".wmv") -> MediaType.VIDEO
-                    lowerName.endsWith(".mp3") || lowerName.endsWith(".flac") || lowerName.endsWith(".wav") ||
-                    lowerName.endsWith(".m4a") || lowerName.endsWith(".aac") || lowerName.endsWith(".ogg") -> MediaType.AUDIO
-                    lowerName.endsWith(".jpg") || lowerName.endsWith(".jpeg") || lowerName.endsWith(".png") ||
-                    lowerName.endsWith(".webp") -> MediaType.IMAGE
-                    else -> continue
-                }
-
-                val ext = name.substringAfterLast('.', "").uppercase()
-                val format = if (ext.isNotEmpty() && ext.length <= 5) ext else null
-
-                // Streaming URL with alt=media and acknowledgeAbuse for large video files
-                val streamUrl = "https://www.googleapis.com/drive/v3/files/$id?alt=media&acknowledgeAbuse=true"
-
-                items.add(
-                    MediaItem(
-                        id = id,
-                        title = name,
-                        uri = streamUrl,
-                        type = mediaType,
-                        sourceType = MediaSourceType.GOOGLE_DRIVE,
-                        size = size,
-                        mimeType = mimeType,
-                        thumbnailUrl = thumb,
-                        parentId = parentFolderId,
-                        format = format
-                    )
-                )
-            }
-        } catch (e: Exception) {
-            Log.e("DriveService", "Exception in executeDriveQuery: ${e.message}", e)
-            lastErrorMessage = e.localizedMessage ?: "Ошибка сети"
-        }
-        return items
-    }
-}
-
-
-================================================================================
-FILE: app/src/main/java/com/replayer/network/gdrive/LocalPairingServer.kt
-================================================================================
-
-package com.replayer.network.gdrive
-
-import android.content.Context
-import android.util.Log
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonPrimitive
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import java.io.BufferedReader
-import java.io.InputStreamReader
-import java.io.OutputStream
-import java.net.Inet4Address
-import java.net.NetworkInterface
-import java.net.ServerSocket
-import java.net.Socket
-import java.net.URLDecoder
-import java.util.UUID
-
-class LocalPairingServer(
-    private val context: Context,
-    private val authManager: GoogleDriveAuthManager,
-    private val onPaired: (String?) -> Unit
-) {
-    private val scope = CoroutineScope(Dispatchers.IO)
-    private var serverSocket: ServerSocket? = null
-    private var isRunning = false
-    private var pollJob: Job? = null
-    private val okClient = OkHttpClient()
-    private val json = Json { ignoreUnknownKeys = true }
-
-    val sessionId: String = UUID.randomUUID().toString().take(8).lowercase()
-    var localIp: String = "127.0.0.1"
-        private set
-    var port: Int = 8765
-        private set
-
-    val pairingUrl: String
-        get() = "http://$localIp:$port/?session=$sessionId"
-
-    fun start() {
-        if (isRunning) return
-        isRunning = true
-        localIp = getLocalIpAddress()
-
-        // 1. Локальный TCP HTTP сервер
-        scope.launch {
-            try {
-                serverSocket = ServerSocket(port)
-            } catch (_: Exception) {
-                port = 8766
-                serverSocket = try { ServerSocket(port) } catch (_: Exception) { null }
-            }
-
-            Log.d("PairingServer", "Started on $pairingUrl")
-            while (isRunning && serverSocket != null && !serverSocket!!.isClosed) {
-                try {
-                    val clientSocket = serverSocket!!.accept()
-                    launch { handleClient(clientSocket) }
-                } catch (_: Exception) {
-                    if (!isRunning) break
-                }
-            }
-        }
-
-        // 2. Cloud relay polling via ntfy.sh (fallback для LTE)
-        pollJob = scope.launch {
-            val topicUrl = "https://ntfy.sh/replayer_pair_$sessionId/raw?poll=1"
-            var attempts = 0
-            while (isActive && isRunning && attempts < 120) {
-                delay(3000)
-                attempts++
-                try {
-                    val request = Request.Builder().url(topicUrl).build()
-                    val response = okClient.newCall(request).execute()
-                    val body = response.body?.string()?.trim() ?: continue
-                    if (body.isNotBlank() && body.contains("{") && body.contains("}")) {
-                        Log.d("PairingServer", "Received ntfy payload: $body")
-                        handleIncomingTokensJson(body)
-                        break
-                    }
-                } catch (_: Exception) {}
-            }
-        }
-    }
-
-    fun stop() {
-        isRunning = false
-        pollJob?.cancel()
-        try {
-            serverSocket?.close()
-        } catch (_: Exception) {}
-        serverSocket = null
-    }
-
-    private suspend fun handleClient(socket: Socket) = withContext(Dispatchers.IO) {
-        try {
-            val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
-            val out = socket.getOutputStream()
-
-            val requestLine = reader.readLine() ?: return@withContext
-            val parts = requestLine.split(" ")
-            if (parts.size < 2) return@withContext
-
-            val method = parts[0]
-            val path = parts[1]
-
-            // Считываем заголовки для Content-Length
-            var contentLength = 0
-            var line: String?
-            while (reader.readLine().also { line = it } != null) {
-                if (line!!.isEmpty()) break
-                if (line!!.lowercase().startsWith("content-length:")) {
-                    contentLength = line!!.substringAfter(":").trim().toIntOrNull() ?: 0
-                }
-            }
-
-            when {
-                method.equals("POST", ignoreCase = true) && path.startsWith("/api/save") -> {
-                    val bodyChars = CharArray(contentLength)
-                    var readTotal = 0
-                    while (readTotal < contentLength) {
-                        val read = reader.read(bodyChars, readTotal, contentLength - readTotal)
-                        if (read == -1) break
-                        readTotal += read
-                    }
-                    val success = handleIncomingPayload(String(bodyChars))
-                    sendJson(
-                        out,
-                        if (success) 200 else 400,
-                        if (success) """{"status":"ok","message":"Google Drive успешно подключен на ТВ!"}"""
-                        else """{"status":"error","message":"Не удалось сохранить токен"}"""
-                    )
-                }
-                method.equals("POST", ignoreCase = true) && path.startsWith("/api/token") -> {
-                    val bodyChars = CharArray(contentLength)
-                    var readTotal = 0
-                    while (readTotal < contentLength) {
-                        val read = reader.read(bodyChars, readTotal, contentLength - readTotal)
-                        if (read == -1) break
-                        readTotal += read
-                    }
-                    val success = handleIncomingTokensJson(String(bodyChars))
-                    sendJson(
-                        out,
-                        if (success) 200 else 400,
-                        if (success) """{"status":"ok"}""" else """{"status":"error"}"""
-                    )
-                }
-                else -> {
-                    // Serve mobile pairing web page
-                    val html = getPairingHtml(
-                        sessionId,
-                        authManager.getSavedClientId(),
-                        authManager.getSavedClientSecret()
-                    )
-                    sendHttpResponse(out, 200, "text/html; charset=utf-8", html)
-                }
-            }
-        } catch (e: Exception) {
-            Log.w("PairingServer", "Client error: ${e.message}")
-        } finally {
-            try { socket.close() } catch (_: Exception) {}
-        }
-    }
-
-    private fun handleIncomingPayload(rawBody: String): Boolean {
-        return try {
-            if (rawBody.trim().startsWith("{")) {
-                handleIncomingTokensJson(rawBody)
-            } else {
-                // URL-encoded form data
-                val params = rawBody.split("&").associate { param ->
-                    val pair = param.split("=")
-                    val key = URLDecoder.decode(pair[0], "UTF-8")
-                    val value = if (pair.size > 1) URLDecoder.decode(pair[1], "UTF-8") else ""
-                    key to value
-                }
-                val clientId = params["client_id"]?.trim() ?: ""
-                val clientSecret = params["client_secret"]?.trim() ?: ""
-                val refreshToken = params["refresh_token"]?.trim() ?: ""
-                val accessToken = params["access_token"]?.trim() ?: ""
-
-                if (clientId.isNotBlank()) authManager.saveClientId(clientId)
-                if (clientSecret.isNotBlank()) authManager.saveClientSecret(clientSecret)
-
-                if (accessToken.isNotBlank() || refreshToken.isNotBlank()) {
-                    authManager.saveTokens(
-                        accessToken = accessToken.ifBlank { "valid_via_refresh" },
-                        refreshToken = refreshToken.ifBlank { null },
-                        expiresInSec = 3600
-                    )
-                    scope.launch {
-                        if (refreshToken.isNotBlank()) {
-                            authManager.refreshAccessToken()
-                        }
-                        withContext(Dispatchers.Main) {
-                            onPaired(authManager.getSavedAccountEmail())
-                        }
-                    }
-                    return true
-                }
-                false
-            }
-        } catch (e: Exception) {
-            Log.e("PairingServer", "Failed to parse payload: ${e.message}")
-            false
-        }
-    }
-
-    private fun handleIncomingTokensJson(jsonStr: String): Boolean {
-        return try {
-            val element = json.parseToJsonElement(jsonStr) as? JsonObject ?: return false
-            val clientId = element["client_id"]?.jsonPrimitive?.contentOrNull?.trim()
-            val clientSecret = element["client_secret"]?.jsonPrimitive?.contentOrNull?.trim()
-            val accessToken = element["access_token"]?.jsonPrimitive?.contentOrNull?.trim()
-            val refreshToken = element["refresh_token"]?.jsonPrimitive?.contentOrNull?.trim()
-            val authCode = element["auth_code"]?.jsonPrimitive?.contentOrNull?.trim()
-
-            if (!clientId.isNullOrBlank()) authManager.saveClientId(clientId)
-            if (!clientSecret.isNullOrBlank()) authManager.saveClientSecret(clientSecret)
-
-            if (!authCode.isNullOrBlank()) {
-                scope.launch {
-                    val result = authManager.exchangeAuthCode(
-                        authCode,
-                        clientId ?: authManager.getSavedClientId(),
-                        clientSecret ?: authManager.getSavedClientSecret()
-                    )
-                    if (result.isSuccess) {
-                        withContext(Dispatchers.Main) {
-                            onPaired(authManager.getSavedAccountEmail())
-                        }
-                    }
-                }
-                return true
-            }
-
-            if (!accessToken.isNullOrBlank() || !refreshToken.isNullOrBlank()) {
-                authManager.saveTokens(
-                    accessToken = accessToken ?: "valid_via_refresh",
-                    refreshToken = refreshToken,
-                    expiresInSec = 3600
-                )
-                scope.launch {
-                    if (!refreshToken.isNullOrBlank()) {
-                        authManager.refreshAccessToken()
-                    }
-                    withContext(Dispatchers.Main) {
-                        onPaired(authManager.getSavedAccountEmail())
-                    }
-                }
-                return true
-            }
-            false
-        } catch (e: Exception) {
-            Log.e("PairingServer", "handleIncomingTokensJson error: ${e.message}")
-            false
-        }
-    }
-
-    private fun sendJson(out: OutputStream, code: Int, body: String) {
-        sendHttpResponse(out, code, "application/json", body)
-    }
-
-    private fun sendHttpResponse(out: OutputStream, code: Int, contentType: String, content: String) {
-        val bytes = content.toByteArray(Charsets.UTF_8)
-        val statusText = if (code == 200) "OK" else "Bad Request"
-        val header = "HTTP/1.1 $code $statusText\r\n" +
-                "Content-Type: $contentType\r\n" +
-                "Content-Length: ${bytes.size}\r\n" +
-                "Access-Control-Allow-Origin: *\r\n" +
-                "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n" +
-                "Access-Control-Allow-Headers: Content-Type\r\n" +
-                "Connection: close\r\n\r\n"
-        out.write(header.toByteArray(Charsets.UTF_8))
-        out.write(bytes)
-        out.flush()
-    }
-
-    private fun getLocalIpAddress(): String {
-        try {
-            val interfaces = NetworkInterface.getNetworkInterfaces()
-            for (intf in interfaces) {
-                if (intf.isLoopback || !intf.isUp) continue
-                for (addr in intf.inetAddresses) {
-                    if (addr is Inet4Address && !addr.isLoopbackAddress) {
-                        val host = addr.hostAddress
-                        if (host != null && (host.startsWith("192.168.") || host.startsWith("10.") || host.startsWith("172."))) {
-                            return host
-                        }
-                    }
-                }
-            }
-        } catch (_: Exception) {}
-        return "127.0.0.1"
-    }
-
-    /**
-     * Pairing-страница. OOB (urn:ietf:wg:oauth:2.0:oob) убран — Google закрыл его в 2022.
-     *
-     * Основной путь: запустить tools/auth_gdrive.py на компе (он сам проводит OAuth
-     * через редирект на localhost и выдаёт готовый Refresh Token), затем скопировать
-     * Client ID + Client Secret + Refresh Token на эту страницу и отправить на ТВ.
-     *
-     * Важно: Refresh Token привязан к тому Client ID, который его выдал.
-     * Поэтому Client ID/Secret с этой страницы ОБЯЗАТЕЛЬНО должны совпадать
-     * с теми, что использовались в auth_gdrive.py.
-     */
-    private fun getPairingHtml(session: String, initialClientId: String, initialClientSecret: String): String {
-        return """
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Re:Player — Подключение Google Drive</title>
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body {
-            background-color: #090A0E;
-            color: #F8FAFC;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            padding: 20px;
-        }
-        .card {
-            background-color: #13161F;
-            border: 1px solid rgba(6, 182, 212, 0.25);
-            border-radius: 16px;
-            max-width: 560px;
-            width: 100%;
-            padding: 28px;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.6);
-        }
-        .logo { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
-        .logo-icon {
-            width: 36px; height: 36px;
-            background: linear-gradient(135deg, #06B6D4, #38BDF8);
-            border-radius: 8px;
-            display: flex; align-items: center; justify-content: center;
-            font-weight: bold; color: #090A0E; font-size: 18px;
-        }
-        h1 { font-size: 20px; font-weight: 700; color: #F8FAFC; }
-        .subtitle { font-size: 14px; color: #94A3B8; margin-bottom: 20px; line-height: 1.45; }
-        .status-badge {
-            background: rgba(6, 182, 212, 0.15);
-            color: #06B6D4;
-            padding: 6px 12px; border-radius: 8px;
-            font-size: 13px; margin-bottom: 20px;
-            display: inline-block;
-        }
-        label { display: block; font-size: 13px; font-weight: 600; color: #CBD5E1; margin-bottom: 6px; }
-        input[type="text"] {
-            width: 100%;
-            background: #1A1E2B;
-            border: 1px solid #334155;
-            color: #F8FAFC;
-            padding: 12px 14px;
-            border-radius: 8px;
-            font-size: 14px;
-            margin-bottom: 16px;
-            outline: none;
-            transition: border-color 0.2s;
-        }
-        input[type="text"]:focus { border-color: #06B6D4; }
-        .btn {
-            display: block; width: 100%;
-            background: linear-gradient(135deg, #06B6D4, #0284C7);
-            color: #090A0E; font-weight: 700; font-size: 15px;
-            padding: 14px; border-radius: 10px;
-            border: none; cursor: pointer;
-            text-align: center; text-decoration: none;
-            margin-top: 8px; margin-bottom: 16px;
-            transition: opacity 0.2s;
-        }
-        .btn:hover { opacity: 0.9; }
-        .info-box {
-            background: rgba(30, 41, 59, 0.5);
-            border-left: 3px solid #06B6D4;
-            padding: 12px 14px;
-            border-radius: 0 8px 8px 0;
-            font-size: 13px;
-            color: #94A3B8;
-            margin-bottom: 18px;
-            line-height: 1.55;
-        }
-        .info-box b { color: #E2E8F0; }
-        .info-box code {
-            background: rgba(6,182,212,0.12);
-            color: #06B6D4;
-            padding: 1px 6px;
-            border-radius: 4px;
-            font-family: 'Courier New', monospace;
-        }
-        .success-box {
-            display: none;
-            background: rgba(16, 185, 129, 0.15);
-            border: 1px solid #10B981;
-            color: #10B981;
-            padding: 16px;
-            border-radius: 8px;
-            font-weight: 600;
-            text-align: center;
-            margin-top: 16px;
-        }
-    </style>
-</head>
-<body>
-    <div class="card">
-        <div class="logo">
-            <div class="logo-icon">▶</div>
-            <h1>Re:Player TV</h1>
-        </div>
-        <div class="status-badge">Сессия ТВ: $session</div>
-        <p class="subtitle">Подключение Google Drive к телевизору. Работает на Яндекс ТВ, Android TV и приставках без сервисов Google Play.</p>
-
-        <div class="info-box">
-            <b>Как получить токен (1 минута):</b><br>
-            1) На компьютере запустите <code>python tools/auth_gdrive.py</code> из репозитория Re:Player.<br>
-            2) Скрипт откроет браузер, вы разрешите доступ к Диску и получите <b>Refresh Token</b>.<br>
-            3) Скопируйте все три значения ниже и нажмите «Подключить к ТВ».<br><br>
-            <b>ВАЖНО:</b> Client ID и Client Secret должны быть точно такими же, как вы вводили в <code>auth_gdrive.py</code>. Refresh Token привязан к этому Client ID.
-        </div>
-
-        <label for="clientId">Client ID (обязательно):</label>
-        <input type="text" id="clientId" value="$initialClientId" placeholder="...apps.googleusercontent.com">
-
-        <label for="clientSecret">Client Secret (обязательно):</label>
-        <input type="text" id="clientSecret" value="$initialClientSecret" placeholder="GOCSPX-...">
-
-        <label for="refreshToken">Refresh Token (обязательно, начинается с 1//):</label>
-        <input type="text" id="refreshToken" placeholder="1//04...">
-
-        <button type="button" class="btn" onclick="sendToTv()">🚀 Подключить к ТВ</button>
-
-        <div id="successBox" class="success-box">
-            ✅ Данные успешно переданы на телевизор!<br>Экран ТВ сейчас обновится.
-        </div>
-    </div>
-
-    <script>
-        function sendToTv() {
-            var clientId = document.getElementById('clientId').value.trim();
-            var clientSecret = document.getElementById('clientSecret').value.trim();
-            var refreshToken = document.getElementById('refreshToken').value.trim();
-
-            if (!clientId) {
-                alert('Введите Client ID — он нужен, чтобы ТВ мог обновлять токен.');
-                return;
-            }
-            if (!clientSecret) {
-                alert('Введите Client Secret — он нужен, чтобы ТВ мог обновлять токен.');
-                return;
-            }
-            if (!refreshToken) {
-                alert('Введите Refresh Token (начинается с 1//).');
-                return;
-            }
-
-            var payload = {
-                client_id: clientId,
-                client_secret: clientSecret,
-                refresh_token: refreshToken,
-                session: '$session'
-            };
-            var jsonPayload = JSON.stringify(payload);
-
-            // 1. Напрямую на локальный сервер ТВ (если телефон в одной Wi-Fi сети)
-            fetch('/api/token', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: jsonPayload
-            }).then(function(res) {
-                return res.json();
-            }).then(function() {
-                document.getElementById('successBox').style.display = 'block';
-            }).catch(function() {
-                // 2. Fallback через ntfy.sh (если телефон в LTE)
-                fetch('https://ntfy.sh/replayer_pair_$session', {
-                    method: 'POST',
-                    body: jsonPayload
-                }).then(function() {
-                    document.getElementById('successBox').style.display = 'block';
-                }).catch(function() {
-                    alert('Не удалось передать токен. Проверьте, что телефон в одной Wi-Fi с ТВ.');
-                });
-            });
-        }
-    </script>
-</body>
-</html>
-        """.trimIndent()
-    }
-}
-
-
-
-================================================================================
 FILE: app/src/main/java/com/replayer/player/RePlayerEngine.kt
 ================================================================================
 
@@ -2519,9 +1284,7 @@ import android.content.Context
 import android.net.Uri
 import com.replayer.model.AudioTrackInfo
 import com.replayer.model.MediaItem
-import com.replayer.model.MediaSourceType
 import com.replayer.model.SubtitleTrackInfo
-import com.replayer.network.gdrive.GoogleDriveAuthManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -2537,21 +1300,13 @@ import org.videolan.libvlc.MediaPlayer
 import org.videolan.libvlc.util.VLCVideoLayout
 
 class RePlayerEngine(private val context: Context) {
-
     private val libVlc: LibVLC = LibVLC(
         context,
-        arrayListOf(
-            "--no-drop-late-frames",
-            "--no-skip-frames",
-            "--audio-time-stretch"
-        )
+        arrayListOf("--no-drop-late-frames", "--no-skip-frames", "--audio-time-stretch")
     )
-
     val mediaPlayer: MediaPlayer = MediaPlayer(libVlc)
-
     private val _playerState = MutableStateFlow(RePlayerState())
     val playerState: StateFlow<RePlayerState> = _playerState.asStateFlow()
-
     private val scope = CoroutineScope(Dispatchers.Main)
     private var progressJob: Job? = null
     private var currentLayout: VLCVideoLayout? = null
@@ -2560,10 +1315,7 @@ class RePlayerEngine(private val context: Context) {
         mediaPlayer.setEventListener { event ->
             when (event.type) {
                 MediaPlayer.Event.Playing -> {
-                    _playerState.value = _playerState.value.copy(
-                        isPlaying = true,
-                        isBuffering = false
-                    )
+                    _playerState.value = _playerState.value.copy(isPlaying = true, isBuffering = false)
                     updateTracks()
                     startProgressTracking()
                 }
@@ -2572,28 +1324,19 @@ class RePlayerEngine(private val context: Context) {
                     stopProgressTracking()
                 }
                 MediaPlayer.Event.Stopped, MediaPlayer.Event.EndReached -> {
-                    _playerState.value = _playerState.value.copy(
-                        isPlaying = false,
-                        isBuffering = false
-                    )
+                    _playerState.value = _playerState.value.copy(isPlaying = false, isBuffering = false)
                     stopProgressTracking()
                 }
                 MediaPlayer.Event.Buffering -> {
-                    val isBuffering = event.buffering < 100f
-                    _playerState.value = _playerState.value.copy(isBuffering = isBuffering)
+                    _playerState.value = _playerState.value.copy(isBuffering = event.buffering < 100f)
                 }
                 MediaPlayer.Event.TimeChanged -> {
                     val time = event.timeChanged
                     val length = if (mediaPlayer.length > 0) mediaPlayer.length else _playerState.value.durationMs
-                    _playerState.value = _playerState.value.copy(
-                        currentPositionMs = time,
-                        durationMs = length
-                    )
+                    _playerState.value = _playerState.value.copy(currentPositionMs = time, durationMs = length)
                 }
                 MediaPlayer.Event.LengthChanged -> {
-                    _playerState.value = _playerState.value.copy(
-                        durationMs = event.lengthChanged
-                    )
+                    _playerState.value = _playerState.value.copy(durationMs = event.lengthChanged)
                     updateTracks()
                 }
                 MediaPlayer.Event.ESAdded, MediaPlayer.Event.ESDeleted, MediaPlayer.Event.ESSelected -> {
@@ -2614,71 +1357,39 @@ class RePlayerEngine(private val context: Context) {
     fun attachVideoLayout(layout: VLCVideoLayout) {
         currentLayout = layout
         try {
-            mediaPlayer.detachViews()
-            mediaPlayer.attachViews(layout, null, true, false)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
-
-    fun detachVideoLayout() {
-        try {
-            mediaPlayer.detachViews()
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-        currentLayout = null
-    }
-
-    fun play(mediaItem: MediaItem, headers: Map<String, String> = emptyMap()) {
-        _playerState.value = _playerState.value.copy(
-            currentMediaTitle = mediaItem.title,
-            errorMessage = null
-        )
-
-        var streamUri = Uri.parse(mediaItem.uri)
-        if (mediaItem.sourceType == MediaSourceType.GOOGLE_DRIVE) {
-            val authMgr = GoogleDriveAuthManager(context)
-            val token = authMgr.getValidAccessTokenBlocking() ?: authMgr.getSavedAccessToken()
-            if (!token.isNullOrBlank()) {
-                streamUri = streamUri.buildUpon().appendQueryParameter("access_token", token).build()
+            if (!mediaPlayer.vlcVout.areViewsAttached()) {
+                mediaPlayer.attachViews(layout, null, true, false)
             }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
+    }
 
+    fun play(mediaItem: MediaItem) {
+        _playerState.value = _playerState.value.copy(currentMediaTitle = mediaItem.title, errorMessage = null)
+        val streamUri = Uri.parse(mediaItem.uri)
         val media = Media(libVlc, streamUri).apply {
             setHWDecoderEnabled(true, false)
             addOption(":network-caching=15000")
             addOption(":file-caching=2000")
-            addOption(":live-caching=2000")
-            addOption(":http-user-agent=RePlayer-TV")
-            for ((key, value) in headers) {
-                if (key.equals("Authorization", ignoreCase = true)) {
-                    addOption(":http-custom-headers=$key: $value")
-                }
-            }
         }
-
         mediaPlayer.media = media
         media.release()
 
         currentLayout?.let { layout ->
             try {
-                mediaPlayer.detachViews()
-                mediaPlayer.attachViews(layout, null, true, false)
+                if (!mediaPlayer.vlcVout.areViewsAttached()) {
+                    mediaPlayer.attachViews(layout, null, true, false)
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
         }
-
         mediaPlayer.play()
     }
 
     fun togglePlayPause() {
-        if (mediaPlayer.isPlaying) {
-            mediaPlayer.pause()
-        } else {
-            mediaPlayer.play()
-        }
+        if (mediaPlayer.isPlaying) mediaPlayer.pause() else mediaPlayer.play()
     }
 
     fun seekRelative(deltaMs: Long) {
@@ -2696,9 +1407,12 @@ class RePlayerEngine(private val context: Context) {
     }
 
     fun selectAudioTrack(track: AudioTrackInfo) {
-        mediaPlayer.setAudioTrack(track.index)
-        _playerState.value = _playerState.value.copy(selectedAudioTrackId = track.id)
-        updateTracks()
+        // ИСПРАВЛЕНИЕ: Передаем именно ID трека, а не его индекс в массиве
+        if (track.index != -1) {
+            mediaPlayer.setAudioTrack(track.index)
+            _playerState.value = _playerState.value.copy(selectedAudioTrackId = track.id)
+            updateTracks()
+        }
     }
 
     fun selectSubtitleTrack(track: SubtitleTrackInfo?) {
@@ -2715,7 +1429,7 @@ class RePlayerEngine(private val context: Context) {
     private fun updateTracks() {
         val currentAudioId = mediaPlayer.audioTrack
         val audioTracksDesc = mediaPlayer.audioTracks ?: emptyArray()
-        val audioList = audioTracksDesc.filter { it.id != -1 }.map { track ->
+        val audioList = audioTracksDesc.map { track ->
             AudioTrackInfo(
                 id = track.id.toString(),
                 index = track.id,
@@ -2731,7 +1445,7 @@ class RePlayerEngine(private val context: Context) {
 
         val currentSpuId = mediaPlayer.spuTrack
         val spuTracksDesc = mediaPlayer.spuTracks ?: emptyArray()
-        val subList = spuTracksDesc.filter { it.id != -1 }.map { track ->
+        val subList = spuTracksDesc.map { track ->
             SubtitleTrackInfo(
                 id = track.id.toString(),
                 index = track.id,
@@ -2776,6 +1490,8 @@ class RePlayerEngine(private val context: Context) {
     fun release() {
         stopProgressTracking()
         try {
+            // ИСПРАВЛЕНИЕ ВЫЛЕТОВ: Сначала отключаем слушатель и отсоединяем вьюху, потом убиваем плеер
+            mediaPlayer.setEventListener(null)
             mediaPlayer.stop()
             mediaPlayer.detachViews()
             mediaPlayer.release()
@@ -2892,7 +1608,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
@@ -2914,7 +1629,6 @@ import com.replayer.ui.theme.TextSecondary
 enum class NavItem(val label: String, val icon: ImageVector) {
     HOME("Главная", Icons.Default.Home),
     UPNP("UPnP / DLNA", Icons.Default.Folder),
-    GDRIVE("Google Drive", Icons.Default.Cloud),
     SETTINGS("Настройки", Icons.Default.Settings)
 }
 
@@ -3119,10 +1833,9 @@ fun HomeScreen(
                                         tint = AccentCyan,
                                         modifier = Modifier.size(28.dp)
                                     )
-                                    // Source badge: DLNA or Google Drive
-                                    val isGdrive = fav.sourceType == MediaSourceType.GOOGLE_DRIVE
-                                    val badgeText = if (isGdrive) "Google Drive" else "DLNA"
-                                    val badgeColor = if (isGdrive) Color(0xFF4285F4) else AccentCyan
+                                    // Source badge: DLNA
+                                    val badgeText = "DLNA"
+                                    val badgeColor = AccentCyan
                                     Box(
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(4.dp))
@@ -3155,756 +1868,6 @@ fun HomeScreen(
                             )
                         }
                     }
-                }
-            }
-        }
-    }
-}
-
-
-================================================================================
-FILE: app/src/main/java/com/replayer/ui/screens/GoogleDriveScreen.kt
-================================================================================
-
-package com.replayer.ui.screens
-
-import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AudioFile
-import androidx.compose.material.icons.filled.Cloud
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.FavoriteBorder
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.GridView
-import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Sort
-import androidx.compose.material.icons.filled.VideoFile
-import androidx.compose.material.icons.filled.ViewList
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.replayer.data.FavoritesManager
-import com.replayer.model.FavoriteFolder
-import com.replayer.model.MediaItem
-import com.replayer.model.MediaSourceType
-import com.replayer.model.MediaType
-import com.replayer.model.SortMode
-import com.replayer.model.ViewMode
-import com.replayer.network.gdrive.GoogleDriveAuthManager
-import com.replayer.network.gdrive.GoogleDriveService
-import com.replayer.ui.components.TvFocusCard
-import com.replayer.ui.theme.AccentCyan
-import com.replayer.ui.theme.DarkCard
-import com.replayer.ui.theme.TextPrimary
-import com.replayer.ui.theme.TextSecondary
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-
-@Composable
-fun GoogleDriveScreen(
-    onPlayMedia: (MediaItem) -> Unit,
-    onNavigateToSettings: () -> Unit,
-    onBackToHome: () -> Unit,
-    modifier: Modifier = Modifier,
-    initialFolder: Pair<String, String>? = null,
-    lastPlayedMediaId: String? = null,
-    isPlayerActive: Boolean = false,
-    onFolderLoaded: () -> Unit = {},
-    onConsumeLastPlayedMediaId: () -> Unit = {}
-) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val authManager = remember { GoogleDriveAuthManager(context) }
-    val driveService = remember { GoogleDriveService(authManager) }
-    val favoritesManager = remember { FavoritesManager(context) }
-
-    val isAuthenticated by GoogleDriveAuthManager.sharedAuthenticatedFlow.collectAsState()
-    val favorites by favoritesManager.favorites.collectAsState()
-
-    var currentItems by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
-    var folderStack by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(false) }
-    var driveLoadError by remember { mutableStateOf<String?>(null) }
-
-    var viewMode by remember { mutableStateOf(ViewMode.LIST) }
-    var sortMode by remember { mutableStateOf(SortMode.BY_NAME) }
-
-    val listState = rememberLazyListState()
-    val gridState = rememberLazyGridState()
-
-    val firstItemFocusRequester = remember { FocusRequester() }
-    val targetItemFocusRequester = remember { FocusRequester() }
-    var lastExitTimestamp by remember { mutableLongStateOf(0L) }
-
-    fun loadFolder(folderId: String) {
-        isLoading = true
-        driveLoadError = null
-        scope.launch {
-            currentItems = driveService.listFolder(folderId)
-            driveLoadError = driveService.lastErrorMessage
-            isLoading = false
-        }
-    }
-
-    fun openFolder(folderId: String, title: String) {
-        onConsumeLastPlayedMediaId()
-        folderStack = folderStack + Pair(folderId, title)
-        loadFolder(folderId)
-    }
-
-    // Initialize or switch folder when isAuthenticated or initialFolder changes
-    LaunchedEffect(isAuthenticated, initialFolder) {
-        if (isAuthenticated) {
-            if (initialFolder != null) {
-                if (folderStack.lastOrNull()?.first != initialFolder.first) {
-                    folderStack = listOf(Pair("root", "Мой диск"), initialFolder)
-                    loadFolder(initialFolder.first)
-                    onFolderLoaded()
-                }
-            } else if (folderStack.isEmpty()) {
-                // При подключении сразу ищем или создаем папку Re:Player
-                val token = authManager.getValidAccessToken() ?: authManager.getSavedAccessToken()
-                if (token != null) {
-                    isLoading = true
-                    val rePlayerFolder = driveService.getOrCreateRePlayerFolder(token)
-                    if (rePlayerFolder != null) {
-                        folderStack = listOf(Pair(rePlayerFolder.id, "Re:Player"))
-                        loadFolder(rePlayerFolder.id)
-                    } else {
-                        folderStack = listOf(Pair("root", "Мой диск"))
-                        loadFolder("root")
-                    }
-                    isLoading = false
-                }
-            }
-        }
-    }
-
-    fun navigateBack() {
-        onConsumeLastPlayedMediaId()
-        if (folderStack.size > 1) {
-            val parentIdx = folderStack.size - 2
-            val parentFolder = folderStack[parentIdx]
-            folderStack = folderStack.take(parentIdx + 1)
-            loadFolder(parentFolder.first)
-        } else {
-            onBackToHome()
-        }
-    }
-
-    BackHandler(enabled = !isPlayerActive) {
-        // Prevent accidental multiple back taps within 400ms after closing player from popping folders
-        if (System.currentTimeMillis() - lastExitTimestamp < 400) {
-            return@BackHandler
-        }
-        navigateBack()
-    }
-
-    val sortedItems = remember(currentItems, sortMode) {
-        when (sortMode) {
-            SortMode.BY_NAME -> {
-                currentItems.sortedWith(
-                    compareBy<MediaItem> { it.type != MediaType.DIRECTORY }
-                        .thenBy(String.CASE_INSENSITIVE_ORDER) { it.title }
-                )
-            }
-            SortMode.BY_DATE -> {
-                currentItems.sortedWith(
-                    compareBy<MediaItem> { it.type != MediaType.DIRECTORY }
-                        .thenByDescending { it.dateAdded ?: "" }
-                        .thenBy(String.CASE_INSENSITIVE_ORDER) { it.title }
-                )
-            }
-        }
-    }
-
-    // 1. Returning from player: focus the played video item and keep focus on it!
-    LaunchedEffect(isPlayerActive) {
-        if (!isPlayerActive && lastPlayedMediaId != null) {
-            val targetIndex = sortedItems.indexOfFirst { it.id == lastPlayedMediaId }
-            if (targetIndex >= 0) {
-                delay(60)
-                try {
-                    if (viewMode == ViewMode.LIST) {
-                        listState.scrollToItem(maxOf(0, targetIndex))
-                    } else {
-                        gridState.scrollToItem(maxOf(0, targetIndex))
-                    }
-                } catch (_: Exception) {}
-                delay(80)
-                try {
-                    targetItemFocusRequester.requestFocus()
-                } catch (_: Exception) {}
-            }
-        }
-    }
-
-    // 2. Folder navigation (entering folder or pressing Back): focus first item
-    LaunchedEffect(folderStack) {
-        if (folderStack.isNotEmpty() && !isPlayerActive) {
-            delay(60)
-            try {
-                if (viewMode == ViewMode.LIST) {
-                    listState.scrollToItem(0)
-                } else {
-                    gridState.scrollToItem(0)
-                }
-                firstItemFocusRequester.requestFocus()
-            } catch (_: Exception) {}
-        }
-    }
-
-    // 3. Initial folder items loaded
-    LaunchedEffect(currentItems) {
-        if (!isPlayerActive && lastPlayedMediaId == null && currentItems.isNotEmpty()) {
-            delay(50)
-            try {
-                firstItemFocusRequester.requestFocus()
-            } catch (_: Exception) {}
-        }
-    }
-
-    if (!isAuthenticated) {
-        // Not connected state
-        Box(
-            modifier = modifier
-                .fillMaxSize()
-                .padding(32.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(80.dp)
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(DarkCard),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Cloud,
-                        contentDescription = null,
-                        tint = Color(0xFF4285F4),
-                        modifier = Modifier.size(42.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.height(20.dp))
-                Text(
-                    text = "Подключите свой Google Drive в настройках",
-                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
-                    color = TextPrimary
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "Для безопасного доступа к файлам облака подключите аккаунт в меню настроек.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = TextSecondary
-                )
-                Spacer(modifier = Modifier.height(24.dp))
-                TvFocusCard(
-                    onClick = onNavigateToSettings,
-                    modifier = Modifier
-                        .width(220.dp)
-                        .height(48.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxSize(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Default.Settings, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(20.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(text = "Перейти в настройки", color = AccentCyan, style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-            }
-        }
-        return
-    }
-
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(horizontal = 32.dp, vertical = 24.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "Google Drive",
-                    style = MaterialTheme.typography.displayLarge
-                )
-                val breadcrumb = folderStack.joinToString(" / ") { it.second }
-                Text(
-                    text = breadcrumb.ifEmpty { "Мой диск" },
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = AccentCyan,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // View Switcher (List / Grid)
-                TvFocusCard(
-                    onClick = {
-                        viewMode = if (viewMode == ViewMode.LIST) ViewMode.GRID else ViewMode.LIST
-                    },
-                    modifier = Modifier
-                        .width(160.dp)
-                        .height(48.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxSize(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = if (viewMode == ViewMode.LIST) Icons.Default.ViewList else Icons.Default.GridView,
-                            contentDescription = null,
-                            tint = AccentCyan,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = if (viewMode == ViewMode.LIST) "Вид: Список" else "Вид: Плитка",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = TextPrimary
-                        )
-                    }
-                }
-
-                // Sort Switcher (Name / Date)
-                TvFocusCard(
-                    onClick = {
-                        sortMode = if (sortMode == SortMode.BY_NAME) SortMode.BY_DATE else SortMode.BY_NAME
-                    },
-                    modifier = Modifier
-                        .width(170.dp)
-                        .height(48.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxSize(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Sort,
-                            contentDescription = null,
-                            tint = AccentCyan,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = if (sortMode == SortMode.BY_NAME) "Сорт: По имени" else "Сорт: По дате",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = TextPrimary
-                        )
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        Box(modifier = Modifier.fillMaxSize()) {
-            if (sortedItems.isEmpty() && !isLoading) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    val currentFolderId = folderStack.lastOrNull()?.first ?: "root"
-                    if (driveLoadError != null) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center,
-                            modifier = Modifier.padding(32.dp)
-                        ) {
-                            Text(
-                                text = driveLoadError ?: "Ошибка загрузки",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = Color(0xFFFF5252)
-                            )
-                            Spacer(modifier = Modifier.height(16.dp))
-                            TvFocusCard(
-                                onClick = { loadFolder(currentFolderId) },
-                                modifier = Modifier
-                                    .width(180.dp)
-                                    .height(48.dp)
-                                    .focusRequester(firstItemFocusRequester)
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxSize(),
-                                    horizontalArrangement = Arrangement.Center,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(Icons.Default.Refresh, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(20.dp))
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(text = "Повторить", color = AccentCyan, style = MaterialTheme.typography.bodyMedium)
-                                }
-                            }
-                        }
-                    } else {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center,
-                            modifier = Modifier
-                                .width(560.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(DarkCard)
-                                .padding(32.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(64.dp)
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .background(AccentCyan.copy(alpha = 0.15f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Cloud,
-                                    contentDescription = null,
-                                    tint = AccentCyan,
-                                    modifier = Modifier.size(36.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Text(
-                                text = if (currentFolderId == "root") "Google Диск подключен" else "Папка пуста",
-                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                                color = TextPrimary
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = if (currentFolderId == "root")
-                                    "В корне вашего Google Диска пока нет видеофайлов или папок. Загрузите видео на диск и нажмите «Обновить»."
-                                else
-                                    "В этой папке нет видео- или аудиофайлов. Скопируйте медиафайлы или вернитесь назад.",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = TextSecondary,
-                                textAlign = TextAlign.Center
-                            )
-                            Spacer(modifier = Modifier.height(20.dp))
-                            TvFocusCard(
-                                onClick = { loadFolder(currentFolderId) },
-                                modifier = Modifier
-                                    .width(200.dp)
-                                    .height(48.dp)
-                                    .focusRequester(firstItemFocusRequester)
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxSize(),
-                                    horizontalArrangement = Arrangement.Center,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(Icons.Default.Refresh, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(20.dp))
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(text = "Обновить список", color = AccentCyan, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                                }
-                            }
-                        }
-                    }
-                }
-            } else if (viewMode == ViewMode.LIST) {
-                // Detailed List View
-                LazyColumn(
-                    state = listState,
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    contentPadding = PaddingValues(vertical = 8.dp),
-                    modifier = Modifier.fillMaxSize()
-                ) {
-                items(sortedItems.size, key = { sortedItems[it].id }) { index ->
-                    val item = sortedItems[index]
-                    val isFirst = index == 0
-                    val isTarget = item.id == lastPlayedMediaId
-                    val isFav = favorites.any { it.id == item.id }
-
-                    val itemFocusModifier = when {
-                        isTarget -> Modifier.focusRequester(targetItemFocusRequester)
-                        isFirst -> Modifier.focusRequester(firstItemFocusRequester)
-                        else -> Modifier
-                    }
-
-                    TvFocusCard(
-                        onClick = {
-                            if (item.type == MediaType.DIRECTORY) {
-                                openFolder(item.id, item.title)
-                            } else {
-                                onPlayMedia(item)
-                            }
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(78.dp)
-                            .then(itemFocusModifier)
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 20.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            val icon = when (item.type) {
-                                MediaType.DIRECTORY -> Icons.Default.Folder
-                                MediaType.VIDEO -> Icons.Default.VideoFile
-                                MediaType.AUDIO -> Icons.Default.AudioFile
-                                MediaType.IMAGE -> Icons.Default.Image
-                                MediaType.UNKNOWN -> Icons.Default.VideoFile
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(AccentCyan.copy(alpha = 0.12f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = icon,
-                                    contentDescription = null,
-                                    tint = AccentCyan,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.width(16.dp))
-
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = item.title,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    color = TextPrimary
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(AccentCyan.copy(alpha = 0.2f))
-                                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                                    ) {
-                                        Text(
-                                            text = item.fileFormat(),
-                                            color = AccentCyan,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-
-                                    val sizeStr = item.formattedSize()
-                                    if (sizeStr.isNotEmpty()) {
-                                        Spacer(modifier = Modifier.width(12.dp))
-                                        Text(text = sizeStr, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
-                                    }
-
-                                    val dateStr = item.formattedDate()
-                                    if (dateStr.isNotEmpty()) {
-                                        Spacer(modifier = Modifier.width(12.dp))
-                                        Text(text = dateStr, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
-                                    }
-                                }
-                            }
-
-                            // Favorite Heart button for folders
-                            if (item.type == MediaType.DIRECTORY) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(if (isFav) Color(0xFFFF4081).copy(alpha = 0.15f) else Color.Transparent)
-                                        .clickable {
-                                            favoritesManager.toggleFavorite(
-                                                FavoriteFolder(
-                                                    id = item.id,
-                                                    title = item.title,
-                                                    sourceType = MediaSourceType.GOOGLE_DRIVE,
-                                                    parentId = item.parentId
-                                                )
-                                            )
-                                        },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                        contentDescription = "Избранное",
-                                        tint = if (isFav) Color(0xFFFF4081) else TextSecondary,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        } else {
-            // Grid View
-            LazyVerticalGrid(
-                state = gridState,
-                columns = GridCells.Adaptive(minSize = 220.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                contentPadding = PaddingValues(vertical = 8.dp)
-            ) {
-                items(sortedItems.size, key = { sortedItems[it].id }) { index ->
-                    val item = sortedItems[index]
-                    val isFirst = index == 0
-                    val isTarget = item.id == lastPlayedMediaId
-                    val isFav = favorites.any { it.id == item.id }
-
-                    val itemFocusModifier = when {
-                        isTarget -> Modifier.focusRequester(targetItemFocusRequester)
-                        isFirst -> Modifier.focusRequester(firstItemFocusRequester)
-                        else -> Modifier
-                    }
-
-                    TvFocusCard(
-                        onClick = {
-                            if (item.type == MediaType.DIRECTORY) {
-                                openFolder(item.id, item.title)
-                            } else {
-                                onPlayMedia(item)
-                            }
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(130.dp)
-                            .then(itemFocusModifier)
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(16.dp),
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            val icon = when (item.type) {
-                                MediaType.DIRECTORY -> Icons.Default.Folder
-                                MediaType.VIDEO -> Icons.Default.VideoFile
-                                MediaType.AUDIO -> Icons.Default.AudioFile
-                                MediaType.IMAGE -> Icons.Default.Image
-                                MediaType.UNKNOWN -> Icons.Default.VideoFile
-                            }
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(icon, contentDescription = null, tint = AccentCyan)
-
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    if (item.type == MediaType.DIRECTORY) {
-                                        Icon(
-                                            imageVector = if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                            contentDescription = null,
-                                            tint = if (isFav) Color(0xFFFF4081) else TextSecondary,
-                                            modifier = Modifier
-                                                .size(20.dp)
-                                                .clickable {
-                                                    favoritesManager.toggleFavorite(
-                                                        FavoriteFolder(
-                                                            id = item.id,
-                                                            title = item.title,
-                                                            sourceType = MediaSourceType.GOOGLE_DRIVE,
-                                                            parentId = item.parentId
-                                                        )
-                                                    )
-                                                }
-                                        )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                    }
-
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(AccentCyan.copy(alpha = 0.2f))
-                                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                                    ) {
-                                        Text(
-                                            text = item.fileFormat(),
-                                            color = AccentCyan,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text(
-                                text = item.title,
-                                style = MaterialTheme.typography.titleMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            val sizeStr = item.formattedSize()
-                            if (sizeStr.isNotEmpty()) {
-                                Text(text = sizeStr, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
-                            }
-                        }
-                    }
-                }
-                }
-            }
-
-            if (isLoading) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.45f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(color = AccentCyan)
                 }
             }
         }
@@ -4711,21 +2674,10 @@ fun PlayerScreen(
 
     // Focus management: when controls are shown, focus play button; when hidden, focus root box
     LaunchedEffect(showControls) {
-        if (showControls) {
-            delay(100)
-            try {
-                playButtonFocusRequester.requestFocus()
-            } catch (_: Exception) {
-                // Ignore focus request failure
-            }
-        } else {
-            delay(50)
-            try {
-                rootFocusRequester.requestFocus()
-            } catch (_: Exception) {
-                // Ignore focus request failure
-            }
-        }
+        delay(100)
+        try {
+            if (showControls) playButtonFocusRequester.requestFocus() else rootFocusRequester.requestFocus()
+        } catch (_: Exception) {}
     }
 
     BackHandler(enabled = true) {
@@ -5288,63 +3240,25 @@ FILE: app/src/main/java/com/replayer/ui/screens/SettingsScreen.kt
 
 package com.replayer.ui.screens
 
-import android.accounts.AccountManager
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
-import android.content.Intent
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Cloud
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.SystemUpdate
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -5352,22 +3266,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
-import kotlinx.coroutines.delay
 import com.replayer.data.ServerConfigManager
 import com.replayer.model.UpnpDevice
-import com.replayer.network.gdrive.GoogleDriveAuthManager
-import com.replayer.network.gdrive.LocalPairingServer
-import com.replayer.network.gdrive.UserConsentRequiredException
 import com.replayer.network.upnp.SsdpDiscovery
 import com.replayer.ui.components.TvFocusCard
-import com.replayer.ui.theme.AccentCyan
-import com.replayer.ui.theme.DarkCard
-import com.replayer.ui.theme.DarkSurface
-import com.replayer.ui.theme.TextPrimary
-import com.replayer.ui.theme.TextSecondary
+import com.replayer.ui.theme.*
 import com.replayer.updater.ReleaseInfo
 import com.replayer.updater.UpdateCheckResult
 import com.replayer.updater.UpdateManager
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -5390,170 +3297,15 @@ fun SettingsScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val serverConfigManager = remember { ServerConfigManager(context) }
-    val authManager = remember { GoogleDriveAuthManager(context) }
     val discovery = remember { SsdpDiscovery(context) }
     val updateManager = remember { UpdateManager(context) }
     val currentVersion = remember { getCurrentAppVersion(context) }
 
     val connectedUpnpDevice by serverConfigManager.connectedUpnpDevice.collectAsState()
-    val isGdriveAuthenticated by GoogleDriveAuthManager.sharedAuthenticatedFlow.collectAsState()
 
     // UPnP scanning state
     var discoveredDevices by remember { mutableStateOf<List<UpnpDevice>>(emptyList()) }
     var isScanningUpnp by remember { mutableStateOf(false) }
-
-    // Google Drive Sign-In state
-    val hasGms = remember { authManager.isGooglePlayServicesAvailable() }
-    var isDriveSigningIn by remember { mutableStateOf(false) }
-    var savedDriveEmail by remember { mutableStateOf(authManager.getSavedAccountEmail()) }
-    var driveErrorMessage by remember { mutableStateOf<String?>(null) }
-    var pendingAccountName by remember { mutableStateOf<String?>(null) }
-    var requestTokenFn by remember { mutableStateOf<((String) -> Unit)?>(null) }
-
-    // Pairing dialog & Manual Keys dialog state
-    var showPairingDialog by remember { mutableStateOf(false) }
-    var showKeysDialog by remember { mutableStateOf(false) }
-    var showDeviceCodeDialog by remember { mutableStateOf(false) }
-    var deviceCodeData by remember { mutableStateOf<com.replayer.model.DeviceCodeResponse?>(null) }
-    var isPollingToken by remember { mutableStateOf(false) }
-    var clientIdInput by remember { mutableStateOf(authManager.getSavedClientId()) }
-    var clientSecretInput by remember { mutableStateOf(authManager.getSavedClientSecret()) }
-    var tokenInput by remember { mutableStateOf("") }
-    var pairingServer by remember { mutableStateOf<LocalPairingServer?>(null) }
-
-    DisposableEffect(showPairingDialog) {
-        if (showPairingDialog) {
-            val server = LocalPairingServer(context, authManager) { email ->
-                savedDriveEmail = email ?: authManager.getSavedAccountEmail()
-                showPairingDialog = false
-                isDriveSigningIn = false
-                driveErrorMessage = null
-            }
-            server.start()
-            pairingServer = server
-            onDispose {
-                server.stop()
-                pairingServer = null
-            }
-        } else {
-            onDispose { }
-        }
-    }
-
-    var pendingConsentIntent by remember { mutableStateOf<Intent?>(null) }
-
-    val consentLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        val account = pendingAccountName
-        if (account != null && (result.resultCode == Activity.RESULT_OK || result.resultCode == Activity.RESULT_CANCELED)) {
-            requestTokenFn?.invoke(account)
-        } else {
-            isDriveSigningIn = false
-            driveErrorMessage = "Для подключения Google Диска необходимо нажать «Разрешить»"
-        }
-    }
-
-    LaunchedEffect(pendingConsentIntent) {
-        val intent = pendingConsentIntent
-        if (intent != null) {
-            try {
-                consentLauncher.launch(intent)
-            } catch (launchEx: Exception) {
-                isDriveSigningIn = false
-                driveErrorMessage = "Не удалось открыть подтверждение: ${launchEx.localizedMessage}"
-            }
-            pendingConsentIntent = null
-        }
-    }
-
-    fun requestDriveToken(accountName: String) {
-        isDriveSigningIn = true
-        driveErrorMessage = null
-        pendingAccountName = accountName
-        scope.launch {
-            val result = authManager.getAccessTokenForAccount(accountName)
-            result.onSuccess {
-                savedDriveEmail = accountName
-                isDriveSigningIn = false
-                driveErrorMessage = null
-            }.onFailure { err ->
-                if (err is UserConsentRequiredException && err.consentIntent != null) {
-                    pendingConsentIntent = err.consentIntent
-                } else {
-                    isDriveSigningIn = false
-                    driveErrorMessage = err.localizedMessage ?: "Ошибка получения доступа Google"
-                    // [FIX-4] Auto-fallback: если нативная авторизация упала (12500/10/etc),
-                    // сразу открываем pairing-окно, чтобы пользователь не застрял в тупике.
-                    showPairingDialog = true
-                }
-            }
-        }
-    }
-
-    LaunchedEffect(Unit) {
-        requestTokenFn = { name -> requestDriveToken(name) }
-    }
-
-    val chooseAccountLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        val accountName = result.data?.getStringExtra(AccountManager.KEY_ACCOUNT_NAME)
-        if (!accountName.isNullOrBlank()) {
-            requestDriveToken(accountName)
-        } else {
-            isDriveSigningIn = false
-            driveErrorMessage = "На ТВ нет учетной записи Google. Откройте вход через телефон (QR-код)."
-            showPairingDialog = true
-        }
-    }
-
-    fun startNativeGoogleSignIn() {
-        driveErrorMessage = null
-        isDriveSigningIn = true
-        try {
-            val chooseIntent = authManager.getChooseAccountIntent()
-            chooseAccountLauncher.launch(chooseIntent)
-        } catch (e: Exception) {
-            isDriveSigningIn = false
-            driveErrorMessage = "Не удалось открыть выбор аккаунта: ${e.localizedMessage}. Откройте вход через телефон."
-            showPairingDialog = true
-        }
-    }
-
-    fun handleConnectDriveClick() {
-        driveErrorMessage = null
-        isDriveSigningIn = true
-        scope.launch {
-            val clientId = authManager.getSavedClientId()
-            val result = authManager.requestDeviceCode(clientId)
-            result.onSuccess { codeResp ->
-                deviceCodeData = codeResp
-                showDeviceCodeDialog = true
-                isPollingToken = true
-                
-                // Запускаем поллинг токена в фоне
-                val tokenResp = authManager.pollForToken(
-                    clientId = clientId,
-                    deviceCode = codeResp.device_code,
-                    intervalSec = codeResp.interval
-                )
-                isPollingToken = false
-                if (tokenResp?.access_token != null) {
-                    showDeviceCodeDialog = false
-                    savedDriveEmail = "Подключено"
-                    isDriveSigningIn = false
-                } else {
-                    driveErrorMessage = "Не удалось получить токен. Попробуйте снова."
-                    isDriveSigningIn = false
-                    showDeviceCodeDialog = false
-                }
-            }.onFailure { err ->
-                isDriveSigningIn = false
-                driveErrorMessage = "Ошибка: ${err.message}"
-            }
-        }
-    }
 
     // App updates state
     var updateUiState by remember { mutableStateOf<UpdateUiState>(UpdateUiState.Idle) }
@@ -5636,14 +3388,14 @@ fun SettingsScreen(
             style = MaterialTheme.typography.displayLarge
         )
         Text(
-            text = "Подключение медиа-серверов и системные параметры",
-            style = MaterialTheme.typography.bodyLarge,
+            text = "Управление сетевыми серверами DLNA / UPnP и обновлениями",
+            style = MaterialTheme.typography.bodyMedium,
             color = TextSecondary,
-            modifier = Modifier.padding(top = 4.dp, bottom = 24.dp)
+            modifier = Modifier.padding(bottom = 24.dp)
         )
 
         // ---------------------------------------------------------
-        // 1. DLNA / UPnP Серверы
+        // 1. Серверы DLNA / UPnP
         // ---------------------------------------------------------
         Text(
             text = "Серверы DLNA / UPnP",
@@ -5652,62 +3404,61 @@ fun SettingsScreen(
             modifier = Modifier.padding(bottom = 12.dp)
         )
 
-        if (connectedUpnpDevice != null) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(DarkCard)
-                    .padding(vertical = 6.dp)
+        // Connected Device Card
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(DarkCard)
+                .padding(20.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 20.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(AccentCyan.copy(alpha = 0.15f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.Folder, contentDescription = null, tint = AccentCyan)
-                        }
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = connectedUpnpDevice!!.friendlyName,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = TextPrimary
-                                )
-                                Spacer(modifier = Modifier.width(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (connectedUpnpDevice != null) AccentCyan.copy(alpha = 0.15f) else DarkSurface),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Folder,
+                            contentDescription = null,
+                            tint = if (connectedUpnpDevice != null) AccentCyan else TextSecondary
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = connectedUpnpDevice?.friendlyName ?: "Сервер не выбран",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = TextPrimary
+                            )
+                            if (connectedUpnpDevice != null) {
+                                Spacer(modifier = Modifier.width(8.dp))
                                 Box(
                                     modifier = Modifier
+                                        .size(8.dp)
                                         .clip(RoundedCornerShape(4.dp))
-                                        .background(AccentCyan.copy(alpha = 0.2f))
-                                        .padding(horizontal = 8.dp, vertical = 2.dp)
-                                ) {
-                                    Text(
-                                        text = "Подключено",
-                                        color = AccentCyan,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
+                                        .background(AccentCyan)
+                                )
                             }
-                            Text(
-                                text = connectedUpnpDevice!!.location,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = TextSecondary
-                            )
                         }
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = connectedUpnpDevice?.location ?: "Выберите сервер из списка найденных в локальной сети",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary
+                        )
                     }
+                }
 
+                if (connectedUpnpDevice != null) {
                     TvFocusCard(
                         onClick = { serverConfigManager.disconnectUpnpDevice() },
                         modifier = Modifier
@@ -5720,19 +3471,35 @@ fun SettingsScreen(
                     }
                 }
             }
-        } else {
-            // Discovered devices list
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Discovered Devices Section
+        Text(
+            text = "Доступные медиасерверы в сети",
+            style = MaterialTheme.typography.titleMedium,
+            color = TextSecondary,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(DarkCard)
+                .padding(16.dp)
+        ) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (discoveredDevices.isEmpty()) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(DarkCard)
-                            .padding(20.dp)
+                            .padding(vertical = 24.dp),
+                        contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = if (isScanningUpnp) "Поиск серверов в локальной сети..." else "Серверы не найдены. Убедитесь, что DLNA включен на роутере/ПК.",
+                            text = if (isScanningUpnp) "Поиск серверов в локальной сети..." else "Серверы не найдены. Убедитесь, что ПК или NAS включены и находятся в одной сети Wi-Fi.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = TextSecondary
                         )
@@ -5800,175 +3567,7 @@ fun SettingsScreen(
         Spacer(modifier = Modifier.height(28.dp))
 
         // ---------------------------------------------------------
-        // 2. Google Drive Хранилище
-        // ---------------------------------------------------------
-        Text(
-            text = "Google Drive",
-            style = MaterialTheme.typography.titleLarge,
-            color = TextPrimary,
-            modifier = Modifier.padding(bottom = 12.dp)
-        )
-
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(DarkCard)
-                .padding(vertical = 4.dp)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(20.dp),
-                verticalArrangement = Arrangement.Center
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Color(0xFF4285F4).copy(alpha = 0.15f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.Cloud, contentDescription = null, tint = Color(0xFF4285F4))
-                        }
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(text = "Google Drive", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .background(if (isGdriveAuthenticated) AccentCyan.copy(alpha = 0.2f) else DarkSurface)
-                                        .padding(horizontal = 8.dp, vertical = 2.dp)
-                                ) {
-                                    Text(
-                                        text = if (isGdriveAuthenticated) "Подключено" else "Не подключено",
-                                        color = if (isGdriveAuthenticated) AccentCyan else TextSecondary,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = if (isGdriveAuthenticated && !savedDriveEmail.isNullOrBlank()) {
-                                    savedDriveEmail!!
-                                } else {
-                                    "Вход через аккаунт Google на ТВ — доступ ко всем вашим видео"
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = if (isGdriveAuthenticated && !savedDriveEmail.isNullOrBlank()) AccentCyan else TextSecondary
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.width(16.dp))
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        if (isGdriveAuthenticated) {
-                            TvFocusCard(
-                                onClick = {
-                                    authManager.clearAuth()
-                                    savedDriveEmail = null
-                                },
-                                modifier = Modifier
-                                    .width(140.dp)
-                                    .height(44.dp)
-                            ) {
-                                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    Text(text = "Отключить", color = Color(0xFFFF5252), style = MaterialTheme.typography.bodyMedium)
-                                }
-                            }
-                        } else {
-                            TvFocusCard(
-                                onClick = {
-                                    if (!isDriveSigningIn) {
-                                        handleConnectDriveClick()
-                                    }
-                                },
-                                modifier = Modifier
-                                    .width(220.dp)
-                                    .height(44.dp)
-                            ) {
-                                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    if (isDriveSigningIn) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(20.dp),
-                                            color = AccentCyan,
-                                            strokeWidth = 2.dp
-                                        )
-                                    } else {
-                                        Text(
-                                            text = "Подключить Google Drive",
-                                            color = AccentCyan,
-                                            fontWeight = FontWeight.Bold,
-                                            style = MaterialTheme.typography.bodyMedium
-                                        )
-                                    }
-                                }
-                            }
-
-                            TvFocusCard(
-                                onClick = {
-                                    clientIdInput = authManager.getSavedClientId()
-                                    clientSecretInput = authManager.getSavedClientSecret()
-                                    showKeysDialog = true
-                                },
-                                modifier = Modifier
-                                    .width(160.dp)
-                                    .height(44.dp)
-                            ) {
-                                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    Text(
-                                        text = "Ключи API / Токен",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = TextSecondary
-                                    )
-                                }
-                            }
-
-                            if (hasGms) {
-                                TvFocusCard(
-                                    onClick = { showPairingDialog = true },
-                                    modifier = Modifier
-                                        .width(120.dp)
-                                        .height(44.dp)
-                                ) {
-                                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                        Text(
-                                            text = "QR-код",
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = TextSecondary
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        if (driveErrorMessage != null) {
-            Text(
-                text = driveErrorMessage!!,
-                color = Color(0xFFFF5252),
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(top = 8.dp)
-            )
-        }
-
-        Spacer(modifier = Modifier.height(28.dp))
-
-        // ---------------------------------------------------------
-        // 3. Обновление приложения
+        // 2. Обновление приложения
         // ---------------------------------------------------------
         Text(
             text = "Обновление приложения",
@@ -6047,37 +3646,38 @@ fun SettingsScreen(
                         TvFocusCard(
                             onClick = {},
                             modifier = Modifier
-                                .width(140.dp)
+                                .width(170.dp)
                                 .height(44.dp)
                         ) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                CircularProgressIndicator(modifier = Modifier.size(20.dp), color = AccentCyan, strokeWidth = 2.dp)
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    color = AccentCyan,
+                                    strokeWidth = 2.dp
+                                )
                             }
                         }
                     }
+
                     is UpdateUiState.Available -> {
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Orange "Что нового?" Button in Player Style
                             TvFocusCard(
                                 onClick = {
                                     changelogRelease = state.release
                                     showChangelogDialog = true
                                 },
-                                focusBorderColor = Color(0xFFFF7A00),
-                                backgroundColor = Color(0x28FF7A00),
                                 modifier = Modifier
-                                    .width(160.dp)
+                                    .width(150.dp)
                                     .height(44.dp)
                             ) {
                                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                     Text(
-                                        text = "Что нового?",
-                                        color = Color(0xFFFF9500),
-                                        fontWeight = FontWeight.Bold,
-                                        style = MaterialTheme.typography.bodyMedium
+                                        text = "Что нового",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = TextSecondary
                                     )
                                 }
                             }
@@ -6085,67 +3685,76 @@ fun SettingsScreen(
                             TvFocusCard(
                                 onClick = { startDownload(state.release) },
                                 modifier = Modifier
-                                    .width(130.dp)
+                                    .width(150.dp)
                                     .height(44.dp)
+                                    .focusRequester(updateActionFocusRequester)
                             ) {
                                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    Text(text = "Скачать", color = AccentCyan, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                                    Text(
+                                        text = "Загрузить",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = AccentCyan,
+                                        fontWeight = FontWeight.Bold
+                                    )
                                 }
                             }
                         }
                     }
+
                     is UpdateUiState.Downloading -> {
-                        TvFocusCard(
-                            onClick = {},
-                            modifier = Modifier
-                                .width(130.dp)
-                                .height(44.dp)
-                                .focusRequester(updateActionFocusRequester)
+                        Column(
+                            modifier = Modifier.width(170.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Row(
-                                modifier = Modifier.fillMaxSize(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center
-                            ) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(20.dp),
-                                    color = AccentCyan,
-                                    strokeWidth = 2.dp
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "${(state.progress * 100).toInt()}%",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = AccentCyan
-                                )
-                            }
+                            LinearProgressIndicator(
+                                progress = { downloadProgress },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(8.dp)
+                                    .clip(RoundedCornerShape(4.dp)),
+                                color = AccentCyan,
+                                trackColor = DarkSurface
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "${(downloadProgress * 100).toInt()}%",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = AccentCyan
+                            )
                         }
                     }
+
                     is UpdateUiState.ReadyToInstall -> {
                         TvFocusCard(
                             onClick = { updateManager.installApk(state.apkFile) },
                             modifier = Modifier
-                                .width(160.dp)
+                                .width(170.dp)
                                 .height(44.dp)
                                 .focusRequester(updateActionFocusRequester)
                         ) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text(text = "Установить", color = AccentCyan, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    text = "Установить",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = AccentCyan,
+                                    fontWeight = FontWeight.Bold
+                                )
                             }
                         }
                     }
+
                     else -> {
                         TvFocusCard(
                             onClick = { startCheckUpdates() },
                             modifier = Modifier
-                                .width(140.dp)
+                                .width(170.dp)
                                 .height(44.dp)
                         ) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Text(
-                                    text = if (updateUiState is UpdateUiState.Error) "Повторить" else "Проверить",
-                                    color = AccentCyan,
-                                    style = MaterialTheme.typography.bodyMedium
+                                    text = "Проверить сейчас",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = TextPrimary
                                 )
                             }
                         }
@@ -6156,16 +3765,17 @@ fun SettingsScreen(
     }
 
     // ---------------------------------------------------------
-    // Dialog: "Что нового?" in Player Style
+    // Changelog Dialog
     // ---------------------------------------------------------
     if (showChangelogDialog && changelogRelease != null) {
+        val release = changelogRelease!!
         Dialog(onDismissRequest = { showChangelogDialog = false }) {
             Box(
                 modifier = Modifier
-                    .width(620.dp)
+                    .width(520.dp)
                     .clip(RoundedCornerShape(20.dp))
                     .background(DarkCard)
-                    .border(2.dp, Color(0xFFFF7A00), RoundedCornerShape(20.dp))
+                    .border(1.dp, AccentCyan.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
                     .padding(28.dp)
             ) {
                 Column {
@@ -6174,182 +3784,67 @@ fun SettingsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column {
                             Text(
-                                text = "Re:",
-                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, fontSize = 24.sp),
-                                color = AccentCyan
+                                text = "Что нового в ${release.tagName}",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                color = TextPrimary
                             )
                             Text(
-                                text = "Player",
-                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, fontSize = 24.sp),
-                                color = Color(0xFFFF7A00)
+                                text = "Обновление готово к установке",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary
                             )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(Color(0x33FF7A00))
-                                    .padding(horizontal = 8.dp, vertical = 3.dp)
-                            ) {
-                                Text(
-                                    text = "v${changelogRelease!!.versionName}",
-                                    color = Color(0xFFFF9500),
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(AccentCyan.copy(alpha = 0.15f))
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = release.tagName,
+                                color = AccentCyan,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = "Главные улучшения этого обновления:",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = TextSecondary
-                    )
-
                     Spacer(modifier = Modifier.height(18.dp))
 
-                    val items = getFriendlyChangelog(changelogRelease!!.versionName, changelogRelease!!.changelog)
-                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                        items.forEach { item ->
+                    val changelogItems = remember(release) {
+                        getFriendlyChangelog(release.tagName, release.changelog)
+                    }
+
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        changelogItems.forEach { item ->
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.Top
                             ) {
-                                Text(
-                                    text = "•",
-                                    color = Color(0xFFFF7A00),
-                                    fontSize = 20.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(end = 12.dp)
+                                Box(
+                                    modifier = Modifier
+                                        .padding(top = 6.dp)
+                                        .size(6.dp)
+                                        .clip(RoundedCornerShape(3.dp))
+                                        .background(AccentCyan)
                                 )
+                                Spacer(modifier = Modifier.width(10.dp))
                                 Text(
                                     text = item,
-                                    style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 22.sp),
-                                    color = TextPrimary
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = TextPrimary,
+                                    lineHeight = 20.sp
                                 )
                             }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(26.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
-                    ) {
-                        TvFocusCard(
-                            onClick = { showChangelogDialog = false },
-                            focusBorderColor = Color(0xFFFF7A00),
-                            backgroundColor = Color(0x33FF7A00),
-                            modifier = Modifier
-                                .width(140.dp)
-                                .height(44.dp)
-                        ) {
-                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text(
-                                    text = "Понятно",
-                                    color = Color(0xFFFF9500),
-                                    fontWeight = FontWeight.Bold,
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // ---------------------------------------------------------
-    // Dialog: Google Drive Web / QR-code Pairing (for Yandex TV & Android TV)
-    // ---------------------------------------------------------
-    if (showPairingDialog) {
-        Dialog(onDismissRequest = { showPairingDialog = false }) {
-            Box(
-                modifier = Modifier
-                    .width(620.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(DarkCard)
-                    .border(2.dp, AccentCyan.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
-                    .padding(28.dp)
-            ) {
-                Column {
-                    Text(
-                        text = "Подключение Google Drive к ТВ",
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                        color = TextPrimary
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Для работы на Яндекс ТВ и Android TV без сервисов Google Play:",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TextSecondary
-                    )
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(DarkSurface)
-                            .padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // QR Code
-                        val pUrl = pairingServer?.pairingUrl ?: "http://127.0.0.1:8765"
-                        val qrApiUrl = "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=" +
-                                java.net.URLEncoder.encode(pUrl, "UTF-8")
-
-                        Box(
-                            modifier = Modifier
-                                .size(130.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color.White)
-                                .padding(6.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            AsyncImage(
-                                model = qrApiUrl,
-                                contentDescription = "QR-код подключения",
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.width(18.dp))
-
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "1. Наведите камеру телефона на QR-код",
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                                color = TextPrimary
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "Или откройте в браузере телефона / ПК:",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = TextSecondary
-                            )
-                            Text(
-                                text = pUrl,
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                color = AccentCyan
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = "2. На открывшейся странице запустите tools/auth_gdrive.py на компе, скопируйте Client ID + Secret + Refresh Token и отправьте на ТВ.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = TextSecondary,
-                                lineHeight = 18.sp
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(20.dp))
+                    Spacer(modifier = Modifier.height(24.dp))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -6357,126 +3852,13 @@ fun SettingsScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         TvFocusCard(
-                            onClick = {
-                                showPairingDialog = false
-                                showKeysDialog = true
-                            },
-                            modifier = Modifier
-                                .width(180.dp)
-                                .height(44.dp)
-                        ) {
-                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text("Ввести ключи на ТВ", color = TextSecondary)
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.width(12.dp))
-
-                        TvFocusCard(
-                            onClick = { showPairingDialog = false },
+                            onClick = { showChangelogDialog = false },
                             modifier = Modifier
                                 .width(120.dp)
                                 .height(44.dp)
                         ) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text("Закрыть", color = AccentCyan, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // ---------------------------------------------------------
-    // Dialog: Direct API Keys & Token Configuration on TV
-    // ---------------------------------------------------------
-    if (showKeysDialog) {
-        Dialog(onDismissRequest = { showKeysDialog = false }) {
-            Box(
-                modifier = Modifier
-                    .width(580.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(DarkCard)
-                    .border(1.dp, AccentCyan.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
-                    .padding(24.dp)
-            ) {
-                Column {
-                    Text(
-                        text = "Ключи API Google Drive",
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                        color = TextPrimary
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = "Введите Client ID и Secret из Google Cloud Console (тип: Desktop или Web), либо готовый Refresh Token / Access Token:",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TextSecondary,
-                        lineHeight = 16.sp
-                    )
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    OutlinedTextField(
-                        value = clientIdInput,
-                        onValueChange = { clientIdInput = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        label = { Text("Client ID", color = TextSecondary) },
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = AccentCyan,
-                            unfocusedBorderColor = DarkSurface,
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary
-                        )
-                    )
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    OutlinedTextField(
-                        value = clientSecretInput,
-                        onValueChange = { clientSecretInput = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        label = { Text("Client Secret", color = TextSecondary) },
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = AccentCyan,
-                            unfocusedBorderColor = DarkSurface,
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary
-                        )
-                    )
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    OutlinedTextField(
-                        value = tokenInput,
-                        onValueChange = { tokenInput = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        label = { Text("Refresh Token или Код авторизации (необязательно)", color = TextSecondary) },
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = AccentCyan,
-                            unfocusedBorderColor = DarkSurface,
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary
-                        )
-                    )
-
-                    Spacer(modifier = Modifier.height(20.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
-                    ) {
-                        TvFocusCard(
-                            onClick = { showKeysDialog = false },
-                            modifier = Modifier
-                                .width(110.dp)
-                                .height(44.dp)
-                        ) {
-                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text("Отмена", color = TextSecondary)
+                                Text("Закрыть", color = TextSecondary)
                             }
                         }
 
@@ -6484,108 +3866,16 @@ fun SettingsScreen(
 
                         TvFocusCard(
                             onClick = {
-                                if (clientIdInput.isNotBlank()) authManager.saveClientId(clientIdInput)
-                                if (clientSecretInput.isNotBlank()) authManager.saveClientSecret(clientSecretInput)
-
-                                val trimmedToken = tokenInput.trim()
-                                if (trimmedToken.isNotBlank()) {
-                                    if (trimmedToken.startsWith("1//") || trimmedToken.startsWith("ya29.")) {
-                                        authManager.saveTokens(
-                                            accessToken = if (trimmedToken.startsWith("ya29.")) trimmedToken else "valid_via_refresh",
-                                            refreshToken = if (trimmedToken.startsWith("1//")) trimmedToken else null,
-                                            expiresInSec = 3600
-                                        )
-                                        scope.launch {
-                                            authManager.refreshAccessToken()
-                                        }
-                                        showKeysDialog = false
-                                    } else {
-                                        scope.launch {
-                                            val res = authManager.exchangeAuthCode(trimmedToken, clientIdInput, clientSecretInput)
-                                            if (res.isSuccess) {
-                                                showKeysDialog = false
-                                            } else {
-                                                driveErrorMessage = res.exceptionOrNull()?.localizedMessage ?: "Ошибка обмена кода"
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    showKeysDialog = false
-                                    showPairingDialog = true
-                                }
+                                showChangelogDialog = false
+                                startDownload(release)
                             },
                             modifier = Modifier
-                                .width(160.dp)
+                                .width(140.dp)
                                 .height(44.dp)
                         ) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text("Сохранить", color = AccentCyan, fontWeight = FontWeight.Bold)
+                                Text("Загрузить", color = AccentCyan, fontWeight = FontWeight.Bold)
                             }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if (showDeviceCodeDialog && deviceCodeData != null) {
-        Dialog(onDismissRequest = { 
-            showDeviceCodeDialog = false 
-            isDriveSigningIn = false
-        }) {
-            Box(
-                modifier = Modifier
-                    .width(500.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(DarkCard)
-                    .border(2.dp, AccentCyan, RoundedCornerShape(20.dp))
-                    .padding(32.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = "Подключение Google Drive",
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                        color = TextPrimary
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = "1. Откройте на телефоне:",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = TextSecondary
-                    )
-                    Text(
-                        text = deviceCodeData!!.verification_url,
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = AccentCyan
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = "2. Введите этот код:",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = TextSecondary
-                    )
-                    Text(
-                        text = deviceCodeData!!.user_code,
-                        style = MaterialTheme.typography.displayLarge.copy(fontSize = 48.sp, fontWeight = FontWeight.Bold),
-                        color = Color(0xFFFF9500)
-                    )
-                    Spacer(modifier = Modifier.height(24.dp))
-                    if (isPollingToken) {
-                        CircularProgressIndicator(color = AccentCyan)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("Ожидание подтверждения...", color = TextSecondary)
-                    }
-                    Spacer(modifier = Modifier.height(16.dp))
-                    TvFocusCard(
-                        onClick = { 
-                            showDeviceCodeDialog = false 
-                            isDriveSigningIn = false
-                        },
-                        modifier = Modifier.width(140.dp).height(44.dp)
-                    ) {
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text("Отмена", color = TextPrimary)
                         }
                     }
                 }
@@ -6595,138 +3885,26 @@ fun SettingsScreen(
 }
 
 private fun getFriendlyChangelog(version: String, rawChangelog: String): List<String> {
+    if (version.contains("0.6")) {
+        return listOf(
+            "Глобальная оптимизация и стабильность: проект полностью сфокусирован на молниеносной работе с домашними серверами DLNA / UPnP.",
+            "Надёжный LibVLC: устранены вылеты при закрытии плеера и исправлено переключение звуковых дорожек.",
+            "Плавный фокус пульта: мгновенное и предсказуемое управление кнопками Android TV без потери курсора."
+        )
+    }
+
     if (version.contains("0.5")) {
         return listOf(
             "Полный переход на плеерный движок LibVLC: встроенный нативный FFmpeg гарантирует 100% плавное воспроизведение любых AVI (DivX, Xvid) и идеальную синхронизацию звука.",
             "Аппаратное и программное декодирование: плавная картинка и чистый звук на любых ТВ без задержек и артефактов.",
-            "Прямое воспроизведение Google Drive и DLNA: мгновенный старт потокового видео с выбором звуковых дорожек и субтитров."
+            "Прямое воспроизведение DLNA: мгновенный старт потокового видео с выбором звуковых дорожек и субтитров."
         )
     }
 
     if (version.contains("0.4")) {
         return listOf(
             "Точный расчёт времени аудиочанков в AVI: устранена рассинхронизация звука через накопление реального времени сэмплов в ChunkReader.",
-            "Подключение Google Drive (Device Flow): вход по коду с экрана на google.com/device — быстро и без настроек на ПК.",
-            "Автооткрытие папки Re:Player: мгновенный доступ к фильмам на вашем Google Диске."
-        )
-    }
-
-    if (version.contains("0.3.4")) {
-        return listOf(
-            "AVI: исправлена синхронизация звука и видео для файлов без idx1-индекса — устранено ~1000-кратное ускорение аудио.",
-            "AVI: добавлена поддержка кодеков DivX 3.11 (DIV1/DIV2/DIV3), XviD (XVID), DX50, 3ivx, MJPG и MPEG-1/2.",
-            "Google Drive: убрана мёртвая OOB-авторизация; подключение через Refresh Token (tools/auth_gdrive.py) теперь работает стабильно.",
-            "Google Drive: при ошибке нативного входа (12500/10) автоматически открывается pairing-окно — не нужно возвращаться в настройки."
-        )
-    }
-
-    if (version.contains("0.3.3")) {
-        return listOf(
-            "Подключение Google Drive для Яндекс ТВ и Android TV: Встроенный локальный веб-сервер и QR-код для моментального входа через телефон или браузер без сервисов Google Play.",
-            "Прямой ввод ключей на ТВ: Возможность ввести Client ID, Client Secret или Refresh Token прямо с пульта телевизора.",
-            "Исправление звука и видео в AVI: Полностью переработан расчёт таймстемпов аудиодорожек в ChunkReader — устранены скрежет звука и зависание кадров.",
-            "Аппаратный и программный fallback видео: Автоматический выбор софтверных декодеров для старых кодеков XviD и DivX."
-        )
-    }
-
-    if (version.contains("0.3.2")) {
-        return listOf(
-            "Стабильный стриминг Google Drive: Динамическое внедрение Bearer-токена в ExoPlayer и поддержка больших видеофайлов (acknowledgeAbuse).",
-            "Умное автообновление токена: Плеер и файловый менеджер автоматически обновляют истекающий токен без разрыва соединения.",
-            "Плавное воспроизведение AVI: Точный маппинг кодеков Xvid, DivX, MP4V, DX50, FMP4, H264 и программный fallback видеодекодера."
-        )
-    }
-
-    if (version.contains("0.3.1")) {
-        return listOf(
-            "Нативный выбор аккаунта Android TV: Использование системного AccountManager вместо мобильного интерфейса — устранена ошибка 12500.",
-            "Прямой запрос разрешений: Окно подтверждения доступа к Google Диску открывается на телевизоре без сбоев.",
-            "Полный доступ к вашим видео: Чтение всех папок Google Диска с автообновлением токена."
-        )
-    }
-
-    if (version.contains("0.3.0")) {
-        return listOf(
-            "Вход в Google Диск в 1 клик на ТВ: Нативная авторизация через аккаунт Google прямо на телевизоре без ввода кодов и телефона.",
-            "Полный доступ ко всем файлам: Чтение всех ваших папок и видеоархивов на Google Диске благодаря правам drive.readonly.",
-            "Мгновенное переподключение: Автоматическое фоновое обновление токена Google Play Services."
-        )
-    }
-
-    if (version.contains("0.2.9")) {
-        return listOf(
-            "Исправление Client Secret: Скорректирован секретный ключ Google OAuth (устранена ошибка «client secret is invalid»).",
-            "Очистка устаревших ключей: Автоматически удалены старые несоответствующие ключи от предыдущих версий.",
-            "Надёжная авторизация: Вход через QR-код на телефоне теперь без ошибок передаёт токен на телевизор."
-        )
-    }
-
-    if (version.contains("0.2.8")) {
-        return listOf(
-            "Google Drive: Вшиты новые параметры подключения (Desktop Client) с поддержкой прямого доступа ко всему диску.",
-            "Фокус в настройках: Кнопка «Скачать» и «Установить» больше никогда не теряют фокус и не сбрасывают курсор в боковое меню.",
-            "Воспроизведение AVI: Расчёт таймстемпов по точной спецификации AVI устраняет чёрный экран и рассинхрон звука."
-        )
-    }
-
-    if (version.contains("0.2.7")) {
-        return listOf(
-            "Стабильное воспроизведение AVI: Полностью исправлена синхронизация аудио и видео — чистый звук и плавное видео без зависаний.",
-            "Папка «Re:Player» на Google Диске: Автоматическое создание папки приложения для мгновенного доступа к вашим фильмам на ТВ.",
-            "Выразительный логотип: Логотип в боковом меню стал крупнее и чётче, радуя глаз стильным неоновым свечением."
-        )
-    }
-
-    if (version.contains("0.2.6")) {
-        return listOf(
-            "Стабильный фокус в настройках: При нажатии «Скачать» или «Проверить» фокус больше не улетает в меню на «Домой».",
-            "Чистый звук и видео в AVI: Исправлен расчёт кадров и включён надёжный программный декодер MPEG-4 — никаких артефактов и инопланетных звуков.",
-            "Загрузка файлов Google Drive: Исправлен запрос к Google API и добавлено автообновление токена — файлы и папки диска отображаются корректно."
-        )
-    }
-
-    if (version.contains("0.2.5")) {
-        return listOf(
-            "Мгновенный вход в Google Диск: Вшит секретный ключ приложения. Больше никаких настроек API — просто сканируйте QR-код телефоном, и диск сразу подключится!",
-            "Улучшенный QR-код: Код больше никогда не сбрасывается по ошибке, телевизор надёжно ожидает подтверждения с телефона.",
-            "Плавное воспроизведение AVI и удобное управление: Все исправления плеера и кнопки «Назад» активны и работают по умолчанию."
-        )
-    }
-
-    if (version.contains("0.2.4")) {
-        return listOf(
-            "Мгновенный «Назад»: Одно нажатие кнопки «Назад» сразу скрывает панель управления плеера без лишних кликов.",
-            "Полный запуск AVI: Устранено зависание картинки — видео в формате .avi теперь непрерывно играет со звуком.",
-            "Подключение Google Drive: Добавлена поддержка Client Secret, код больше не сбрасывается, а телевизор успешно авторизуется."
-        )
-    }
-
-    if (version.contains("0.2.3")) {
-        return listOf(
-            "Память просмотренного: При выходе из видео курсор точно остаётся на этом файле.",
-            "Стабильный фокус: При открытии и выходе из папок курсор больше не прыгает в боковое меню «Домой».",
-            "Google Drive без ошибок: Устранена ошибка авторизации (400 invalid_scope), подключение проходит гладко.",
-            "Восстановление AVI: Фильмы в формате .avi открываются и воспроизводятся стабильно с чистым звуком и картинкой."
-        )
-    }
-
-    if (version.contains("0.2.2")) {
-        return listOf(
-            "Послушный курсор: При открытии папок и выходе назад фокус всегда на первом файле, а не улетает в меню.",
-            "Кнопка «Назад»: Если панель плеера открыта, нажатие «Назад» просто скрывает её, не закрывая видео.",
-            "Удобная перемотка: Стрелки влево и вправо мотают на 10 сек без лишних плашек, а полоса прогресса не прыгает в начало.",
-            "Честный AVI: Фильмы в формате .avi теперь идут чисто и плавно — без шумов, заиканий и артефактов.",
-            "Google Drive без заминок: После входа на телефоне телевизор сразу открывает все твои папки и файлы."
-        )
-    }
-
-    if (version.contains("0.2.1")) {
-        return listOf(
-            "Фирменный логотип: Вместо скучного текста теперь аккуратный прозрачный логотип в боковом меню.",
-            "Поддержка AVI: Старые и редкие видео в формате .avi теперь открываются и воспроизводятся без сбоев.",
-            "Пульт не теряется: Меню плеера больше не застревает — нажми любую стрелку или ОК, и управление появится.",
-            "Умная память папок: После просмотра возвращаешься ровно в ту же папку, и курсор сразу стоит на просмотренном файле.",
-            "Быстрый выход: Одно нажатие «Назад» во время фильма сразу возвращает к списку файлов."
+            "Автооткрытие папок: мгновенный доступ к видеофайлам."
         )
     }
 
@@ -6753,9 +3931,9 @@ private fun getFriendlyChangelog(version: String, rawChangelog: String): List<St
 private fun getCurrentAppVersion(context: Context): String {
     return try {
         val pInfo = context.packageManager.getPackageInfo(context.packageName, 0)
-        pInfo.versionName ?: "0.5.0"
+        pInfo.versionName ?: "0.6.0"
     } catch (e: Exception) {
-        "0.5.0"
+        "0.6.0"
     }
 }
 
@@ -6767,7 +3945,6 @@ private fun Context.findActivity(): Activity? {
     }
     return null
 }
-
 
 
 ================================================================================
@@ -7220,182 +4397,3 @@ jobs:
         generate_release_notes: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-
-================================================================================
-FILE: tools/auth_gdrive.py
-================================================================================
-
-#!/usr/bin/env python3
-"""
-Re:Player Google Drive OAuth Helper for Mac & PC
-Авторизация Google Drive в 1 клик через браузер компьютера
-
-Использование:
-  1. Создайте OAuth 2.0 Client ID (тип: Desktop) в Google Cloud Console.
-  2. Разрешите в нём redirect URI: http://127.0.0.1:8089
-  3. Запустите: python tools/auth_gdrive.py
-  4. Скопируйте Client ID, Client Secret и Refresh Token на pairing-страницу ТВ.
-"""
-
-import http.server
-import json
-import socketserver
-import sys
-import urllib.parse
-import urllib.request
-import webbrowser
-
-PORT = 8089
-REDIRECT_URI = f"http://127.0.0.1:{PORT}"
-SCOPE = "https://www.googleapis.com/auth/drive.readonly email profile"
-TOKEN_URL = "https://oauth2.googleapis.com/token"
-
-class OAuthHandler(http.server.BaseHTTPRequestHandler):
-    def do_GET(self):
-        query = urllib.parse.urlparse(self.path).query
-        params = urllib.parse.parse_qs(query)
-
-        if "code" in params:
-            self.server.auth_code = params["code"][0]
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.end_headers()
-            html = """
-            <!DOCTYPE html>
-            <html>
-            <head><meta charset="utf-8"><title>Re:Player Auth</title>
-            <style>
-                body { background: #090A0E; color: #F8FAFC; font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-                .box { background: #13161F; border: 1px solid #06B6D4; padding: 32px; border-radius: 16px; text-align: center; max-width: 480px; }
-                h1 { color: #06B6D4; font-size: 22px; }
-                p { color: #94A3B8; font-size: 15px; line-height: 1.5; }
-            </style>
-            </head>
-            <body>
-                <div class="box">
-                    <h1>✅ Авторизация успешна!</h1>
-                    <p>Код получен. Сейчас токен будет передан на ваш телевизор.<br>Можете закрыть эту вкладку.</p>
-                </div>
-            </body>
-            </html>
-            """
-            self.wfile.write(html.encode("utf-8"))
-        else:
-            error = params.get("error", ["unknown"])[0]
-            self.send_response(400)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.end_headers()
-            self.wfile.write(f"Ошибка авторизации: {error}".encode("utf-8"))
-
-    def log_message(self, format, *args):
-        pass
-
-
-def exchange_code(client_id, client_secret, auth_code):
-    data = urllib.parse.urlencode({
-        "code": auth_code,
-        "client_id": client_id.strip(),
-        "client_secret": client_secret.strip(),
-        "redirect_uri": REDIRECT_URI,
-        "grant_type": "authorization_code"
-    }).encode("utf-8")
-
-    req = urllib.request.Request(TOKEN_URL, data=data, method="POST")
-    try:
-        with urllib.request.urlopen(req) as resp:
-            body = resp.read().decode("utf-8")
-            return json.loads(body)
-    except urllib.error.HTTPError as e:
-        print(f"\n❌ Ошибка обмена кода ({e.code}): {e.read().decode('utf-8')}")
-        return None
-
-
-def main():
-    print("=" * 60)
-    print("🎬 Re:Player TV — Авторизация Google Drive")
-    print("=" * 60)
-
-    client_id = input("\n1. Введите ваш Client ID из Google Cloud Console:\n> ").strip()
-    if not client_id:
-        print("Client ID не может быть пустым.")
-        return
-
-    client_secret = input("\n2. Введите ваш Client Secret:\n> ").strip()
-    if not client_secret:
-        print("Client Secret не может быть пустым.")
-        return
-
-    tv_ip = input("\n3. Введите IP-адрес телевизора (например 192.168.1.45, или оставьте пустым):\n> ").strip()
-
-    auth_url = (
-        "https://accounts.google.com/o/oauth2/v2/auth?"
-        + urllib.parse.urlencode({
-            "client_id": client_id,
-            "redirect_uri": REDIRECT_URI,
-            "response_type": "code",
-            "scope": SCOPE,
-            "access_type": "offline",
-            "prompt": "consent"
-        })
-    )
-
-    print("\n🌐 Открываю браузер для входа в Google...")
-    webbrowser.open(auth_url)
-
-    server = socketserver.TCPServer(("127.0.0.1", PORT), OAuthHandler)
-    server.auth_code = None
-    print(f"⏳ Ожидание подтверждения в браузере (порт {PORT})...")
-
-    while not server.auth_code:
-        server.handle_request()
-
-    auth_code = server.auth_code
-    server.server_close()
-    print("✅ Код авторизации получен от Google!")
-
-    print("🔄 Обмениваю код на Refresh Token...")
-    token_resp = exchange_code(client_id, client_secret, auth_code)
-    if not token_resp:
-        return
-
-    access_token = token_resp.get("access_token", "")
-    refresh_token = token_resp.get("refresh_token", "")
-    print(f"🎉 Успешно! Refresh Token: {refresh_token[:15]}...{refresh_token[-6:] if refresh_token else ''}")
-
-    # Send to TV if IP provided
-    if tv_ip:
-        payload = json.dumps({
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "access_token": access_token,
-            "refresh_token": refresh_token
-        }).encode("utf-8")
-
-        target_url = f"http://{tv_ip}:8765/api/save"
-        print(f"📡 Отправляю токены на телевизор ({target_url})...")
-        try:
-            req = urllib.request.Request(
-                target_url,
-                data=payload,
-                headers={"Content-Type": "application/json"},
-                method="POST"
-            )
-            with urllib.request.urlopen(req, timeout=5) as r:
-                print("📺 Телевизор подтвердил получение! Google Drive подключен!")
-        except Exception as e:
-            print(f"⚠️ Не удалось отправить напрямую на {target_url}: {e}")
-            print("Вы можете ввести полученный Refresh Token в приложении Re:Player на ТВ вручную:")
-            print(f"\nRefresh Token:\n{refresh_token}\n")
-    else:
-        print("\n" + "=" * 60)
-        print("Скопируйте три значения ниже на pairing-страницу ТВ:")
-        print(f"  Client ID:     {client_id}")
-        print(f"  Client Secret: {client_secret}")
-        print(f"  Refresh Token: {refresh_token}")
-        print("=" * 60)
-
-
-if __name__ == "__main__":
-    main()
-
