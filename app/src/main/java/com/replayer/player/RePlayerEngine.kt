@@ -29,6 +29,7 @@ import androidx.media3.extractor.ExtractorsFactory
 import androidx.media3.extractor.avi.AviExtractor
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.NextRenderersFactory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -39,29 +40,18 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
+// Safe fallback extension in case NextRenderersFactory doesn't declare a no-arg build()
+private fun NextRenderersFactory.build(): NextRenderersFactory = this
+
 @OptIn(UnstableApi::class)
 class RePlayerEngine(private val context: Context) {
 
     private val trackSelector = DefaultTrackSelector(context)
 
-    private val renderersFactory = DefaultRenderersFactory(context)
+    private val renderersFactory = NextRenderersFactory(context)
         .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
         .setEnableDecoderFallback(true)
-        .setMediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunnelingDecoder ->
-            val decoders = MediaCodecSelector.DEFAULT.getDecoderInfos(mimeType, requiresSecureDecoder, requiresTunnelingDecoder)
-            if (mimeType == MimeTypes.VIDEO_MP4V) {
-                // Prioritize software decoders for MPEG4 / XviD / DivX as TV hardware decoders often have severe quirks
-                decoders.sortedBy {
-                    val isSoftware = it.softwareOnly ||
-                            it.name.contains("google", ignoreCase = true) ||
-                            it.name.contains("android", ignoreCase = true) ||
-                            it.name.contains("sw", ignoreCase = true)
-                    if (isSoftware) 0 else 1
-                }
-            } else {
-                decoders
-            }
-        }
+        .build()
 
     private val loadControl = DefaultLoadControl.Builder()
         .setBufferDurationsMs(

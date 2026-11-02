@@ -138,8 +138,20 @@ fun GoogleDriveScreen(
                     onFolderLoaded()
                 }
             } else if (folderStack.isEmpty()) {
-                folderStack = listOf(Pair("root", "Мой диск"))
-                loadFolder("root")
+                // При подключении сразу ищем или создаем папку Re:Player
+                val token = authManager.getValidAccessToken() ?: authManager.getSavedAccessToken()
+                if (token != null) {
+                    isLoading = true
+                    val rePlayerFolder = driveService.getOrCreateRePlayerFolder(token)
+                    if (rePlayerFolder != null) {
+                        folderStack = listOf(Pair(rePlayerFolder.id, "Re:Player"))
+                        loadFolder(rePlayerFolder.id)
+                    } else {
+                        folderStack = listOf(Pair("root", "Мой диск"))
+                        loadFolder("root")
+                    }
+                    isLoading = false
+                }
             }
         }
     }

@@ -125,6 +125,9 @@ fun SettingsScreen(
     // Pairing dialog & Manual Keys dialog state
     var showPairingDialog by remember { mutableStateOf(false) }
     var showKeysDialog by remember { mutableStateOf(false) }
+    var showDeviceCodeDialog by remember { mutableStateOf(false) }
+    var deviceCodeData by remember { mutableStateOf<com.replayer.model.DeviceCodeResponse?>(null) }
+    var isPollingToken by remember { mutableStateOf(false) }
     var clientIdInput by remember { mutableStateOf(authManager.getSavedClientId()) }
     var clientSecretInput by remember { mutableStateOf(authManager.getSavedClientSecret()) }
     var tokenInput by remember { mutableStateOf("") }
@@ -232,13 +235,35 @@ fun SettingsScreen(
 
     fun handleConnectDriveClick() {
         driveErrorMessage = null
-        if (!hasGms) {
-            // Яндекс ТВ / AOSP: сразу pairing (Refresh Token через tools/auth_gdrive.py)
-            showPairingDialog = true
-        } else {
-            // GMS: пробуем нативный account chooser;
-            // при любой ошибке 12500/10 — автоматически падаем в pairing.
-            startNativeGoogleSignIn()
+        isDriveSigningIn = true
+        scope.launch {
+            val clientId = authManager.getSavedClientId()
+            val result = authManager.requestDeviceCode(clientId)
+            result.onSuccess { codeResp ->
+                deviceCodeData = codeResp
+                showDeviceCodeDialog = true
+                isPollingToken = true
+                
+                // Запускаем поллинг токена в фоне
+                val tokenResp = authManager.pollForToken(
+                    clientId = clientId,
+                    deviceCode = codeResp.device_code,
+                    intervalSec = codeResp.interval
+                )
+                isPollingToken = false
+                if (tokenResp?.access_token != null) {
+                    showDeviceCodeDialog = false
+                    savedDriveEmail = "Подключено"
+                    isDriveSigningIn = false
+                } else {
+                    driveErrorMessage = "Не удалось получить токен. Попробуйте снова."
+                    isDriveSigningIn = false
+                    showDeviceCodeDialog = false
+                }
+            }.onFailure { err ->
+                isDriveSigningIn = false
+                driveErrorMessage = "Ошибка: ${err.message}"
+            }
         }
     }
 
@@ -593,7 +618,7 @@ fun SettingsScreen(
                                         )
                                     } else {
                                         Text(
-                                            text = if (hasGms) "Войти через аккаунт ТВ" else "Подключить через телефон",
+                                            text = "Подключить Google Drive",
                                             color = AccentCyan,
                                             fontWeight = FontWeight.Bold,
                                             style = MaterialTheme.typography.bodyMedium
@@ -1214,9 +1239,82 @@ fun SettingsScreen(
             }
         }
     }
+
+    if (showDeviceCodeDialog && deviceCodeData != null) {
+        Dialog(onDismissRequest = { 
+            showDeviceCodeDialog = false 
+            isDriveSigningIn = false
+        }) {
+            Box(
+                modifier = Modifier
+                    .width(500.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(DarkCard)
+                    .border(2.dp, AccentCyan, RoundedCornerShape(20.dp))
+                    .padding(32.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "Подключение Google Drive",
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                        color = TextPrimary
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "1. Откройте на телефоне:",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = TextSecondary
+                    )
+                    Text(
+                        text = deviceCodeData!!.verification_url,
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = AccentCyan
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "2. Введите этот код:",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = TextSecondary
+                    )
+                    Text(
+                        text = deviceCodeData!!.user_code,
+                        style = MaterialTheme.typography.displayLarge.copy(fontSize = 48.sp, fontWeight = FontWeight.Bold),
+                        color = Color(0xFFFF9500)
+                    )
+                    Spacer(modifier = Modifier.height(24.dp))
+                    if (isPollingToken) {
+                        CircularProgressIndicator(color = AccentCyan)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Ожидание подтверждения...", color = TextSecondary)
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                    TvFocusCard(
+                        onClick = { 
+                            showDeviceCodeDialog = false 
+                            isDriveSigningIn = false
+                        },
+                        modifier = Modifier.width(140.dp).height(44.dp)
+                    ) {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text("Отмена", color = TextPrimary)
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 private fun getFriendlyChangelog(version: String, rawChangelog: String): List<String> {
+    if (version.contains("0.4")) {
+        return listOf(
+            "Подключение Google Drive (Device Flow): вход по коду с экрана на google.com/device — быстро и без настроек на ПК.",
+            "Автооткрытие папки Re:Player: мгновенный доступ к фильмам на вашем Google Диске.",
+            "Поддержка Nextlib FFmpeg: интеграция мощного программного видеодекодера для плавного воспроизведения AVI (DivX/Xvid)."
+        )
+    }
+
     if (version.contains("0.3.4")) {
         return listOf(
             "AVI: исправлена синхронизация звука и видео для файлов без idx1-индекса — устранено ~1000-кратное ускорение аудио.",
@@ -1359,9 +1457,9 @@ private fun getFriendlyChangelog(version: String, rawChangelog: String): List<St
 private fun getCurrentAppVersion(context: Context): String {
     return try {
         val pInfo = context.packageManager.getPackageInfo(context.packageName, 0)
-        pInfo.versionName ?: "0.3.4"
+        pInfo.versionName ?: "0.4.0"
     } catch (e: Exception) {
-        "0.3.4"
+        "0.4.0"
     }
 }
 

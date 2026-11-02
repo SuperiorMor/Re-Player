@@ -13,8 +13,8 @@ android {
         applicationId = "com.replayer"
         minSdk = 24
         targetSdk = 35
-        versionCode = 20
-        versionName = "0.3.4"
+        versionCode = 21
+        versionName = "0.4.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -63,6 +63,9 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
+        jniLibs {
+            pickFirsts += "**/*.so"
+        }
     }
 }
 
@@ -91,6 +94,9 @@ dependencies {
     implementation(libs.androidx.media3.datasource)
     implementation(libs.androidx.media3.extractor)
     implementation(libs.media3.ffmpeg)
+    // Nextlib для софт-декодинга видео AVI/DivX/Xvid:
+    implementation("io.github.anilbeesetti.nextlib:nextlib-media3ext:0.8.4")
+    implementation("io.github.anilbeesetti.nextlib:nextlib-ffmpeg-decoder:0.8.4")
 
     // Networking, JSON, Image loading
     implementation(libs.kotlinx.coroutines.android)
