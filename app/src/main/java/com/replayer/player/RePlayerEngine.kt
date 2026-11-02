@@ -60,7 +60,10 @@ class RePlayerEngine(private val context: Context) {
         .build()
 
     private val extractorsFactory = ExtractorsFactory {
-        DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(false).createExtractors()
+        arrayOf(
+            com.replayer.player.avi.AviExtractor(),
+            *DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(false).createExtractors()
+        )
     }
 
     private val baseHttpDataSourceFactory = DefaultHttpDataSource.Factory()
@@ -172,7 +175,10 @@ class RePlayerEngine(private val context: Context) {
 
         val activeExtractorsFactory = object : ExtractorsFactory {
             override fun createExtractors(): Array<Extractor> {
-                return DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(false).createExtractors()
+                return arrayOf(
+                    com.replayer.player.avi.AviExtractor(),
+                    *DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(false).createExtractors()
+                )
             }
 
             override fun createExtractors(uri: Uri, responseHeaders: Map<String, List<String>>): Array<Extractor> {
@@ -181,9 +187,10 @@ class RePlayerEngine(private val context: Context) {
                 } else {
                     responseHeaders
                 }
-                return DefaultExtractorsFactory()
+                val defaultExtractors = DefaultExtractorsFactory()
                     .setConstantBitrateSeekingEnabled(false)
                     .createExtractors(uri, cleanHeaders)
+                return arrayOf(com.replayer.player.avi.AviExtractor(), *defaultExtractors)
             }
         }
 

@@ -72,6 +72,9 @@ import java.util.Arrays;
   /** Number of chunks as calculated by the index. */
   private int currentChunkIndex;
 
+  private long currentChunkDurationUs;
+  private long accumulatedAudioTimeUs;
+
   private int indexChunkCount;
   private int indexSize;
   private long firstIndexChunkOffset;
@@ -120,6 +123,8 @@ import java.util.Arrays;
     // что ломает расчёт таймстемпов. Реальное число чанков установит commitIndex().
     // Защита от «samples as chunks» также реализована в getChunkTimestampUs().
     chunkCount = 0;
+    currentChunkDurationUs = 0;
+    accumulatedAudioTimeUs = 0;
   }
 
   public void appendIndexChunk(long offset, boolean isKeyFrame) {
@@ -143,6 +148,10 @@ import java.util.Arrays;
   }
 
   public long getCurrentChunkTimestampUs() {
+    // Для аудио используем накопленное реальное время, а не догадки
+    if (isAudio() && accumulatedAudioTimeUs > 0) {
+        return accumulatedAudioTimeUs;
+    }
     return getChunkTimestampUs(currentChunkIndex);
   }
 
@@ -201,6 +210,19 @@ import java.util.Arrays;
   public void onChunkStart(int size) {
     currentChunkSize = size;
     bytesRemainingInCurrentChunk = size;
+    
+    // Вычисляем точную длительность текущего аудио-чанка в микросекундах
+    if (isAudio() && streamHeaderChunk.sampleSize > 0 && streamHeaderChunk.rate > 0 && streamHeaderChunk.scale > 0) {
+        int numSamples = size / streamHeaderChunk.sampleSize; // Количество сэмплов
+        long sampleRate = streamHeaderChunk.rate / streamHeaderChunk.scale; // Частота дискретизации
+        if (sampleRate > 0) {
+            currentChunkDurationUs = numSamples * 1_000_000L / sampleRate;
+        } else {
+            currentChunkDurationUs = 26_000L;
+        }
+    } else if (isAudio()) {
+        currentChunkDurationUs = 26_000L; // Фолбэк
+    }
   }
 
   /**
@@ -220,6 +242,10 @@ import java.util.Arrays;
             0,
             null);
       }
+      // Накапливаем время для аудио
+      if (isAudio()) {
+          accumulatedAudioTimeUs += currentChunkDurationUs;
+      }
       advanceCurrentChunk();
     }
     return done;
@@ -228,11 +254,13 @@ import java.util.Arrays;
   public void seekToPosition(long position) {
     if (indexSize == 0) {
       currentChunkIndex = 0;
+      accumulatedAudioTimeUs = 0;
     } else {
       int index =
           Util.binarySearchFloor(
               keyFrameOffsets, position, /* inclusive= */ true, /* stayInBounds= */ true);
       currentChunkIndex = keyFrameIndices[index];
+      accumulatedAudioTimeUs = getChunkTimestampUs(currentChunkIndex);
     }
   }
 
