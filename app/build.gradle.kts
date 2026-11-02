@@ -13,8 +13,8 @@ android {
         applicationId = "com.replayer"
         minSdk = 24
         targetSdk = 35
-        versionCode = 21
-        versionName = "0.4.0"
+        versionCode = 22
+        versionName = "0.4.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

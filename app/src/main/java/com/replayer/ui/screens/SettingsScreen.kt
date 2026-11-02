@@ -1309,9 +1309,9 @@ fun SettingsScreen(
 private fun getFriendlyChangelog(version: String, rawChangelog: String): List<String> {
     if (version.contains("0.4")) {
         return listOf(
+            "Стандартный Media3 парсер AVI: удалён кастомный парсер, декодирование видео и аудио передано нативному движку Nextlib FFmpeg.",
             "Подключение Google Drive (Device Flow): вход по коду с экрана на google.com/device — быстро и без настроек на ПК.",
-            "Автооткрытие папки Re:Player: мгновенный доступ к фильмам на вашем Google Диске.",
-            "Поддержка Nextlib FFmpeg: интеграция мощного программного видеодекодера для плавного воспроизведения AVI (DivX/Xvid)."
+            "Автооткрытие папки Re:Player: мгновенный доступ к фильмам на вашем Google Диске."
         )
     }
 
@@ -1457,9 +1457,9 @@ private fun getFriendlyChangelog(version: String, rawChangelog: String): List<St
 private fun getCurrentAppVersion(context: Context): String {
     return try {
         val pInfo = context.packageManager.getPackageInfo(context.packageName, 0)
-        pInfo.versionName ?: "0.4.0"
+        pInfo.versionName ?: "0.4.1"
     } catch (e: Exception) {
-        "0.4.0"
+        "0.4.1"
     }
 }
 
