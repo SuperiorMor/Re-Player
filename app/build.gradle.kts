@@ -96,7 +96,6 @@ dependencies {
     implementation(libs.media3.ffmpeg)
     // Nextlib для софт-декодинга видео AVI/DivX/Xvid:
     implementation("io.github.anilbeesetti.nextlib:nextlib-media3ext:0.8.4")
-    implementation("io.github.anilbeesetti.nextlib:nextlib-ffmpeg-decoder:0.8.4")
 
     // Networking, JSON, Image loading
     implementation(libs.kotlinx.coroutines.android)
