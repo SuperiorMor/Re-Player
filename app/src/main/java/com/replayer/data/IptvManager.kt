@@ -214,31 +214,38 @@ class IptvManager private constructor(private val context: Context) {
         channel.tvgId?.let { id ->
             map[id]?.let { if (it.isNotEmpty()) return it }
             map[id.lowercase()]?.let { if (it.isNotEmpty()) return it }
+            val cleanId = XmlTvParser.normalizeChannelName(id)
+            if (cleanId.isNotEmpty()) {
+                map[cleanId]?.let { if (it.isNotEmpty()) return it }
+            }
         }
 
         channel.tvgName?.let { name ->
             map[name]?.let { if (it.isNotEmpty()) return it }
             map[name.lowercase()]?.let { if (it.isNotEmpty()) return it }
+            val cleanName = XmlTvParser.normalizeChannelName(name)
+            if (cleanName.isNotEmpty()) {
+                map[cleanName]?.let { if (it.isNotEmpty()) return it }
+            }
         }
 
         map[channel.name]?.let { if (it.isNotEmpty()) return it }
         map[channel.name.lowercase()]?.let { if (it.isNotEmpty()) return it }
 
-        val clean = channel.name.lowercase()
-            .replace(Regex("\\[.*?\\]|\\(.*?\\)"), "")
-            .replace(Regex("\\b(hd|fhd|4k|uhd|sd|50fps|orig|hevc)\\b"), "")
-            .replace(Regex("[^a-zA-Z0-9а-яА-ЯёЁ]"), "")
-            .trim()
-
+        val clean = XmlTvParser.normalizeChannelName(channel.name)
         if (clean.isNotEmpty()) {
             map[clean]?.let { if (it.isNotEmpty()) return it }
+            val noDigits = clean.replace(Regex("\\d+$"), "")
+            if (noDigits.isNotEmpty() && noDigits != clean) {
+                map[noDigits]?.let { if (it.isNotEmpty()) return it }
+            }
         }
 
         return emptyList()
     }
 
     /**
-     * Binary search for current program (O(log N))
+     * Binary search with linear fallback for current program
      */
     fun getCurrentProgram(channel: IptvChannel): EpgProgram? {
         val progs = getProgramsForChannel(channel)
@@ -252,7 +259,15 @@ class IptvManager private constructor(private val context: Context) {
                 else -> 0
             }
         }
-        return if (idx >= 0) progs[idx] else null
+        if (idx >= 0) return progs[idx]
+
+        for (prog in progs) {
+            if (now in prog.startTime until prog.endTime) {
+                return prog
+            }
+        }
+
+        return progs.firstOrNull { it.startTime > now }
     }
 
     /**
@@ -526,7 +541,8 @@ class IptvManager private constructor(private val context: Context) {
             try { tempFile.delete() } catch (_: Exception) {}
             _epgMap.value = parsed
             saveCachedEpg(parsed)
-            _statusMessage.value = "Телепрограмма обновлена (${parsed.size} источников). Каналов: ${_channels.value.size}"
+            val totalProgs = parsed.values.sumOf { it.size }
+            _statusMessage.value = "Телепрограмма обновлена: $totalProgs передач для ${_channels.value.size} каналов"
         } catch (e: Exception) {
             _statusMessage.value = "Сбой EPG: ${e.localizedMessage ?: "Сбой соединения"}"
         } finally {
@@ -599,7 +615,7 @@ class IptvManager private constructor(private val context: Context) {
 
     private fun saveCachedEpg(map: Map<String, List<EpgProgram>>) {
         try {
-            val trimmed = map.entries.take(400).associate { it.key to it.value.take(40) }
+            val trimmed = map.entries.take(2000).associate { it.key to it.value.take(50) }
             val file = File(context.filesDir, "iptv_epg.json")
             file.writeText(json.encodeToString(trimmed))
         } catch (_: Exception) {}

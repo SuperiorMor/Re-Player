@@ -29,13 +29,15 @@ object XmlTvParser {
         val parser = Xml.newPullParser()
         parser.setInput(stream, "UTF-8")
 
-        // Mapping from display name / alias (lowercased) -> channel ID
+        // Mapping from display name / alias (lowercased) -> channel XML ID
         val aliasToChannelId = mutableMapOf<String, String>()
+        // All XML IDs that matched the user's target channels (or all channels if targetChannels is null)
+        val relevantXmlChannelIds = mutableSetOf<String>()
         // Canonical channel programs: channelId -> list of programs
         val channelPrograms = mutableMapOf<String, MutableList<EpgProgram>>()
 
         val now = System.currentTimeMillis()
-        val minTime = now - 18 * 3600 * 1000L // last 18h
+        val minTime = now - 24 * 3600 * 1000L // last 24h
         val maxTime = now + 48 * 3600 * 1000L // next 48h
 
         var currentChannelId: String? = null
@@ -48,15 +50,40 @@ object XmlTvParser {
                     when (parser.name) {
                         "channel" -> {
                             currentChannelId = parser.getAttributeValue(null, "id")?.trim()
+                            if (!currentChannelId.isNullOrBlank()) {
+                                if (targetChannels == null) {
+                                    relevantXmlChannelIds.add(currentChannelId)
+                                } else {
+                                    val idLower = currentChannelId.lowercase()
+                                    val idClean = normalizeChannelName(currentChannelId)
+                                    if (targetChannels.contains(currentChannelId) ||
+                                        targetChannels.contains(idLower) ||
+                                        (idClean.isNotEmpty() && targetChannels.contains(idClean))
+                                    ) {
+                                        relevantXmlChannelIds.add(currentChannelId)
+                                    }
+                                }
+                            }
                         }
                         "display-name" -> {
                             if (!currentChannelId.isNullOrBlank()) {
                                 val name = parser.nextText().trim()
                                 if (name.isNotEmpty()) {
-                                    aliasToChannelId[name.lowercase()] = currentChannelId
+                                    val lower = name.lowercase()
+                                    aliasToChannelId[lower] = currentChannelId
                                     val clean = normalizeChannelName(name)
                                     if (clean.isNotEmpty()) {
                                         aliasToChannelId[clean] = currentChannelId
+                                    }
+
+                                    // Check if this display-name matches any target channel
+                                    if (targetChannels != null) {
+                                        if (targetChannels.contains(lower) ||
+                                            targetChannels.contains(name) ||
+                                            (clean.isNotEmpty() && targetChannels.contains(clean))
+                                        ) {
+                                            relevantXmlChannelIds.add(currentChannelId)
+                                        }
                                     }
                                 }
                             }
@@ -66,14 +93,14 @@ object XmlTvParser {
                             val startStr = parser.getAttributeValue(null, "start")?.trim()
                             val stopStr = parser.getAttributeValue(null, "stop")?.trim()
 
-                            // If user has specific channels loaded, check if this channel is in their list
-                            val isRelevantChannel = if (targetChannels != null && !channel.isNullOrBlank()) {
-                                targetChannels.contains(channel) ||
-                                targetChannels.contains(channel.lowercase()) ||
-                                targetChannels.contains(normalizeChannelName(channel))
-                            } else true
+                            // Check if this programme belongs to a matched relevant channel
+                            val isRelevant = if (targetChannels != null) {
+                                !channel.isNullOrBlank() && relevantXmlChannelIds.contains(channel)
+                            } else {
+                                !channel.isNullOrBlank()
+                            }
 
-                            if (!isRelevantChannel || channel.isNullOrBlank() || startStr.isNullOrBlank() || stopStr.isNullOrBlank()) {
+                            if (!isRelevant || channel.isNullOrBlank() || startStr.isNullOrBlank() || stopStr.isNullOrBlank()) {
                                 skipTag(parser)
                             } else {
                                 val start = parseXmlDate(startStr)
@@ -110,7 +137,7 @@ object XmlTvParser {
                                             )
                                         )
                                         totalProgrammesCount++
-                                        if (totalProgrammesCount % 1000 == 0) {
+                                        if (totalProgrammesCount % 500 == 0) {
                                             onProgress?.invoke("Индексация: $totalProgrammesCount передач...")
                                         }
                                     }
@@ -151,8 +178,12 @@ object XmlTvParser {
 
         for ((alias, chId) in aliasToChannelId) {
             val progs = sortedCanonical[chId]
-            if (progs != null) {
+            if (progs != null && progs.isNotEmpty()) {
                 finalMap.putIfAbsent(alias, progs)
+                val clean = normalizeChannelName(alias)
+                if (clean.isNotEmpty()) {
+                    finalMap.putIfAbsent(clean, progs)
+                }
             }
         }
 
