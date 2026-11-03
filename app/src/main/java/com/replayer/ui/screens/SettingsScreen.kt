@@ -614,7 +614,7 @@ fun SettingsScreen(
                             if (iptvEpgInput.isNotBlank()) {
                                 iptvManager.loadEpgOnly(iptvEpgInput)
                             } else if (iptvPlaylistInput.isNotBlank()) {
-                                iptvManager.refreshPlaylist()
+                                scope.launch { iptvManager.refreshPlaylist() }
                             }
                         },
                         modifier = Modifier
