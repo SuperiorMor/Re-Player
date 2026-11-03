@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import org.videolan.libvlc.util.VLCVideoLayout
 import com.replayer.data.IptvManager
 import com.replayer.model.AudioTrackInfo
 import com.replayer.model.EpgProgram
