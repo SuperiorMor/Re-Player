@@ -277,9 +277,31 @@ class IptvManager private constructor(private val context: Context) {
         return progs.firstOrNull { it.startTime > now }
     }
 
+    fun isEpgUrl(url: String): Boolean {
+        val u = url.lowercase().trim()
+        return u.endsWith(".xml") || u.endsWith(".xml.gz") || u.endsWith(".xml.xz") || u.endsWith(".xml.zip") ||
+                u.contains("/epg2.xml") || u.contains("/epg.xml") || u.contains("epg.it999") || u.contains("epg.one")
+    }
+
+    fun isPlaylistUrl(url: String): Boolean {
+        val u = url.lowercase().trim()
+        return u.endsWith(".m3u") || u.endsWith(".m3u8") || u.contains(".m3u?") || u.contains(".m3u8?")
+    }
+
     fun saveConfigAndLoad(playlistUrl: String, epgUrl: String?) {
-        val cleanPlaylist = playlistUrl.trim()
-        val cleanEpg = epgUrl?.trim()?.ifBlank { null }
+        var cleanPlaylist = playlistUrl.trim()
+        var cleanEpg = epgUrl?.trim()?.ifBlank { null }
+
+        // Swap if user put EPG into playlist field and playlist was empty, or vice versa
+        if (cleanPlaylist.isNotBlank() && isEpgUrl(cleanPlaylist) && cleanEpg == null) {
+            cleanEpg = cleanPlaylist
+            cleanPlaylist = ""
+            _statusMessage.value = "Ссылка на EPG сохранена! Теперь добавьте плейлист каналов (.m3u) или выберите файл с флешки."
+        } else if (cleanEpg != null && isPlaylistUrl(cleanEpg) && cleanPlaylist.isBlank()) {
+            cleanPlaylist = cleanEpg
+            cleanEpg = null
+        }
+
         saveUrlsOnly(cleanPlaylist, cleanEpg)
 
         scope.launch {
@@ -305,14 +327,18 @@ class IptvManager private constructor(private val context: Context) {
         _statusMessage.value = "Чтение файла ${file.name}..."
         try {
             val parseResult = FileInputStream(file).use { M3uParser.parse(it) }
-            _channels.value = parseResult.channels
-            saveCachedChannels(parseResult.channels)
+            if (parseResult.channels.isNotEmpty()) {
+                _channels.value = parseResult.channels
+                saveCachedChannels(parseResult.channels)
 
-            val detectedEpg = parseResult.epgUrl ?: getSavedEpgUrl()
-            _statusMessage.value = "Каналов загружено: ${parseResult.channels.size}"
+                val detectedEpg = parseResult.epgUrl ?: getSavedEpgUrl()
+                _statusMessage.value = "Каналов загружено: ${parseResult.channels.size}"
 
-            if (!detectedEpg.isNullOrBlank()) {
-                fetchEpg(detectedEpg)
+                if (!detectedEpg.isNullOrBlank()) {
+                    fetchEpg(detectedEpg)
+                }
+            } else {
+                _statusMessage.value = "В файле ${file.name} не найдено каналов"
             }
         } catch (e: Exception) {
             _statusMessage.value = "Ошибка чтения файла: ${e.localizedMessage ?: "Сбой"}"
@@ -336,7 +362,7 @@ class IptvManager private constructor(private val context: Context) {
         try {
             val req = Request.Builder()
                 .url(url)
-                .header("User-Agent", "RePlayer-TV")
+                .header("User-Agent", "Mozilla/5.0 (Linux; Android 11; TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
                 .build()
 
             val resp = client.newCall(req).execute()
@@ -371,8 +397,38 @@ class IptvManager private constructor(private val context: Context) {
             _playlistProgress.value = 1f
             _statusMessage.value = "Обработка каналов плейлиста..."
 
+            // Check if downloaded file is an EPG or gzip file instead of M3U
+            val isGzipHeader = tempFile.length() >= 2 && try {
+                tempFile.inputStream().use { it.read() == 0x1f && it.read() == 0x8b }
+            } catch (_: Exception) { false }
+
+            val startsWithXml = if (!isGzipHeader && tempFile.length() > 5) {
+                try {
+                    tempFile.bufferedReader().use { reader ->
+                        val firstLine = reader.readLine() ?: ""
+                        firstLine.startsWith("<?xml") || firstLine.contains("<tv")
+                    }
+                } catch (_: Exception) { false }
+            } else false
+
+            if (isGzipHeader || startsWithXml) {
+                try { tempFile.delete() } catch (_: Exception) {}
+                _statusMessage.value = "По ссылке передан EPG (телепрограмма), а не плейлист каналов (.m3u)! Перенесите ссылку в поле EPG."
+                if (manualEpgUrl.isNullOrBlank()) {
+                    prefs.edit().putString("iptv_epg_url", url).apply()
+                    fetchEpg(url)
+                }
+                return@withContext
+            }
+
             val parseResult = tempFile.inputStream().use { M3uParser.parse(it) }
             try { tempFile.delete() } catch (_: Exception) {}
+
+            if (parseResult.channels.isEmpty()) {
+                _statusMessage.value = "В файле не найдено каналов. Проверьте формат плейлиста (.m3u)."
+                return@withContext
+            }
+
             _channels.value = parseResult.channels
             saveCachedChannels(parseResult.channels)
 
@@ -446,6 +502,16 @@ class IptvManager private constructor(private val context: Context) {
                     set.add(ch.id)
                     set.add(ch.id.lowercase())
                     set.add(ch.name.lowercase())
+                    ch.tvgId?.let {
+                        set.add(it)
+                        set.add(it.lowercase())
+                    }
+                    ch.tvgName?.let {
+                        set.add(it)
+                        set.add(it.lowercase())
+                        val cleanTvg = XmlTvParser.normalizeChannelName(it)
+                        if (cleanTvg.isNotEmpty()) set.add(cleanTvg)
+                    }
                     val clean = XmlTvParser.normalizeChannelName(ch.name)
                     if (clean.isNotEmpty()) set.add(clean)
                 }
@@ -536,8 +602,6 @@ class IptvManager private constructor(private val context: Context) {
             val trimmed = map.entries.take(400).associate { it.key to it.value.take(40) }
             val file = File(context.filesDir, "iptv_epg.json")
             file.writeText(json.encodeToString(trimmed))
-        } catch (_: Exception) {}
-    }
         } catch (_: Exception) {}
     }
 }

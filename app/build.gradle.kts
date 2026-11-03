@@ -13,8 +13,8 @@ android {
         applicationId = "com.replayer"
         minSdk = 24
         targetSdk = 35
-        versionCode = 31
-        versionName = "0.8.4"
+        versionCode = 32
+        versionName = "0.8.5"
 
         ndk {
             abiFilters += listOf("armeabi-v7a", "arm64-v8a")

@@ -31,16 +31,20 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
 import com.replayer.data.ChannelSortMode
 import com.replayer.data.IptvManager
 import com.replayer.model.IptvChannel
 import com.replayer.ui.components.TvFocusCard
 import com.replayer.ui.theme.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import java.io.File
 
 @Composable
 fun IptvScreen(
@@ -65,6 +69,38 @@ fun IptvScreen(
     var sortMode by remember { mutableStateOf(ChannelSortMode.DEFAULT) }
 
     val folders = remember(channels) { iptvManager.getCategoryFolders() }
+
+    var showLocalFileDialog by remember { mutableStateOf(false) }
+    var localFiles by remember { mutableStateOf<List<File>>(emptyList()) }
+    var isScanningLocalFiles by remember { mutableStateOf(false) }
+
+    fun scanLocalFiles() {
+        isScanningLocalFiles = true
+        scope.launch(Dispatchers.IO) {
+            val candidates = mutableListOf<File>()
+            val searchDirs = listOfNotNull(
+                File("/storage"),
+                File("/sdcard"),
+                File("/storage/emulated/0/Download"),
+                File("/storage/emulated/0"),
+                context.getExternalFilesDir(null)
+            )
+            for (dir in searchDirs) {
+                try {
+                    if (dir.exists() && dir.canRead()) {
+                        dir.walkTopDown().maxDepth(3).forEach { f ->
+                            if (f.isFile && (f.name.endsWith(".m3u", ignoreCase = true) || f.name.endsWith(".m3u8", ignoreCase = true))) {
+                                candidates.add(f)
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+            localFiles = candidates.distinctBy { it.absolutePath }
+            isScanningLocalFiles = false
+            showLocalFileDialog = true
+        }
+    }
 
     // Remote back button handling: inside folder -> back to folders; on folders -> back to Home
     BackHandler(enabled = true) {
@@ -271,25 +307,59 @@ fun IptvScreen(
                         }
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
-                            text = "Плейлист IPTV не загружен",
+                            text = if (epgMap.isNotEmpty()) "Телепрограмма готова, но нет списка каналов" else "Плейлист IPTV не загружен",
                             style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
                             color = TextPrimary
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "Добавьте ссылку на .m3u плейлист или выберите файл в Настройках",
+                            text = if (epgMap.isNotEmpty()) {
+                                "Телепрограмма загружена (${epgMap.size} каналов в базе). Для показа ТВ каналов требуется плейлист (.m3u / .m3u8) со ссылками на видеопотоки."
+                            } else {
+                                "Добавьте ссылку на .m3u плейлист или выберите файл с флешки"
+                            },
                             style = MaterialTheme.typography.bodyMedium,
-                            color = TextSecondary
+                            color = TextSecondary,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(horizontal = 48.dp)
                         )
                         Spacer(modifier = Modifier.height(24.dp))
-                        TvFocusCard(
-                            onClick = onNavigateToSettings,
-                            modifier = Modifier
-                                .width(220.dp)
-                                .height(48.dp)
-                        ) {
-                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text("Перейти в настройки", color = AccentCyan, style = MaterialTheme.typography.bodyMedium)
+                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            TvFocusCard(
+                                onClick = { scanLocalFiles() },
+                                modifier = Modifier
+                                    .width(240.dp)
+                                    .height(48.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxSize(),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.Folder, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(20.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = if (isScanningLocalFiles) "Поиск файлов..." else "Плейлист с флешки",
+                                        color = AccentCyan,
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                }
+                            }
+                            TvFocusCard(
+                                onClick = onNavigateToSettings,
+                                modifier = Modifier
+                                    .width(200.dp)
+                                    .height(48.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxSize(),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.Settings, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(20.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Настройки ТВ", color = TextPrimary, style = MaterialTheme.typography.bodyMedium)
+                                }
                             }
                         }
                     }
@@ -489,6 +559,106 @@ fun IptvScreen(
                                         tint = if (isFav) Color(0xFFFF4081) else TextSecondary,
                                         modifier = Modifier.size(24.dp)
                                     )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showLocalFileDialog) {
+        Dialog(onDismissRequest = { showLocalFileDialog = false }) {
+            Box(
+                modifier = Modifier
+                    .width(520.dp)
+                    .height(440.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(DarkCard)
+                    .border(1.dp, AccentCyan.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
+                    .padding(24.dp)
+            ) {
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "Файлы плейлистов (.m3u / .m3u8)",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                color = TextPrimary
+                            )
+                            Text(
+                                text = "Найдено на флешке и в памяти: ${localFiles.size}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary
+                            )
+                        }
+                        TvFocusCard(
+                            onClick = { showLocalFileDialog = false },
+                            modifier = Modifier.width(110.dp).height(40.dp)
+                        ) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text("Закрыть", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    if (localFiles.isEmpty()) {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text(
+                                text = "Файлы .m3u / .m3u8 не найдены на подключенных накопителях.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = TextSecondary
+                            )
+                        }
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            items(localFiles, key = { it.absolutePath }) { file ->
+                                TvFocusCard(
+                                    onClick = {
+                                        showLocalFileDialog = false
+                                        scope.launch { iptvManager.loadFromLocalFile(file) }
+                                    },
+                                    modifier = Modifier.fillMaxWidth().height(64.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.weight(1f),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(Icons.Default.Folder, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(24.dp))
+                                            Spacer(Modifier.width(12.dp))
+                                            Column {
+                                                Text(
+                                                    text = file.name,
+                                                    style = MaterialTheme.typography.titleMedium,
+                                                    color = TextPrimary,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                Text(
+                                                    text = file.parent ?: "",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = TextSecondary,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
