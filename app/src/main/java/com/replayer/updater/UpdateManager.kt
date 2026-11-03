@@ -42,7 +42,22 @@ class UpdateManager(private val context: Context) {
     private val repoOwner = "SuperiorMor"
     private val repoName = "Re-Player"
 
+    fun cleanOldUpdates() {
+        try {
+            val dir = context.externalCacheDir ?: context.cacheDir
+            val updatesDir = File(dir, "updates")
+            if (updatesDir.exists() && updatesDir.isDirectory) {
+                updatesDir.listFiles()?.forEach { file ->
+                    if (file.isFile) file.delete()
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("UpdateManager", "Failed to clean old updates", e)
+        }
+    }
+
     suspend fun checkForUpdates(currentVersion: String): UpdateCheckResult = withContext(Dispatchers.IO) {
+        cleanOldUpdates()
         try {
             val url = "https://api.github.com/repos/$repoOwner/$repoName/releases/latest"
             val request = Request.Builder()
@@ -184,14 +199,24 @@ class UpdateManager(private val context: Context) {
         try {
             val dir = context.externalCacheDir ?: context.cacheDir
             val updatesDir = File(dir, "updates").apply { mkdirs() }
+            // Remove any old downloaded update files to free up disk space immediately
+            updatesDir.listFiles()?.forEach { file ->
+                try { if (file.isFile) file.delete() } catch (_: Exception) {}
+            }
             val targetFile = File(updatesDir, fileName)
             if (targetFile.exists()) targetFile.delete()
+
+            val downloadClient = client.newBuilder()
+                .connectTimeout(30, TimeUnit.SECONDS)
+                .readTimeout(300, TimeUnit.SECONDS)
+                .writeTimeout(300, TimeUnit.SECONDS)
+                .build()
 
             val request = Request.Builder()
                 .url(downloadUrl)
                 .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) RePlayer-TV-App")
                 .build()
-            val response = client.newCall(request).execute()
+            val response = downloadClient.newCall(request).execute()
             if (!response.isSuccessful) return@withContext null
 
             val body = response.body ?: return@withContext null
@@ -199,7 +224,7 @@ class UpdateManager(private val context: Context) {
 
             body.byteStream().use { input ->
                 FileOutputStream(targetFile).use { output ->
-                    val buffer = ByteArray(8192)
+                    val buffer = ByteArray(32768)
                     var bytesRead: Int
                     var totalRead = 0L
 
