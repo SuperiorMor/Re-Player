@@ -22,6 +22,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -54,6 +55,10 @@ private sealed class UpdateUiState {
     data class Error(val message: String) : UpdateUiState()
 }
 
+private enum class UrlEditTarget {
+    PLAYLIST, EPG
+}
+
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
@@ -77,6 +82,8 @@ fun SettingsScreen(
     val iptvManager = remember { IptvManager(context) }
     var iptvPlaylistInput by remember { mutableStateOf(iptvManager.getSavedPlaylistUrl() ?: "") }
     var iptvEpgInput by remember { mutableStateOf(iptvManager.getSavedEpgUrl() ?: "") }
+    var editingUrlTarget by remember { mutableStateOf<UrlEditTarget?>(null) }
+    var editingUrlValue by remember { mutableStateOf("") }
     val iptvIsLoading by iptvManager.isLoading.collectAsState()
     val iptvPlaylistProgress by iptvManager.playlistProgress.collectAsState()
     val iptvEpgProgress by iptvManager.epgProgress.collectAsState()
@@ -123,10 +130,12 @@ fun SettingsScreen(
 
     LaunchedEffect(updateUiState) {
         if (updateUiState is UpdateUiState.Downloading || updateUiState is UpdateUiState.ReadyToInstall) {
-            delay(60)
-            try {
-                updateActionFocusRequester.requestFocus()
-            } catch (_: Exception) {}
+            for (d in listOf(50L, 120L, 250L, 500L)) {
+                delay(d)
+                try {
+                    updateActionFocusRequester.requestFocus()
+                } catch (_: Exception) {}
+            }
         }
     }
 
@@ -176,10 +185,13 @@ fun SettingsScreen(
                 downloadProgress = progress
                 updateUiState = UpdateUiState.Downloading(progress)
             }
-            updateUiState = if (file != null) {
-                UpdateUiState.ReadyToInstall(file)
+            if (file != null) {
+                updateUiState = UpdateUiState.ReadyToInstall(file)
+                try {
+                    updateManager.installApk(file)
+                } catch (_: Exception) {}
             } else {
-                UpdateUiState.Error("Не удалось загрузить файл обновления")
+                updateUiState = UpdateUiState.Error("Не удалось загрузить файл обновления")
             }
         }
     }
@@ -436,45 +448,89 @@ fun SettingsScreen(
                     )
                 }
 
-                OutlinedTextField(
-                    value = iptvPlaylistInput,
-                    onValueChange = {
-                        iptvPlaylistInput = it
-                        iptvManager.saveUrlsOnly(it, iptvEpgInput)
+                // Playlist URL Card (Replaces raw TextField so D-pad navigation never opens keyboard accidentally)
+                TvFocusCard(
+                    onClick = {
+                        editingUrlValue = iptvPlaylistInput
+                        editingUrlTarget = UrlEditTarget.PLAYLIST
                     },
-                    label = { Text("URL плейлиста (.m3u / .m3u8)") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary,
-                        focusedBorderColor = AccentCyan,
-                        unfocusedBorderColor = DarkSurface,
-                        focusedLabelColor = AccentCyan,
-                        unfocusedLabelColor = TextSecondary,
-                        cursorColor = AccentCyan
-                    )
-                )
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(60.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "URL плейлиста (.m3u / .m3u8)",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = AccentCyan
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = if (iptvPlaylistInput.isNotBlank()) iptvPlaylistInput else "Нажмите для ввода или изменения ссылки",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = if (iptvPlaylistInput.isNotBlank()) TextPrimary else TextSecondary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Icon(
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = "Редактировать",
+                            tint = AccentCyan,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
 
-                OutlinedTextField(
-                    value = iptvEpgInput,
-                    onValueChange = {
-                        iptvEpgInput = it
-                        iptvManager.saveUrlsOnly(iptvPlaylistInput, it)
+                // EPG URL Card (Replaces raw TextField so D-pad navigation never opens keyboard accidentally)
+                TvFocusCard(
+                    onClick = {
+                        editingUrlValue = iptvEpgInput
+                        editingUrlTarget = UrlEditTarget.EPG
                     },
-                    label = { Text("URL программы передач (.xml / .xml.gz, необязательно)") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary,
-                        focusedBorderColor = AccentCyan,
-                        unfocusedBorderColor = DarkSurface,
-                        focusedLabelColor = AccentCyan,
-                        unfocusedLabelColor = TextSecondary,
-                        cursorColor = AccentCyan
-                    )
-                )
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(60.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "URL программы передач (.xml / .xml.gz, необязательно)",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = AccentCyan
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = if (iptvEpgInput.isNotBlank()) iptvEpgInput else "Нажмите для ввода или изменения ссылки (необязательно)",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = if (iptvEpgInput.isNotBlank()) TextPrimary else TextSecondary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Icon(
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = "Редактировать",
+                            tint = AccentCyan,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
 
                 // Live download progress bar (Requirement 1)
                 if (iptvPlaylistProgress != null || iptvEpgProgress != null || iptvIsLoading) {
@@ -726,25 +782,37 @@ fun SettingsScreen(
                     }
 
                     is UpdateUiState.Downloading -> {
-                        Column(
-                            modifier = Modifier.width(170.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
+                        TvFocusCard(
+                            onClick = {},
+                            modifier = Modifier
+                                .width(170.dp)
+                                .height(44.dp)
+                                .focusRequester(updateActionFocusRequester)
                         ) {
-                            LinearProgressIndicator(
-                                progress = { downloadProgress },
+                            Box(
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(8.dp)
-                                    .clip(RoundedCornerShape(4.dp)),
-                                color = AccentCyan,
-                                trackColor = DarkSurface
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "${(downloadProgress * 100).toInt()}%",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = AccentCyan
-                            )
+                                    .fillMaxSize()
+                                    .padding(horizontal = 12.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    CircularProgressIndicator(
+                                        progress = { downloadProgress },
+                                        modifier = Modifier.size(16.dp),
+                                        color = AccentCyan,
+                                        strokeWidth = 2.dp
+                                    )
+                                    Text(
+                                        text = "${(downloadProgress * 100).toInt()}%",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = AccentCyan,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
                         }
                     }
 
@@ -757,12 +825,23 @@ fun SettingsScreen(
                                 .focusRequester(updateActionFocusRequester)
                         ) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text(
-                                    text = "Установить",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = AccentCyan,
-                                    fontWeight = FontWeight.Bold
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.CheckCircle,
+                                        contentDescription = null,
+                                        tint = AccentCyan,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Text(
+                                        text = "Установить",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = AccentCyan,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
                         }
                     }
@@ -1012,16 +1091,155 @@ fun SettingsScreen(
             }
         }
     }
+    // URL Edit Dialog (Only opens when user explicitly clicks the URL card)
+    if (editingUrlTarget != null) {
+        val target = editingUrlTarget!!
+        Dialog(onDismissRequest = { editingUrlTarget = null }) {
+            val dialogFocusRequester = remember { FocusRequester() }
+            val clipboardManager = LocalClipboardManager.current
+            val clipboardText = remember { clipboardManager.getText()?.text }
+            val canPaste = remember(clipboardText) {
+                !clipboardText.isNullOrBlank() && (clipboardText.startsWith("http://", ignoreCase = true) || clipboardText.startsWith("https://", ignoreCase = true))
+            }
+
+            LaunchedEffect(Unit) {
+                delay(120)
+                try {
+                    dialogFocusRequester.requestFocus()
+                } catch (_: Exception) {}
+            }
+
+            Box(
+                modifier = Modifier
+                    .width(620.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(DarkCard)
+                    .border(1.dp, AccentCyan.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
+                    .padding(24.dp)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Text(
+                        text = if (target == UrlEditTarget.PLAYLIST)
+                            "URL плейлиста (.m3u / .m3u8)"
+                        else
+                            "URL программы передач (.xml / .xml.gz)",
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                        color = TextPrimary
+                    )
+
+                    OutlinedTextField(
+                        value = editingUrlValue,
+                        onValueChange = { editingUrlValue = it },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .focusRequester(dialogFocusRequester),
+                        singleLine = true,
+                        placeholder = {
+                            Text(
+                                if (target == UrlEditTarget.PLAYLIST) "https://example.com/playlist.m3u" else "https://example.com/epg.xml.gz",
+                                color = TextSecondary
+                            )
+                        },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = AccentCyan,
+                            unfocusedBorderColor = DarkSurface,
+                            focusedLabelColor = AccentCyan,
+                            unfocusedLabelColor = TextSecondary,
+                            cursorColor = AccentCyan
+                        )
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        if (canPaste) {
+                            TvFocusCard(
+                                onClick = {
+                                    clipboardText?.let { editingUrlValue = it.trim() }
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(44.dp)
+                            ) {
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Text("Вставить из буфера", style = MaterialTheme.typography.bodyMedium, color = AccentCyan)
+                                }
+                            }
+                        }
+
+                        if (editingUrlValue.isNotBlank()) {
+                            TvFocusCard(
+                                onClick = { editingUrlValue = "" },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(44.dp)
+                            ) {
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Text("Очистить", style = MaterialTheme.typography.bodyMedium, color = Color(0xFFFF5252))
+                                }
+                            }
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        TvFocusCard(
+                            onClick = {
+                                val clean = editingUrlValue.trim()
+                                if (target == UrlEditTarget.PLAYLIST) {
+                                    iptvPlaylistInput = clean
+                                    iptvManager.saveUrlsOnly(clean, iptvEpgInput)
+                                } else {
+                                    iptvEpgInput = clean
+                                    iptvManager.saveUrlsOnly(iptvPlaylistInput, clean)
+                                }
+                                editingUrlTarget = null
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                        ) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text(
+                                    "Сохранить",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = AccentCyan,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        TvFocusCard(
+                            onClick = { editingUrlTarget = null },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                        ) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text("Отмена", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 private fun getFriendlyChangelog(version: String, rawChangelog: String): List<String> {
     if (version.contains("0.8")) {
         return listOf(
+            "Плавный фокус пульта: кнопка обновления удерживает фокус при скачивании и сразу открывает установку.",
+            "Настройки ТВ: ссылки открывают экранную клавиатуру только при нажатии ОК, без ложных открытий при навигации.",
             "Наглядный прогресс загрузки телепрограммы и плейлистов с процентами.",
             "Раздел ТВ: категории представлены как папки с сортировкой по времени просмотра и названию.",
             "Плеер ТВ: время начала и конца текущей передачи, live-таймбар и телепрограмма по отдельной кнопке.",
-            "Главный экран: добавлен раздел телепрограммы избранных каналов в стиле Google TV.",
-            "Поддержка подключения .m3u с флешек без ручного ввода ссылки."
+            "Главный экран: добавлен раздел телепрограммы избранных каналов в стиле Google TV."
         )
     }
 
