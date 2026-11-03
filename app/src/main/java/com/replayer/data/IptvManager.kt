@@ -85,13 +85,13 @@ class IptvManager private constructor(private val context: Context) {
     private val json = Json { ignoreUnknownKeys = true }
     private val scope = CoroutineScope(Dispatchers.IO)
 
-    private val _channels = MutableStateFlow<List<IptvChannel>>(loadCachedChannels())
+    private val _channels = MutableStateFlow<List<IptvChannel>>(emptyList())
     val channels: StateFlow<List<IptvChannel>> = _channels.asStateFlow()
 
     private val _favoriteChannelIds = MutableStateFlow<Set<String>>(loadFavoriteChannelIds())
     val favoriteChannelIds: StateFlow<Set<String>> = _favoriteChannelIds.asStateFlow()
 
-    private val _epgMap = MutableStateFlow<Map<String, List<EpgProgram>>>(loadCachedEpg())
+    private val _epgMap = MutableStateFlow<Map<String, List<EpgProgram>>>(emptyMap())
     val epgMap: StateFlow<Map<String, List<EpgProgram>>> = _epgMap.asStateFlow()
 
     private val _isLoading = MutableStateFlow(false)
@@ -116,18 +116,28 @@ class IptvManager private constructor(private val context: Context) {
     private var isFetchingEpg = false
 
     init {
-        val savedPlaylist = getSavedPlaylistUrl()
-        val savedEpg = getSavedEpgUrl()
-        val lastUpdate = getLastEpgUpdateTime()
-        val now = System.currentTimeMillis()
-        val isEpgStale = (now - lastUpdate) > 24 * 3600 * 1000L
+        scope.launch(Dispatchers.IO) {
+            // 1. Asynchronously load disk caches off main thread
+            val cachedCh = loadCachedChannels()
+            _channels.value = cachedCh
 
-        if (_channels.value.isEmpty() && !savedPlaylist.isNullOrBlank()) {
-            scope.launch {
+            val cachedEpg = loadCachedEpg()
+            _epgMap.value = cachedEpg
+
+            // 2. Wait 3 seconds so Compose UI renders frame 1 smoothly
+            delay(3000)
+
+            val savedPlaylist = getSavedPlaylistUrl()
+            val savedEpg = getSavedEpgUrl()
+            val lastUpdate = getLastEpgUpdateTime()
+            val now = System.currentTimeMillis()
+            val isEpgStale = lastUpdate > 0L && (now - lastUpdate) > 24 * 3600 * 1000L
+
+            if (_channels.value.isEmpty() && !savedPlaylist.isNullOrBlank()) {
                 loadPlaylist(savedPlaylist, savedEpg)
+            } else if (!savedEpg.isNullOrBlank() && (_epgMap.value.isEmpty() || isEpgStale)) {
+                fetchEpg(savedEpg)
             }
-        } else if (!savedEpg.isNullOrBlank() && (_epgMap.value.isEmpty() || isEpgStale)) {
-            scope.launch { fetchEpg(savedEpg) }
         }
     }
 
@@ -611,7 +621,7 @@ class IptvManager private constructor(private val context: Context) {
                     list
                 } else emptyList()
             }
-        } catch (_: Exception) {
+        } catch (_: Throwable) {
             emptyList()
         }
     }
@@ -620,32 +630,45 @@ class IptvManager private constructor(private val context: Context) {
         try {
             val file = File(context.filesDir, "iptv_channels.json")
             file.writeText(json.encodeToString(channels))
-        } catch (_: Exception) {}
+        } catch (_: Throwable) {}
     }
 
     private fun loadCachedEpg(): Map<String, List<EpgProgram>> {
+        val file = File(context.filesDir, "iptv_epg.json")
         return try {
-            val file = File(context.filesDir, "iptv_epg.json")
             if (file.exists()) {
-                json.decodeFromString<Map<String, List<EpgProgram>>>(file.readText())
-            } else {
-                val oldFile = File(context.cacheDir, "iptv_epg.json")
-                if (oldFile.exists()) {
-                    val map = json.decodeFromString<Map<String, List<EpgProgram>>>(oldFile.readText())
-                    saveCachedEpg(map)
-                    map
-                } else emptyMap()
-            }
-        } catch (_: Exception) {
+                // Protect against OutOfMemoryError if file is oversized
+                if (file.length() > 1_500_000L) {
+                    file.delete()
+                    emptyMap()
+                } else {
+                    json.decodeFromString<Map<String, List<EpgProgram>>>(file.readText())
+                }
+            } else emptyMap()
+        } catch (_: Throwable) {
+            try { file.delete() } catch (_: Throwable) {}
             emptyMap()
         }
     }
 
     private fun saveCachedEpg(map: Map<String, List<EpgProgram>>) {
         try {
-            val trimmed = map.entries.take(2000).associate { it.key to it.value.take(50) }
+            // Cache only current/upcoming programs around now: [-6h .. +18h] to keep cache < 300KB
+            val now = System.currentTimeMillis()
+            val minT = now - 6 * 3600 * 1000L
+            val maxT = now + 18 * 3600 * 1000L
+
+            val trimmed = mutableMapOf<String, List<EpgProgram>>()
+            for ((key, progs) in map) {
+                val filtered = progs.filter { it.endTime >= minT && it.startTime <= maxT }.take(15)
+                if (filtered.isNotEmpty()) {
+                    trimmed[key] = filtered
+                }
+                if (trimmed.size >= 400) break
+            }
+
             val file = File(context.filesDir, "iptv_epg.json")
             file.writeText(json.encodeToString(trimmed))
-        } catch (_: Exception) {}
+        } catch (_: Throwable) {}
     }
 }

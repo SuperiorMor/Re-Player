@@ -24,6 +24,7 @@
     <application
         android:name=".RePlayerApp"
         android:allowBackup="true"
+        android:largeHeap="true"
         android:icon="@drawable/ic_replayer_logo"
         android:banner="@drawable/tv_banner"
         android:label="@string/app_name"
