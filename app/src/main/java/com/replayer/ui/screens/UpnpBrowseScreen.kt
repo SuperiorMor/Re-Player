@@ -564,23 +564,24 @@ fun UpnpBrowseScreen(
                         }
                     }
                 }
-                }
             }
+        }
 
-            if (isLoadingFolder) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.45f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(color = AccentCyan)
-                }
+        if (isLoadingFolder) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.45f)),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(color = AccentCyan)
             }
         }
     }
+}
+}
 
-    // 1. Returning from player: focus the played video item and keep focus on it!
+// 1. Returning from player: focus the played video item and keep focus on it!
     LaunchedEffect(isPlayerActive) {
         if (!isPlayerActive && lastPlayedMediaId != null) {
             val targetIndex = sortedItems.indexOfFirst { it.id == lastPlayedMediaId }
