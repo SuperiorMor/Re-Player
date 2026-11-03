@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material.icons.filled.VideoFile
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -401,6 +402,188 @@ fun HomeScreen(
                                 contentDescription = "В избранном",
                                 tint = Color(0xFFFF4081),
                                 modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(34.dp))
+
+        // -------------------------------------------------------------
+        // СТРОКА 3: ТЕЛЕПРОГРАММА ИЗБРАННЫХ КАНАЛОВ (Google TV Live Guide, Requirement 12)
+        // -------------------------------------------------------------
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Телепрограмма избранных каналов",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                color = TextPrimary
+            )
+            Text(
+                text = "Прямой эфир",
+                style = MaterialTheme.typography.bodySmall,
+                color = AccentCyan
+            )
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        if (favoriteChannels.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(DarkCard)
+                    .padding(horizontal = 20.dp, vertical = 20.dp),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Tv,
+                        contentDescription = null,
+                        tint = TextSecondary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = "Отмечайте каналы сердечком в разделе «ТВ каналы», чтобы видеть их программу передач здесь.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextSecondary
+                    )
+                }
+            }
+        } else {
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                contentPadding = PaddingValues(vertical = 4.dp)
+            ) {
+                items(favoriteChannels, key = { "guide_${it.id}" }) { channel ->
+                    val currentProg = remember(channel, epgMap) {
+                        iptvManager.getCurrentProgram(channel)
+                    }
+                    val nextProg = remember(channel, epgMap) {
+                        iptvManager.getNextProgram(channel)
+                    }
+
+                    TvFocusCard(
+                        onClick = { onPlayChannel(channel) },
+                        modifier = Modifier
+                            .width(320.dp)
+                            .height(170.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(16.dp),
+                            verticalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            // Header: Logo + Channel Name + LIVE indicator
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    modifier = Modifier.weight(1f),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    if (!channel.logoUrl.isNullOrBlank()) {
+                                        AsyncImage(
+                                            model = channel.logoUrl,
+                                            contentDescription = null,
+                                            modifier = Modifier
+                                                .size(28.dp)
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .background(Color.White.copy(alpha = 0.08f)),
+                                            contentScale = ContentScale.Fit
+                                        )
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                    }
+                                    Text(
+                                        text = channel.name,
+                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                        color = TextPrimary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(7.dp)
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(Color(0xFFFF1744))
+                                    )
+                                    Text(
+                                        text = "В ЭФИРЕ",
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                        color = Color(0xFFFF1744),
+                                        fontSize = 10.sp
+                                    )
+                                }
+                            }
+
+                            // Middle: Current Show Title & Progress Bar
+                            Column {
+                                Text(
+                                    text = currentProg?.title ?: "Прямой эфир",
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = AccentCyan,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = currentProg?.formattedStartTime() ?: "--:--",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = TextSecondary
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    LinearProgressIndicator(
+                                        progress = { currentProg?.progress() ?: 0.5f },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(5.dp)
+                                            .clip(RoundedCornerShape(3.dp)),
+                                        color = AccentCyan,
+                                        trackColor = DarkSurface
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = currentProg?.formattedEndTime() ?: "--:--",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = TextSecondary
+                                    )
+                                }
+                            }
+
+                            // Bottom: Next Show Preview
+                            Text(
+                                text = if (nextProg != null) {
+                                    "Далее в ${nextProg.formattedStartTime()}: ${nextProg.title}"
+                                } else {
+                                    "Нажмите OK для запуска"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                fontSize = 11.sp
                             )
                         }
                     }

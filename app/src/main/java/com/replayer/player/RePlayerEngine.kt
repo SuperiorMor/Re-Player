@@ -88,10 +88,17 @@ class RePlayerEngine(private val context: Context) {
     fun play(mediaItem: MediaItem) {
         _playerState.value = _playerState.value.copy(currentMediaTitle = mediaItem.title, errorMessage = null)
         val streamUri = Uri.parse(mediaItem.uri)
+        val isIptv = mediaItem.sourceType == com.replayer.model.MediaSourceType.IPTV
         val media = Media(libVlc, streamUri).apply {
             setHWDecoderEnabled(true, false)
-            addOption(":network-caching=15000")
-            addOption(":file-caching=2000")
+            if (isIptv) {
+                addOption(":network-caching=3000")
+                addOption(":live-caching=1500")
+                addOption(":http-user-agent=RePlayer-TV")
+            } else {
+                addOption(":network-caching=15000")
+                addOption(":file-caching=2000")
+            }
         }
         mediaPlayer.media = media
         media.release()

@@ -23,4 +23,14 @@ data class EpgProgram(
         val s = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
         return "${s.format(java.util.Date(startTime))} - ${s.format(java.util.Date(endTime))}"
     }
+
+    fun formattedStartTime(): String {
+        val s = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+        return s.format(java.util.Date(startTime))
+    }
+
+    fun formattedEndTime(): String {
+        val s = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+        return s.format(java.util.Date(endTime))
+    }
 }

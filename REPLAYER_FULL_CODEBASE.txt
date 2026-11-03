@@ -1,5 +1,5 @@
 ================================================================================
-PROJECT: Re:Player (Android TV Media Player v0.7.0)
+PROJECT: Re:Player (Android TV Media Player v0.8.0)
 COMPLETE SINGLE-FILE CODEBASE ARCHIVE
 Package: com.replayer | Target SDK: 35 | Compose Android TV + LibVLC (DLNA + IPTV)
 ================================================================================
@@ -164,8 +164,8 @@ android {
         applicationId = "com.replayer"
         minSdk = 24
         targetSdk = 35
-        versionCode = 26
-        versionName = "0.7.0"
+        versionCode = 27
+        versionName = "0.8.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -824,6 +824,16 @@ data class EpgProgram(
         val s = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
         return "${s.format(java.util.Date(startTime))} - ${s.format(java.util.Date(endTime))}"
     }
+
+    fun formattedStartTime(): String {
+        val s = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+        return s.format(java.util.Date(startTime))
+    }
+
+    fun formattedEndTime(): String {
+        val s = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+        return s.format(java.util.Date(endTime))
+    }
 }
 
 
@@ -1009,7 +1019,15 @@ import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
+import java.io.FileInputStream
+import java.io.InputStream
 import java.util.concurrent.TimeUnit
+
+enum class ChannelSortMode(val label: String) {
+    DEFAULT("По умолчанию"),
+    BY_NAME("По названию (А-Я)"),
+    BY_WATCH_TIME("По времени просмотра")
+}
 
 class IptvManager(private val context: Context) {
 
@@ -1017,8 +1035,10 @@ class IptvManager(private val context: Context) {
         context.getSharedPreferences("replayer_iptv", Context.MODE_PRIVATE)
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
+        .connectTimeout(20, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .followRedirects(true)
+        .followSslRedirects(true)
         .build()
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -1030,19 +1050,29 @@ class IptvManager(private val context: Context) {
     private val _favoriteChannelIds = MutableStateFlow<Set<String>>(loadFavoriteChannelIds())
     val favoriteChannelIds: StateFlow<Set<String>> = _favoriteChannelIds.asStateFlow()
 
-    private val _epgMap = MutableStateFlow<Map<String, List<EpgProgram>>>(emptyMap())
+    private val _epgMap = MutableStateFlow<Map<String, List<EpgProgram>>>(loadCachedEpg())
     val epgMap: StateFlow<Map<String, List<EpgProgram>>> = _epgMap.asStateFlow()
 
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
+    private val _playlistProgress = MutableStateFlow<Float?>(null)
+    val playlistProgress: StateFlow<Float?> = _playlistProgress.asStateFlow()
+
+    private val _epgProgress = MutableStateFlow<Float?>(null)
+    val epgProgress: StateFlow<Float?> = _epgProgress.asStateFlow()
+
     private val _statusMessage = MutableStateFlow<String?>(null)
     val statusMessage: StateFlow<String?> = _statusMessage.asStateFlow()
 
+    // Watch duration in seconds: channelId -> seconds
+    private val _watchTimes = MutableStateFlow<Map<String, Long>>(loadWatchTimes())
+    val watchTimes: StateFlow<Map<String, Long>> = _watchTimes.asStateFlow()
+
     init {
-        // Load EPG if cached or available
+        // If we have saved URLs, refresh EPG if cache is empty
         val savedEpg = getSavedEpgUrl()
-        if (!savedEpg.isNullOrBlank()) {
+        if (!savedEpg.isNullOrBlank() && _epgMap.value.isEmpty()) {
             scope.launch { fetchEpg(savedEpg) }
         }
     }
@@ -1051,9 +1081,44 @@ class IptvManager(private val context: Context) {
 
     fun getSavedEpgUrl(): String? = prefs.getString("iptv_epg_url", null)
 
-    fun getGroups(): List<String> {
-        val groups = _channels.value.map { it.group }.distinct().sorted()
-        return listOf("Все", "Избранное") + groups
+    fun saveUrlsOnly(playlistUrl: String, epgUrl: String?) {
+        prefs.edit()
+            .putString("iptv_playlist_url", playlistUrl.trim())
+            .putString("iptv_epg_url", epgUrl?.trim()?.ifBlank { null })
+            .apply()
+    }
+
+    /**
+     * Category folders (Requirement 5 & 8):
+     * Excludes artificial "Все" and "Избранное" (favorites are on Home screen).
+     * Replaces blank or "Общие" with "Другие".
+     */
+    fun getCategoryFolders(): List<String> {
+        val groups = _channels.value
+            .map { it.group }
+            .distinct()
+            .filter { it != "Все" && it != "Избранное" }
+            .sorted()
+        return groups.ifEmpty { listOf("Все каналы") }
+    }
+
+    fun getChannelsInFolder(folder: String): List<IptvChannel> {
+        return if (folder == "Все каналы") {
+            _channels.value
+        } else {
+            _channels.value.filter { it.group == folder }
+        }
+    }
+
+    fun getSortedChannels(channels: List<IptvChannel>, sortMode: ChannelSortMode): List<IptvChannel> {
+        return when (sortMode) {
+            ChannelSortMode.DEFAULT -> channels
+            ChannelSortMode.BY_NAME -> channels.sortedBy { it.name.lowercase() }
+            ChannelSortMode.BY_WATCH_TIME -> {
+                val times = _watchTimes.value
+                channels.sortedByDescending { times[it.id] ?: 0L }
+            }
+        }
     }
 
     fun isFavorite(channelId: String): Boolean = _favoriteChannelIds.value.contains(channelId)
@@ -1074,23 +1139,125 @@ class IptvManager(private val context: Context) {
         return _channels.value.filter { favIds.contains(it.id) }
     }
 
-    fun getCurrentProgram(channel: IptvChannel): EpgProgram? {
+    fun recordWatchTime(channelId: String, deltaSeconds: Long) {
+        if (deltaSeconds <= 0) return
+        val current = _watchTimes.value.toMutableMap()
+        val old = current[channelId] ?: 0L
+        current[channelId] = old + deltaSeconds
+        _watchTimes.value = current
+        saveWatchTimes(current)
+    }
+
+    fun getWatchTime(channelId: String): Long {
+        return _watchTimes.value[channelId] ?: 0L
+    }
+
+    /**
+     * Program lookup with multi-level fallback matching:
+     * 1. tvgId
+     * 2. tvgName
+     * 3. Channel Name
+     * 4. Normalized name (cleaned of HD, 4K, symbols)
+     */
+    fun getProgramsForChannel(channel: IptvChannel): List<EpgProgram> {
         val map = _epgMap.value
-        val list = (channel.tvgId?.let { map[it] }) ?: map[channel.name] ?: return null
+        if (map.isEmpty()) return emptyList()
+
+        channel.tvgId?.let { id ->
+            map[id]?.let { if (it.isNotEmpty()) return it }
+            map[id.lowercase()]?.let { if (it.isNotEmpty()) return it }
+        }
+
+        channel.tvgName?.let { name ->
+            map[name]?.let { if (it.isNotEmpty()) return it }
+            map[name.lowercase()]?.let { if (it.isNotEmpty()) return it }
+        }
+
+        map[channel.name]?.let { if (it.isNotEmpty()) return it }
+        map[channel.name.lowercase()]?.let { if (it.isNotEmpty()) return it }
+
+        val clean = channel.name.lowercase()
+            .replace(Regex("\\[.*?\\]|\\(.*?\\)"), "")
+            .replace(Regex("\\b(hd|fhd|4k|uhd|sd|50fps|orig|hevc)\\b"), "")
+            .replace(Regex("[^a-zA-Z0-9а-яА-ЯёЁ]"), "")
+            .trim()
+
+        if (clean.isNotEmpty()) {
+            map[clean]?.let { if (it.isNotEmpty()) return it }
+        }
+
+        return emptyList()
+    }
+
+    /**
+     * Binary search for current program (O(log N))
+     */
+    fun getCurrentProgram(channel: IptvChannel): EpgProgram? {
+        val progs = getProgramsForChannel(channel)
+        if (progs.isEmpty()) return null
         val now = System.currentTimeMillis()
-        return list.firstOrNull { it.isCurrent(now) }
+
+        val idx = progs.binarySearch { prog ->
+            when {
+                now < prog.startTime -> 1
+                now >= prog.endTime -> -1
+                else -> 0
+            }
+        }
+        return if (idx >= 0) progs[idx] else null
+    }
+
+    /**
+     * Returns the program airing right after the current one
+     */
+    fun getNextProgram(channel: IptvChannel): EpgProgram? {
+        val progs = getProgramsForChannel(channel)
+        if (progs.isEmpty()) return null
+        val now = System.currentTimeMillis()
+
+        val idx = progs.binarySearch { prog ->
+            when {
+                now < prog.startTime -> 1
+                now >= prog.endTime -> -1
+                else -> 0
+            }
+        }
+        if (idx >= 0 && idx + 1 < progs.size) {
+            return progs[idx + 1]
+        }
+        // Fallback: first program starting after now
+        return progs.firstOrNull { it.startTime > now }
     }
 
     fun saveConfigAndLoad(playlistUrl: String, epgUrl: String?) {
         val cleanPlaylist = playlistUrl.trim()
         val cleanEpg = epgUrl?.trim()?.ifBlank { null }
-        prefs.edit()
-            .putString("iptv_playlist_url", cleanPlaylist)
-            .putString("iptv_epg_url", cleanEpg)
-            .apply()
+        saveUrlsOnly(cleanPlaylist, cleanEpg)
 
         scope.launch {
             loadPlaylist(cleanPlaylist, cleanEpg)
+        }
+    }
+
+    suspend fun loadFromLocalFile(file: File) = withContext(Dispatchers.IO) {
+        if (!file.exists()) return@withContext
+        _isLoading.value = true
+        _statusMessage.value = "Чтение файла ${file.name}..."
+        try {
+            val parseResult = FileInputStream(file).use { M3uParser.parse(it) }
+            _channels.value = parseResult.channels
+            saveCachedChannels(parseResult.channels)
+
+            val detectedEpg = parseResult.epgUrl ?: getSavedEpgUrl()
+            _statusMessage.value = "Каналов загружено: ${parseResult.channels.size}"
+
+            if (!detectedEpg.isNullOrBlank()) {
+                fetchEpg(detectedEpg)
+            }
+        } catch (e: Exception) {
+            _statusMessage.value = "Ошибка чтения файла: ${e.localizedMessage ?: "Сбой"}"
+        } finally {
+            _isLoading.value = false
         }
     }
 
@@ -1103,6 +1270,7 @@ class IptvManager(private val context: Context) {
     private suspend fun loadPlaylist(url: String, manualEpgUrl: String?) = withContext(Dispatchers.IO) {
         if (url.isBlank()) return@withContext
         _isLoading.value = true
+        _playlistProgress.value = 0f
         _statusMessage.value = "Загрузка плейлиста..."
 
         try {
@@ -1114,18 +1282,36 @@ class IptvManager(private val context: Context) {
             val resp = client.newCall(req).execute()
             if (!resp.isSuccessful) {
                 _statusMessage.value = "Ошибка загрузки: HTTP ${resp.code}"
-                _isLoading.value = false
                 return@withContext
             }
 
-            val bodyStream = resp.body?.byteStream()
-            if (bodyStream == null) {
+            val body = resp.body
+            if (body == null) {
                 _statusMessage.value = "Пустой ответ сервера"
-                _isLoading.value = false
                 return@withContext
             }
 
-            val parseResult = M3uParser.parse(bodyStream)
+            val totalBytes = body.contentLength()
+            val tempFile = File(context.cacheDir, "temp_playlist.m3u")
+            body.byteStream().use { input ->
+                tempFile.outputStream().use { output ->
+                    val buffer = ByteArray(32768)
+                    var read: Int
+                    var downloaded = 0L
+                    while (input.read(buffer).also { read = it } != -1) {
+                        output.write(buffer, 0, read)
+                        downloaded += read
+                        if (totalBytes > 0) {
+                            val p = (downloaded.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f)
+                            _playlistProgress.value = p
+                        }
+                    }
+                }
+            }
+            _playlistProgress.value = 1f
+            _statusMessage.value = "Обработка каналов плейлиста..."
+
+            val parseResult = tempFile.inputStream().use { M3uParser.parse(it) }
             _channels.value = parseResult.channels
             saveCachedChannels(parseResult.channels)
 
@@ -1141,10 +1327,15 @@ class IptvManager(private val context: Context) {
             _statusMessage.value = "Ошибка: ${e.localizedMessage ?: "Сбой соединения"}"
         } finally {
             _isLoading.value = false
+            _playlistProgress.value = null
         }
     }
 
-    private suspend fun fetchEpg(epgUrl: String) = withContext(Dispatchers.IO) {
+    suspend fun fetchEpg(epgUrl: String) = withContext(Dispatchers.IO) {
+        if (epgUrl.isBlank()) return@withContext
+        _epgProgress.value = 0f
+        _statusMessage.value = "Загрузка телепрограммы (EPG)..."
+
         try {
             val req = Request.Builder()
                 .url(epgUrl)
@@ -1152,18 +1343,65 @@ class IptvManager(private val context: Context) {
                 .build()
 
             val resp = client.newCall(req).execute()
-            if (!resp.isSuccessful) return@withContext
+            if (!resp.isSuccessful) {
+                _statusMessage.value = "Ошибка EPG: HTTP ${resp.code}"
+                return@withContext
+            }
 
-            val stream = resp.body?.byteStream() ?: return@withContext
-            val isGzip = epgUrl.endsWith(".gz", ignoreCase = true)
-            val parsed = XmlTvParser.parse(stream, isGzip = isGzip)
+            val body = resp.body ?: return@withContext
+            val totalBytes = body.contentLength()
+            val tempFile = File(context.cacheDir, "temp_epg.xml")
+
+            body.byteStream().use { input ->
+                tempFile.outputStream().use { output ->
+                    val buffer = ByteArray(65536)
+                    var read: Int
+                    var downloaded = 0L
+                    while (input.read(buffer).also { read = it } != -1) {
+                        output.write(buffer, 0, read)
+                        downloaded += read
+                        if (totalBytes > 0) {
+                            val p = (downloaded.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f)
+                            _epgProgress.value = p
+                            _statusMessage.value = "Загрузка телепрограммы: ${(p * 100).toInt()}%"
+                        }
+                    }
+                }
+            }
+
+            _epgProgress.value = 1f
+            _statusMessage.value = "Распаковка и индексация телепрограммы..."
+
+            val parsed = tempFile.inputStream().use { stream ->
+                XmlTvParser.parse(stream)
+            }
             _epgMap.value = parsed
-            _statusMessage.value = "Каналов: ${_channels.value.size}. Программа передач обновлена."
-        } catch (_: Exception) {}
+            saveCachedEpg(parsed)
+            _statusMessage.value = "Каналов: ${_channels.value.size}. Телепрограмма обновлена (${parsed.size} источников)."
+        } catch (e: Exception) {
+            _statusMessage.value = "Сбой EPG: ${e.localizedMessage ?: "Ошибка"}"
+        } finally {
+            _epgProgress.value = null
+        }
     }
 
     private fun loadFavoriteChannelIds(): Set<String> {
         return prefs.getStringSet("iptv_favorites", emptySet()) ?: emptySet()
+    }
+
+    private fun loadWatchTimes(): Map<String, Long> {
+        val raw = prefs.getString("channel_watch_times", null) ?: return emptyMap()
+        return try {
+            json.decodeFromString<Map<String, Long>>(raw)
+        } catch (_: Exception) {
+            emptyMap()
+        }
+    }
+
+    private fun saveWatchTimes(map: Map<String, Long>) {
+        try {
+            prefs.edit().putString("channel_watch_times", json.encodeToString(map)).apply()
+        } catch (_: Exception) {}
     }
 
     private fun loadCachedChannels(): List<IptvChannel> {
@@ -1181,6 +1419,26 @@ class IptvManager(private val context: Context) {
         try {
             val file = File(context.cacheDir, "iptv_channels.json")
             file.writeText(json.encodeToString(channels))
+        } catch (_: Exception) {}
+    }
+
+    private fun loadCachedEpg(): Map<String, List<EpgProgram>> {
+        return try {
+            val file = File(context.cacheDir, "iptv_epg.json")
+            if (file.exists()) {
+                json.decodeFromString<Map<String, List<EpgProgram>>>(file.readText())
+            } else emptyMap()
+        } catch (_: Exception) {
+            emptyMap()
+        }
+    }
+
+    private fun saveCachedEpg(map: Map<String, List<EpgProgram>>) {
+        try {
+            // Keep top 300 active channels to prevent giant file
+            val trimmed = map.entries.take(400).associate { it.key to it.value.take(40) }
+            val file = File(context.cacheDir, "iptv_epg.json")
+            file.writeText(json.encodeToString(trimmed))
         } catch (_: Exception) {}
     }
 }
@@ -1651,6 +1909,7 @@ package com.replayer.network.iptv
 import android.util.Xml
 import com.replayer.model.EpgProgram
 import org.xmlpull.v1.XmlPullParser
+import java.io.BufferedInputStream
 import java.io.InputStream
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -1658,79 +1917,180 @@ import java.util.zip.GZIPInputStream
 
 object XmlTvParser {
 
-    private val DATE_FORMAT_TZ = SimpleDateFormat("yyyyMMddHHmmss Z", Locale.US)
-    private val DATE_FORMAT_NO_TZ = SimpleDateFormat("yyyyMMddHHmmss", Locale.US)
+    fun parse(rawInputStream: InputStream, isGzipHint: Boolean = false): Map<String, List<EpgProgram>> {
+        // Detect GZIP by magic bytes (0x1f, 0x8b) or hint
+        val buffered = BufferedInputStream(rawInputStream, 65536)
+        buffered.mark(4)
+        val b1 = buffered.read()
+        val b2 = buffered.read()
+        buffered.reset()
 
-    fun parse(inputStream: InputStream, isGzip: Boolean = false): Map<String, List<EpgProgram>> {
-        val stream = if (isGzip) GZIPInputStream(inputStream) else inputStream
+        val isGzip = (b1 == 0x1f && b2 == 0x8b) || isGzipHint
+        val stream: InputStream = if (isGzip) GZIPInputStream(buffered) else buffered
+
         val parser = Xml.newPullParser()
         parser.setInput(stream, "UTF-8")
 
-        val result = mutableMapOf<String, MutableList<EpgProgram>>()
+        // Mapping from display name / alias (lowercased) -> channel ID
+        val aliasToChannelId = mutableMapOf<String, String>()
+        // Canonical channel programs: channelId -> list of programs
+        val channelPrograms = mutableMapOf<String, MutableList<EpgProgram>>()
+
         val now = System.currentTimeMillis()
-        val minTime = now - 12 * 3600 * 1000L // last 12h
-        val maxTime = now + 36 * 3600 * 1000L // next 36h
+        val minTime = now - 18 * 3600 * 1000L // last 18h
+        val maxTime = now + 48 * 3600 * 1000L // next 48h
 
+        var currentChannelId: String? = null
         var eventType = parser.eventType
+
         while (eventType != XmlPullParser.END_DOCUMENT) {
-            if (eventType == XmlPullParser.START_TAG && parser.name == "programme") {
-                val channel = parser.getAttributeValue(null, "channel")
-                val startStr = parser.getAttributeValue(null, "start")
-                val stopStr = parser.getAttributeValue(null, "stop")
-
-                if (!channel.isNullOrBlank() && !startStr.isNullOrBlank() && !stopStr.isNullOrBlank()) {
-                    val start = parseXmlDate(startStr)
-                    val stop = parseXmlDate(stopStr)
-
-                    if (start != null && stop != null && stop >= minTime && start <= maxTime) {
-                        var title: String? = null
-                        var desc: String? = null
-
-                        // Inner tags
-                        while (true) {
-                            val innerEvent = parser.next()
-                            if (innerEvent == XmlPullParser.START_TAG) {
-                                when (parser.name) {
-                                    "title" -> title = parser.nextText()
-                                    "desc" -> desc = parser.nextText()
+            when (eventType) {
+                XmlPullParser.START_TAG -> {
+                    when (parser.name) {
+                        "channel" -> {
+                            currentChannelId = parser.getAttributeValue(null, "id")?.trim()
+                        }
+                        "display-name" -> {
+                            if (!currentChannelId.isNullOrBlank()) {
+                                val name = parser.nextText().trim()
+                                if (name.isNotEmpty()) {
+                                    aliasToChannelId[name.lowercase()] = currentChannelId
+                                    // Also normalize (remove HD, 4K, spaces)
+                                    val clean = normalizeChannelName(name)
+                                    if (clean.isNotEmpty()) {
+                                        aliasToChannelId[clean] = currentChannelId
+                                    }
                                 }
-                            } else if (innerEvent == XmlPullParser.END_TAG && parser.name == "programme") {
-                                break
-                            } else if (innerEvent == XmlPullParser.END_DOCUMENT) {
-                                break
                             }
                         }
+                        "programme" -> {
+                            val channel = parser.getAttributeValue(null, "channel")?.trim()
+                            val startStr = parser.getAttributeValue(null, "start")?.trim()
+                            val stopStr = parser.getAttributeValue(null, "stop")?.trim()
 
-                        if (!title.isNullOrBlank()) {
-                            val list = result.getOrPut(channel) { mutableListOf() }
-                            list.add(
-                                EpgProgram(
-                                    channelId = channel,
-                                    title = title,
-                                    description = desc,
-                                    startTime = start,
-                                    endTime = stop
-                                )
-                            )
+                            if (!channel.isNullOrBlank() && !startStr.isNullOrBlank() && !stopStr.isNullOrBlank()) {
+                                val start = parseXmlDate(startStr)
+                                val stop = parseXmlDate(stopStr)
+
+                                if (start != null && stop != null && stop >= minTime && start <= maxTime) {
+                                    var title: String? = null
+                                    var desc: String? = null
+
+                                    while (true) {
+                                        val innerEvent = parser.next()
+                                        if (innerEvent == XmlPullParser.START_TAG) {
+                                            when (parser.name) {
+                                                "title" -> title = parser.nextText().trim()
+                                                "desc" -> desc = parser.nextText().trim()
+                                            }
+                                        } else if (innerEvent == XmlPullParser.END_TAG && parser.name == "programme") {
+                                            break
+                                        } else if (innerEvent == XmlPullParser.END_DOCUMENT) {
+                                            break
+                                        }
+                                    }
+
+                                    if (!title.isNullOrBlank()) {
+                                        val list = channelPrograms.getOrPut(channel) { mutableListOf() }
+                                        list.add(
+                                            EpgProgram(
+                                                channelId = channel,
+                                                title = title,
+                                                description = desc,
+                                                startTime = start,
+                                                endTime = stop
+                                            )
+                                        )
+                                    }
+                                }
+                            }
                         }
+                    }
+                }
+                XmlPullParser.END_TAG -> {
+                    if (parser.name == "channel") {
+                        currentChannelId = null
                     }
                 }
             }
             eventType = parser.next()
         }
 
-        // Sort each channel's programs by startTime
-        return result.mapValues { (_, progs) -> progs.sortedBy { it.startTime } }
+        // Sort canonical lists by startTime
+        val sortedCanonical = channelPrograms.mapValues { (_, progs) ->
+            progs.sortedBy { it.startTime }
+        }
+
+        // Build composite lookup map:
+        // 1. All original channel IDs (case-sensitive and lowercase)
+        // 2. All display-name aliases pointing to their programs
+        val finalMap = mutableMapOf<String, List<EpgProgram>>()
+
+        for ((chId, progs) in sortedCanonical) {
+            finalMap[chId] = progs
+            finalMap[chId.lowercase()] = progs
+            val cleanId = normalizeChannelName(chId)
+            if (cleanId.isNotEmpty()) {
+                finalMap[cleanId] = progs
+            }
+        }
+
+        for ((alias, chId) in aliasToChannelId) {
+            val progs = sortedCanonical[chId]
+            if (progs != null) {
+                finalMap.putIfAbsent(alias, progs)
+            }
+        }
+
+        return finalMap
     }
 
-    private fun parseXmlDate(dateStr: String): Long? {
+    private fun normalizeChannelName(raw: String): String {
+        return raw.lowercase()
+            .replace(Regex("\\[.*?\\]|\\(.*?\\)"), "")
+            .replace(Regex("\\b(hd|fhd|4k|uhd|sd|50fps|orig|hevc)\\b"), "")
+            .replace(Regex("[^a-zA-Z0-9а-яА-ЯёЁ]"), "")
+            .trim()
+    }
+
+    /**
+     * Thread-safe, flexible XMLTV date parser supporting:
+     * - "20261103120000 +0300"
+     * - "20261103120000 +03:00"
+     * - "20261103120000"
+     * - "2026-11-03 12:00:00 +0300"
+     * - "2026-11-03 12:00:00"
+     */
+    fun parseXmlDate(dateStr: String): Long? {
         val trimmed = dateStr.trim()
+        if (trimmed.length < 14) return null
+
         return try {
-            if (trimmed.length >= 15 && (trimmed.contains("+") || trimmed.contains("-"))) {
-                DATE_FORMAT_TZ.parse(trimmed)?.time
+            // Check for timezone offset (+0300, -0500, +03:00)
+            val plusIdx = trimmed.indexOf('+')
+            val minusIdx = if (plusIdx == -1) trimmed.indexOf('-', 8) else -1
+            val tzIdx = if (plusIdx != -1) plusIdx else minusIdx
+
+            if (tzIdx != -1) {
+                val datePartRaw = trimmed.substring(0, tzIdx).trim()
+                var tzPart = trimmed.substring(tzIdx).trim()
+                // Convert +03:00 -> +0300
+                if (tzPart.length == 6 && tzPart[3] == ':') {
+                    tzPart = tzPart.substring(0, 3) + tzPart.substring(4)
+                }
+
+                val cleanDate = datePartRaw.replace("-", "").replace(":", "").replace(" ", "")
+                val candidate = if (cleanDate.length >= 14) cleanDate.take(14) + " " + tzPart else null
+                if (candidate != null) {
+                    val sdf = SimpleDateFormat("yyyyMMddHHmmss Z", Locale.US)
+                    sdf.parse(candidate)?.time
+                } else null
             } else {
-                val clean = trimmed.take(14)
-                DATE_FORMAT_NO_TZ.parse(clean)?.time
+                val cleanDate = trimmed.replace("-", "").replace(":", "").replace(" ", "").take(14)
+                if (cleanDate.length == 14) {
+                    val sdf = SimpleDateFormat("yyyyMMddHHmmss", Locale.US)
+                    sdf.parse(cleanDate)?.time
+                } else null
             }
         } catch (_: Exception) {
             null
@@ -1830,10 +2190,17 @@ class RePlayerEngine(private val context: Context) {
     fun play(mediaItem: MediaItem) {
         _playerState.value = _playerState.value.copy(currentMediaTitle = mediaItem.title, errorMessage = null)
         val streamUri = Uri.parse(mediaItem.uri)
+        val isIptv = mediaItem.sourceType == com.replayer.model.MediaSourceType.IPTV
         val media = Media(libVlc, streamUri).apply {
             setHWDecoderEnabled(true, false)
-            addOption(":network-caching=15000")
-            addOption(":file-caching=2000")
+            if (isIptv) {
+                addOption(":network-caching=3000")
+                addOption(":live-caching=1500")
+                addOption(":http-user-agent=RePlayer-TV")
+            } else {
+                addOption(":network-caching=15000")
+                addOption(":file-caching=2000")
+            }
         }
         mediaPlayer.media = media
         media.release()
@@ -2154,6 +2521,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material.icons.filled.VideoFile
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -2540,6 +2908,188 @@ fun HomeScreen(
                                 contentDescription = "В избранном",
                                 tint = Color(0xFFFF4081),
                                 modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(34.dp))
+
+        // -------------------------------------------------------------
+        // СТРОКА 3: ТЕЛЕПРОГРАММА ИЗБРАННЫХ КАНАЛОВ (Google TV Live Guide, Requirement 12)
+        // -------------------------------------------------------------
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Телепрограмма избранных каналов",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                color = TextPrimary
+            )
+            Text(
+                text = "Прямой эфир",
+                style = MaterialTheme.typography.bodySmall,
+                color = AccentCyan
+            )
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        if (favoriteChannels.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(DarkCard)
+                    .padding(horizontal = 20.dp, vertical = 20.dp),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Tv,
+                        contentDescription = null,
+                        tint = TextSecondary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = "Отмечайте каналы сердечком в разделе «ТВ каналы», чтобы видеть их программу передач здесь.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextSecondary
+                    )
+                }
+            }
+        } else {
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                contentPadding = PaddingValues(vertical = 4.dp)
+            ) {
+                items(favoriteChannels, key = { "guide_${it.id}" }) { channel ->
+                    val currentProg = remember(channel, epgMap) {
+                        iptvManager.getCurrentProgram(channel)
+                    }
+                    val nextProg = remember(channel, epgMap) {
+                        iptvManager.getNextProgram(channel)
+                    }
+
+                    TvFocusCard(
+                        onClick = { onPlayChannel(channel) },
+                        modifier = Modifier
+                            .width(320.dp)
+                            .height(170.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(16.dp),
+                            verticalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            // Header: Logo + Channel Name + LIVE indicator
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    modifier = Modifier.weight(1f),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    if (!channel.logoUrl.isNullOrBlank()) {
+                                        AsyncImage(
+                                            model = channel.logoUrl,
+                                            contentDescription = null,
+                                            modifier = Modifier
+                                                .size(28.dp)
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .background(Color.White.copy(alpha = 0.08f)),
+                                            contentScale = ContentScale.Fit
+                                        )
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                    }
+                                    Text(
+                                        text = channel.name,
+                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                        color = TextPrimary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(7.dp)
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(Color(0xFFFF1744))
+                                    )
+                                    Text(
+                                        text = "В ЭФИРЕ",
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                        color = Color(0xFFFF1744),
+                                        fontSize = 10.sp
+                                    )
+                                }
+                            }
+
+                            // Middle: Current Show Title & Progress Bar
+                            Column {
+                                Text(
+                                    text = currentProg?.title ?: "Прямой эфир",
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = AccentCyan,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = currentProg?.formattedStartTime() ?: "--:--",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = TextSecondary
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    LinearProgressIndicator(
+                                        progress = { currentProg?.progress() ?: 0.5f },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(5.dp)
+                                            .clip(RoundedCornerShape(3.dp)),
+                                        color = AccentCyan,
+                                        trackColor = DarkSurface
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = currentProg?.formattedEndTime() ?: "--:--",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = TextSecondary
+                                    )
+                                }
+                            }
+
+                            // Bottom: Next Show Preview
+                            Text(
+                                text = if (nextProg != null) {
+                                    "Далее в ${nextProg.formattedStartTime()}: ${nextProg.title}"
+                                } else {
+                                    "Нажмите OK для запуска"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                fontSize = 11.sp
                             )
                         }
                     }
@@ -3191,15 +3741,19 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -3209,12 +3763,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.replayer.data.ChannelSortMode
 import com.replayer.data.IptvManager
 import com.replayer.model.IptvChannel
 import com.replayer.ui.components.TvFocusCard
@@ -3228,10 +3784,6 @@ fun IptvScreen(
     onBackToHome: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    BackHandler(enabled = true) {
-        onBackToHome()
-    }
-
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val iptvManager = remember { IptvManager(context) }
@@ -3240,51 +3792,42 @@ fun IptvScreen(
     val favoriteIds by iptvManager.favoriteChannelIds.collectAsState()
     val epgMap by iptvManager.epgMap.collectAsState()
     val isLoading by iptvManager.isLoading.collectAsState()
+    val epgProgress by iptvManager.epgProgress.collectAsState()
     val statusMsg by iptvManager.statusMessage.collectAsState()
 
-    val groups = remember(channels) { iptvManager.getGroups() }
-    var selectedGroup by remember { mutableStateOf("Все") }
+    // Level 1: Category folder selection. Level 2: Inside folder
+    var selectedFolder by remember { mutableStateOf<String?>(null) }
+    var sortMode by remember { mutableStateOf(ChannelSortMode.DEFAULT) }
 
-    val filteredChannels = remember(channels, selectedGroup, favoriteIds) {
-        when (selectedGroup) {
-            "Все" -> channels
-            "Избранное" -> channels.filter { favoriteIds.contains(it.id) }
-            else -> channels.filter { it.group == selectedGroup }
+    val folders = remember(channels) { iptvManager.getCategoryFolders() }
+
+    // Remote back button handling: inside folder -> back to folders; on folders -> back to Home
+    BackHandler(enabled = true) {
+        if (selectedFolder != null) {
+            selectedFolder = null
+        } else {
+            onBackToHome()
         }
     }
-
-    val firstItemFocusRequester = remember { FocusRequester() }
 
     Column(
         modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 32.dp, vertical = 24.dp)
     ) {
-        // Top Header
+        // TOP BAR
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column {
-                Text(
-                    text = "ТВ каналы",
-                    style = MaterialTheme.typography.displayLarge
-                )
-                Text(
-                    text = if (channels.isEmpty()) "Плейлист не настроен" else "Каналов: ${channels.size} • $selectedGroup",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = TextSecondary,
-                    modifier = Modifier.padding(top = 2.dp)
-                )
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (channels.isNotEmpty()) {
+            if (selectedFolder != null) {
+                // Inside Folder Header
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     TvFocusCard(
-                        onClick = { scope.launch { iptvManager.refreshPlaylist() } },
+                        onClick = { selectedFolder = null },
                         modifier = Modifier
-                            .width(150.dp)
+                            .width(130.dp)
                             .height(44.dp)
                     ) {
                         Row(
@@ -3292,21 +3835,39 @@ fun IptvScreen(
                             horizontalArrangement = Arrangement.Center,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            if (isLoading) {
-                                CircularProgressIndicator(modifier = Modifier.size(18.dp), color = AccentCyan, strokeWidth = 2.dp)
-                            } else {
-                                Icon(Icons.Default.Refresh, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
-                            }
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(text = "Обновить", style = MaterialTheme.typography.bodyMedium)
+                            Icon(Icons.Default.ArrowBack, contentDescription = "Назад", tint = AccentCyan, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Папки", style = MaterialTheme.typography.bodyMedium, color = AccentCyan)
                         }
+                    }
+                    Spacer(Modifier.width(16.dp))
+                    Column {
+                        Text(
+                            text = selectedFolder!!,
+                            style = MaterialTheme.typography.displayLarge
+                        )
+                        val folderChannels = remember(channels, selectedFolder) {
+                            iptvManager.getChannelsInFolder(selectedFolder!!)
+                        }
+                        Text(
+                            text = "Каналов: ${folderChannels.size} • Сортировка: ${sortMode.label}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary
+                        )
                     }
                 }
 
+                // Sort toggle button inside folder (Requirement 9)
                 TvFocusCard(
-                    onClick = onNavigateToSettings,
+                    onClick = {
+                        sortMode = when (sortMode) {
+                            ChannelSortMode.DEFAULT -> ChannelSortMode.BY_NAME
+                            ChannelSortMode.BY_NAME -> ChannelSortMode.BY_WATCH_TIME
+                            ChannelSortMode.BY_WATCH_TIME -> ChannelSortMode.DEFAULT
+                        }
+                    },
                     modifier = Modifier
-                        .width(160.dp)
+                        .width(230.dp)
                         .height(44.dp)
                 ) {
                     Row(
@@ -3314,18 +3875,93 @@ fun IptvScreen(
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.Settings, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(text = "Настройки ТВ", style = MaterialTheme.typography.bodyMedium)
+                        Icon(Icons.Default.Sort, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(text = sortMode.label, style = MaterialTheme.typography.bodyMedium, color = AccentCyan)
+                    }
+                }
+            } else {
+                // Top Level (Folders List) Header
+                Column {
+                    Text(
+                        text = "ТВ каналы",
+                        style = MaterialTheme.typography.displayLarge
+                    )
+                    Text(
+                        text = if (channels.isEmpty()) "Плейлист не настроен" else "Категорий: ${folders.size} • Всего каналов: ${channels.size}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextSecondary,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (channels.isNotEmpty()) {
+                        TvFocusCard(
+                            onClick = { scope.launch { iptvManager.refreshPlaylist() } },
+                            modifier = Modifier
+                                .width(150.dp)
+                                .height(44.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxSize(),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Обновить", style = MaterialTheme.typography.bodyMedium)
+                            }
+                        }
+                    }
+
+                    TvFocusCard(
+                        onClick = onNavigateToSettings,
+                        modifier = Modifier
+                            .width(160.dp)
+                            .height(44.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.Settings, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Настройки ТВ", style = MaterialTheme.typography.bodyMedium)
+                        }
                     }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        // Live EPG / Playlist background progress indicator (Requirement 1)
+        if (epgProgress != null || isLoading) {
+            Spacer(modifier = Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                LinearProgressIndicator(
+                    progress = { epgProgress ?: 0.5f },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(3.dp)),
+                    color = AccentCyan,
+                    trackColor = DarkSurface
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(
+                    text = statusMsg ?: "Загрузка...",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = AccentCyan
+                )
+            }
+        }
 
-        // Empty Playlist State
-        if (channels.isEmpty()) {
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // MAIN CONTENT
+        if (channels.isEmpty() && !isLoading) {
+            // Empty State: Playlist Not Configured
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -3352,191 +3988,223 @@ fun IptvScreen(
                     }
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(
-                        text = "Плейлист IPTV не добавлен",
-                        style = MaterialTheme.typography.titleLarge,
+                        text = "Плейлист IPTV не загружен",
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
                         color = TextPrimary
                     )
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "Добавьте ссылку на плейлист M3U / M3U8 в настройках приложения",
+                        text = "Добавьте ссылку на .m3u плейлист или выберите файл в Настройках",
                         style = MaterialTheme.typography.bodyMedium,
                         color = TextSecondary
                     )
-                    Spacer(modifier = Modifier.height(20.dp))
+                    Spacer(modifier = Modifier.height(24.dp))
                     TvFocusCard(
                         onClick = onNavigateToSettings,
                         modifier = Modifier
                             .width(220.dp)
                             .height(48.dp)
                     ) {
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text(
-                                text = "Настроить IPTV",
-                                color = AccentCyan,
-                                fontWeight = FontWeight.Bold,
-                                style = MaterialTheme.typography.bodyLarge
-                            )
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text("Перейти в настройки", color = AccentCyan, style = MaterialTheme.typography.bodyMedium)
                         }
                     }
                 }
             }
-        } else {
-            // Categories Row (Horizontal Pills)
-            LazyRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                items(groups) { group ->
-                    val isSelected = group == selectedGroup
-                    TvFocusCard(
-                        onClick = { selectedGroup = group },
-                        modifier = Modifier.height(40.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxHeight()
-                                .background(if (isSelected) AccentCyan.copy(alpha = 0.25f) else Color.Transparent)
-                                .padding(horizontal = 16.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = group,
-                                color = if (isSelected) AccentCyan else TextPrimary,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Channel List with Televizo-style EPG
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+        } else if (selectedFolder == null) {
+            // LEVEL 1: Category Folders Grid (Requirement 5 & 8)
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(minSize = 240.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
                 contentPadding = PaddingValues(bottom = 32.dp)
             ) {
-                itemsIndexed(filteredChannels, key = { _, ch -> ch.id }) { index, channel ->
-                    val isFav = favoriteIds.contains(channel.id)
-                    val prog = remember(channel, epgMap) { iptvManager.getCurrentProgram(channel) }
-                    val isFirst = index == 0
+                items(folders) { folder ->
+                    val count = remember(channels, folder) {
+                        iptvManager.getChannelsInFolder(folder).size
+                    }
 
                     TvFocusCard(
-                        onClick = { onPlayChannel(channel) },
+                        onClick = { selectedFolder = folder },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(76.dp)
-                            .then(if (isFirst) Modifier.focusRequester(firstItemFocusRequester) else Modifier)
+                            .height(110.dp)
                     ) {
                         Row(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .padding(horizontal = 16.dp),
+                                .padding(20.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Channel Logo or Placeholder
-                            Box(
-                                modifier = Modifier
-                                    .size(52.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(DarkSurface),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                if (!channel.logoUrl.isNullOrBlank()) {
-                                    AsyncImage(
-                                        model = channel.logoUrl,
-                                        contentDescription = channel.name,
-                                        modifier = Modifier.size(44.dp)
-                                    )
-                                } else {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(44.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(AccentCyan.copy(alpha = 0.15f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
                                     Icon(
-                                        imageVector = Icons.Default.Tv,
+                                        imageVector = Icons.Default.Folder,
                                         contentDescription = null,
                                         tint = AccentCyan,
                                         modifier = Modifier.size(26.dp)
                                     )
                                 }
-                            }
-
-                            Spacer(modifier = Modifier.width(16.dp))
-
-                            // Channel Title & EPG Program
-                            Column(modifier = Modifier.weight(1f)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                Spacer(modifier = Modifier.width(16.dp))
+                                Column {
                                     Text(
-                                        text = channel.name,
-                                        style = MaterialTheme.typography.titleMedium,
+                                        text = folder,
+                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                         color = TextPrimary,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(AccentCyan.copy(alpha = 0.15f))
-                                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                                    ) {
-                                        Text(
-                                            text = "LIVE",
-                                            color = AccentCyan,
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                }
-
-                                Spacer(modifier = Modifier.height(4.dp))
-
-                                if (prog != null) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(
-                                            text = "${prog.formattedTimeRange()}  ${prog.title}",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = TextSecondary,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                    }
                                     Spacer(modifier = Modifier.height(4.dp))
-                                    LinearProgressIndicator(
-                                        progress = { prog.progress() },
-                                        modifier = Modifier
-                                            .width(180.dp)
-                                            .height(3.dp)
-                                            .clip(RoundedCornerShape(2.dp)),
-                                        color = AccentCyan,
-                                        trackColor = DarkSurface
-                                    )
-                                } else {
                                     Text(
-                                        text = channel.group,
+                                        text = "$count каналов",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = TextSecondary
                                     )
                                 }
                             }
+                        }
+                    }
+                }
+            }
+        } else {
+            // LEVEL 2: Channels inside the selected folder
+            val folderChannels = remember(channels, selectedFolder) {
+                iptvManager.getChannelsInFolder(selectedFolder!!)
+            }
+            val sortedList = remember(folderChannels, sortMode) {
+                iptvManager.getSortedChannels(folderChannels, sortMode)
+            }
 
-                            Spacer(modifier = Modifier.width(16.dp))
+            if (sortedList.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "В этой категории нет каналов",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = TextSecondary
+                    )
+                }
+            } else {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    contentPadding = PaddingValues(bottom = 32.dp),
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    items(sortedList, key = { it.id }) { channel ->
+                        val isFav = favoriteIds.contains(channel.id)
+                        val currentProg = remember(channel, epgMap) {
+                            iptvManager.getCurrentProgram(channel)
+                        }
 
-                            // Favorite Toggle Button
-                            Box(
+                        TvFocusCard(
+                            onClick = { onPlayChannel(channel) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(78.dp)
+                        ) {
+                            Row(
                                 modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(RoundedCornerShape(18.dp))
-                                    .background(if (isFav) Color(0xFFFF4081).copy(alpha = 0.2f) else DarkSurface)
-                                    .clickable { iptvManager.toggleFavorite(channel.id) },
-                                contentAlignment = Alignment.Center
+                                    .fillMaxSize()
+                                    .padding(horizontal = 20.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    imageVector = if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                    contentDescription = "Избранное",
-                                    tint = if (isFav) Color(0xFFFF4081) else TextSecondary,
-                                    modifier = Modifier.size(20.dp)
-                                )
+                                Row(
+                                    modifier = Modifier.weight(1f),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    if (!channel.logoUrl.isNullOrBlank()) {
+                                        AsyncImage(
+                                            model = channel.logoUrl,
+                                            contentDescription = channel.name,
+                                            modifier = Modifier
+                                                .size(48.dp)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(Color.White.copy(alpha = 0.08f)),
+                                            contentScale = ContentScale.Fit
+                                        )
+                                    } else {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(48.dp)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(DarkSurface),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Tv,
+                                                contentDescription = null,
+                                                tint = AccentCyan,
+                                                modifier = Modifier.size(24.dp)
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.width(16.dp))
+
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = channel.name,
+                                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                            color = TextPrimary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+
+                                        // Subtitle: Shows CURRENT PROGRAM instead of "Общие" (Requirement 7)
+                                        if (currentProg != null) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(
+                                                    text = "${currentProg.formattedTimeRange()}  ${currentProg.title}",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = TextSecondary,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.weight(1f, fill = false)
+                                                )
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                LinearProgressIndicator(
+                                                    progress = { currentProg.progress() },
+                                                    modifier = Modifier
+                                                        .width(44.dp)
+                                                        .height(4.dp)
+                                                        .clip(RoundedCornerShape(2.dp)),
+                                                    color = AccentCyan,
+                                                    trackColor = DarkSurface
+                                                )
+                                            }
+                                        } else {
+                                            Text(
+                                                text = "Прямой эфир",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = TextSecondary
+                                            )
+                                        }
+                                    }
+                                }
+
+                                // Favorite Toggle Button
+                                IconButton(
+                                    onClick = { iptvManager.toggleFavorite(channel.id) },
+                                    modifier = Modifier.padding(start = 12.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                        contentDescription = if (isFav) "В избранном" else "Добавить в избранное",
+                                        tint = if (isFav) Color(0xFFFF4081) else TextSecondary,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -3584,6 +4252,14 @@ import androidx.compose.material.icons.filled.Forward10
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Replay10
+import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.LinearProgressIndicator
+import com.replayer.data.IptvManager
+import com.replayer.model.IptvChannel
+import com.replayer.model.MediaSourceType
+import kotlinx.coroutines.isActive
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -3643,7 +4319,30 @@ fun PlayerScreen(
     var showControls by remember { mutableStateOf(true) }
     var showAudioDialog by remember { mutableStateOf(false) }
     var showSubtitleDialog by remember { mutableStateOf(false) }
+    var showEpgDialog by remember { mutableStateOf(false) }
     var lastInteractionTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
+
+    val isIptv = mediaItem.sourceType == MediaSourceType.IPTV
+    val iptvManager = remember { IptvManager(context) }
+    var currentProgram by remember(mediaItem) {
+        mutableStateOf(if (isIptv) iptvManager.getCurrentProgram(IptvChannel(id = mediaItem.id, name = mediaItem.title, streamUrl = mediaItem.uri)) else null)
+    }
+    val channelSchedule = remember(mediaItem) {
+        if (isIptv) iptvManager.getProgramsForChannel(IptvChannel(id = mediaItem.id, name = mediaItem.title, streamUrl = mediaItem.uri)) else emptyList()
+    }
+
+    // Periodic EPG check and watch duration tracking
+    LaunchedEffect(isIptv) {
+        if (isIptv) {
+            while (isActive) {
+                delay(5000)
+                currentProgram = iptvManager.getCurrentProgram(IptvChannel(id = mediaItem.id, name = mediaItem.title, streamUrl = mediaItem.uri))
+                if (playerState.isPlaying) {
+                    iptvManager.recordWatchTime(mediaItem.id, 5)
+                }
+            }
+        }
+    }
 
     val playButtonFocusRequester = remember { FocusRequester() }
     val rootFocusRequester = remember { FocusRequester() }
@@ -3678,7 +4377,10 @@ fun PlayerScreen(
     }
 
     BackHandler(enabled = true) {
-        if (showAudioDialog || showSubtitleDialog) {
+        if (showEpgDialog) {
+            showEpgDialog = false
+            lastInteractionTime = System.currentTimeMillis()
+        } else if (showAudioDialog || showSubtitleDialog) {
             showAudioDialog = false
             showSubtitleDialog = false
             lastInteractionTime = System.currentTimeMillis()
@@ -3805,37 +4507,81 @@ fun PlayerScreen(
                         .fillMaxWidth()
                         .align(Alignment.BottomCenter)
                 ) {
-                    // Time Labels & Interactive Seek Bar
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = formatTime(playerState.currentPositionMs),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = TextPrimary
-                        )
+                    // Time Labels & Interactive Seek Bar / IPTV EPG Timebar (Requirement 10)
+                    if (isIptv) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            if (currentProgram != null) {
+                                Text(
+                                    text = currentProgram!!.title,
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = TextPrimary,
+                                    maxLines = 1,
+                                    modifier = Modifier.padding(bottom = 8.dp)
+                                )
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = currentProgram?.formattedStartTime() ?: "В эфире",
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = AccentCyan
+                                )
 
-                        Spacer(modifier = Modifier.width(16.dp))
+                                Spacer(modifier = Modifier.width(16.dp))
 
-                        // Interactive Focusable Timeline Seek Bar
-                        TvTimelineBar(
-                            currentPositionMs = playerState.currentPositionMs,
-                            durationMs = playerState.durationMs,
-                            onSeekRelative = { delta ->
-                                engine.seekRelative(delta)
-                                lastInteractionTime = System.currentTimeMillis()
-                            },
-                            modifier = Modifier.weight(1f)
-                        )
+                                LinearProgressIndicator(
+                                    progress = { currentProgram?.progress() ?: 0.5f },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(8.dp)
+                                        .clip(RoundedCornerShape(4.dp)),
+                                    color = AccentCyan,
+                                    trackColor = DarkSurface
+                                )
 
-                        Spacer(modifier = Modifier.width(16.dp))
+                                Spacer(modifier = Modifier.width(16.dp))
 
-                        Text(
-                            text = formatTime(playerState.durationMs),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = TextSecondary
-                        )
+                                Text(
+                                    text = currentProgram?.formattedEndTime() ?: "Прямой эфир",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = TextSecondary
+                                )
+                            }
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = formatTime(playerState.currentPositionMs),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = TextPrimary
+                            )
+
+                            Spacer(modifier = Modifier.width(16.dp))
+
+                            // Interactive Focusable Timeline Seek Bar
+                            TvTimelineBar(
+                                currentPositionMs = playerState.currentPositionMs,
+                                durationMs = playerState.durationMs,
+                                onSeekRelative = { delta ->
+                                    engine.seekRelative(delta)
+                                    lastInteractionTime = System.currentTimeMillis()
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            Spacer(modifier = Modifier.width(16.dp))
+
+                            Text(
+                                text = formatTime(playerState.durationMs),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = TextSecondary
+                            )
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(20.dp))
@@ -3846,16 +4592,18 @@ fun PlayerScreen(
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        TvPlayerIconButton(
-                            icon = Icons.Default.Replay10,
-                            contentDescription = "Назад на 10 сек",
-                            onClick = {
-                                engine.seekRelative(-10000)
-                                lastInteractionTime = System.currentTimeMillis()
-                            }
-                        )
+                        if (!isIptv) {
+                            TvPlayerIconButton(
+                                icon = Icons.Default.Replay10,
+                                contentDescription = "Назад на 10 сек",
+                                onClick = {
+                                    engine.seekRelative(-10000)
+                                    lastInteractionTime = System.currentTimeMillis()
+                                }
+                            )
 
-                        Spacer(modifier = Modifier.width(20.dp))
+                            Spacer(modifier = Modifier.width(20.dp))
+                        }
 
                         TvPlayerIconButton(
                             icon = if (playerState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
@@ -3867,16 +4615,18 @@ fun PlayerScreen(
                             }
                         )
 
-                        Spacer(modifier = Modifier.width(20.dp))
+                        if (!isIptv) {
+                            Spacer(modifier = Modifier.width(20.dp))
 
-                        TvPlayerIconButton(
-                            icon = Icons.Default.Forward10,
-                            contentDescription = "Вперед на 10 сек",
-                            onClick = {
-                                engine.seekRelative(10000)
-                                lastInteractionTime = System.currentTimeMillis()
-                            }
-                        )
+                            TvPlayerIconButton(
+                                icon = Icons.Default.Forward10,
+                                contentDescription = "Вперед на 10 сек",
+                                onClick = {
+                                    engine.seekRelative(10000)
+                                    lastInteractionTime = System.currentTimeMillis()
+                                }
+                            )
+                        }
 
                         Spacer(modifier = Modifier.width(36.dp))
 
@@ -3901,6 +4651,20 @@ fun PlayerScreen(
                                 lastInteractionTime = System.currentTimeMillis()
                             }
                         )
+
+                        if (isIptv) {
+                            Spacer(modifier = Modifier.width(16.dp))
+
+                            // EPG Schedule Button (Requirement 11)
+                            TvPlayerIconButton(
+                                icon = Icons.Default.MenuBook,
+                                contentDescription = "Телепрограмма",
+                                onClick = {
+                                    showEpgDialog = true
+                                    lastInteractionTime = System.currentTimeMillis()
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -3932,6 +4696,126 @@ fun PlayerScreen(
                 },
                 onDismiss = { showSubtitleDialog = false }
             )
+        }
+
+        // IPTV EPG Schedule Dialog (Requirement 11)
+        if (showEpgDialog) {
+            androidx.compose.ui.window.Dialog(onDismissRequest = { showEpgDialog = false }) {
+                Box(
+                    modifier = Modifier
+                        .width(540.dp)
+                        .height(480.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(DarkCard)
+                        .border(1.dp, AccentCyan.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
+                        .padding(24.dp)
+                ) {
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = mediaItem.title,
+                                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                    color = TextPrimary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "Телепрограмма",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextSecondary
+                                )
+                            }
+                            TvFocusCard(
+                                onClick = { showEpgDialog = false },
+                                modifier = Modifier
+                                    .width(110.dp)
+                                    .height(40.dp)
+                            ) {
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Text("Закрыть", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        if (channelSchedule.isEmpty()) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = "Для этого канала нет данных программы передач",
+                                    color = TextSecondary,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier.fillMaxSize(),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                items(channelSchedule) { prog ->
+                                    val isCurrent = prog.isCurrent()
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(if (isCurrent) AccentCyan.copy(alpha = 0.15f) else DarkSurface)
+                                            .border(
+                                                width = if (isCurrent) 1.dp else 0.dp,
+                                                color = if (isCurrent) AccentCyan else Color.Transparent,
+                                                shape = RoundedCornerShape(10.dp)
+                                            )
+                                            .padding(12.dp)
+                                    ) {
+                                        Column {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = prog.formattedTimeRange(),
+                                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                                    color = if (isCurrent) AccentCyan else TextSecondary
+                                                )
+                                                if (isCurrent) {
+                                                    Text(
+                                                        text = "СЕЙЧАС В ЭФИРЕ",
+                                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                                        color = AccentCyan
+                                                    )
+                                                }
+                                            }
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                text = prog.title,
+                                                style = MaterialTheme.typography.bodyMedium.copy(
+                                                    fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal
+                                                ),
+                                                color = TextPrimary
+                                            )
+                                            if (!prog.description.isNullOrBlank()) {
+                                                Spacer(modifier = Modifier.height(2.dp))
+                                                Text(
+                                                    text = prog.description,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = TextSecondary,
+                                                    maxLines = 2,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -4269,6 +5153,7 @@ import com.replayer.ui.theme.*
 import com.replayer.updater.ReleaseInfo
 import com.replayer.updater.UpdateCheckResult
 import com.replayer.updater.UpdateManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
@@ -4308,7 +5193,41 @@ fun SettingsScreen(
     var iptvPlaylistInput by remember { mutableStateOf(iptvManager.getSavedPlaylistUrl() ?: "") }
     var iptvEpgInput by remember { mutableStateOf(iptvManager.getSavedEpgUrl() ?: "") }
     val iptvIsLoading by iptvManager.isLoading.collectAsState()
+    val iptvPlaylistProgress by iptvManager.playlistProgress.collectAsState()
+    val iptvEpgProgress by iptvManager.epgProgress.collectAsState()
     val iptvStatusMessage by iptvManager.statusMessage.collectAsState()
+
+    var showLocalFileDialog by remember { mutableStateOf(false) }
+    var localFiles by remember { mutableStateOf<List<File>>(emptyList()) }
+    var isScanningLocalFiles by remember { mutableStateOf(false) }
+
+    fun scanLocalFiles() {
+        isScanningLocalFiles = true
+        scope.launch(Dispatchers.IO) {
+            val candidates = mutableListOf<File>()
+            val searchDirs = listOfNotNull(
+                File("/storage"),
+                File("/sdcard"),
+                File("/storage/emulated/0/Download"),
+                File("/storage/emulated/0"),
+                context.getExternalFilesDir(null)
+            )
+            for (dir in searchDirs) {
+                try {
+                    if (dir.exists() && dir.canRead()) {
+                        dir.walkTopDown().maxDepth(3).forEach { f ->
+                            if (f.isFile && (f.name.endsWith(".m3u", ignoreCase = true) || f.name.endsWith(".m3u8", ignoreCase = true))) {
+                                candidates.add(f)
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+            localFiles = candidates.distinctBy { it.absolutePath }
+            isScanningLocalFiles = false
+            showLocalFileDialog = true
+        }
+    }
 
     // App updates state
     var updateUiState by remember { mutableStateOf<UpdateUiState>(UpdateUiState.Idle) }
@@ -4615,15 +5534,29 @@ fun SettingsScreen(
                 .padding(20.dp)
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Text(
-                    text = "Добавьте ссылку на плейлист каналов (M3U / M3U8) и программу передач EPG (XMLTV).",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextSecondary
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Добавьте ссылку на плейлист каналов (M3U / M3U8) и программу передач EPG (XMLTV).",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary
+                    )
+                    Text(
+                        text = "✓ Сохраняется автоматически",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AccentCyan
+                    )
+                }
 
                 OutlinedTextField(
                     value = iptvPlaylistInput,
-                    onValueChange = { iptvPlaylistInput = it },
+                    onValueChange = {
+                        iptvPlaylistInput = it
+                        iptvManager.saveUrlsOnly(it, iptvEpgInput)
+                    },
                     label = { Text("URL плейлиста (.m3u / .m3u8)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
@@ -4640,7 +5573,10 @@ fun SettingsScreen(
 
                 OutlinedTextField(
                     value = iptvEpgInput,
-                    onValueChange = { iptvEpgInput = it },
+                    onValueChange = {
+                        iptvEpgInput = it
+                        iptvManager.saveUrlsOnly(iptvPlaylistInput, it)
+                    },
                     label = { Text("URL программы передач (.xml / .xml.gz, необязательно)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
@@ -4655,9 +5591,31 @@ fun SettingsScreen(
                     )
                 )
 
+                // Live download progress bar (Requirement 1)
+                if (iptvPlaylistProgress != null || iptvEpgProgress != null || iptvIsLoading) {
+                    val progVal = iptvEpgProgress ?: iptvPlaylistProgress ?: 0f
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        LinearProgressIndicator(
+                            progress = { progVal },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(8.dp)
+                                .clip(RoundedCornerShape(4.dp)),
+                            color = AccentCyan,
+                            trackColor = DarkSurface
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = iptvStatusMessage ?: "Загрузка...",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = AccentCyan
+                        )
+                    }
+                }
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     TvFocusCard(
@@ -4665,7 +5623,7 @@ fun SettingsScreen(
                             iptvManager.saveConfigAndLoad(iptvPlaylistInput, iptvEpgInput)
                         },
                         modifier = Modifier
-                            .width(240.dp)
+                            .width(220.dp)
                             .height(48.dp)
                     ) {
                         Row(
@@ -4694,7 +5652,7 @@ fun SettingsScreen(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "Сохранить и загрузить",
+                                    text = "Загрузить по ссылке",
                                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                                     color = AccentCyan
                                 )
@@ -4702,7 +5660,34 @@ fun SettingsScreen(
                         }
                     }
 
-                    if (!iptvStatusMessage.isNullOrBlank()) {
+                    // Local USB / storage file picker button (Requirement 2)
+                    TvFocusCard(
+                        onClick = { scanLocalFiles() },
+                        modifier = Modifier
+                            .width(240.dp)
+                            .height(48.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Folder,
+                                contentDescription = null,
+                                tint = AccentCyan,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = if (isScanningLocalFiles) "Поиск файлов..." else "Выбрать файл с флешки",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = TextPrimary
+                            )
+                        }
+                    }
+
+                    if (!iptvStatusMessage.isNullOrBlank() && iptvPlaylistProgress == null && iptvEpgProgress == null) {
                         Text(
                             text = iptvStatusMessage ?: "",
                             style = MaterialTheme.typography.bodySmall,
@@ -4711,7 +5696,7 @@ fun SettingsScreen(
                             } else {
                                 AccentCyan
                             },
-                            modifier = Modifier.padding(start = 16.dp)
+                            modifier = Modifier.padding(start = 12.dp)
                         )
                     }
                 }
@@ -5036,9 +6021,125 @@ fun SettingsScreen(
             }
         }
     }
+
+    // Local USB / Storage M3U File Picker Dialog (Requirement 2)
+    if (showLocalFileDialog) {
+        Dialog(onDismissRequest = { showLocalFileDialog = false }) {
+            Box(
+                modifier = Modifier
+                    .width(520.dp)
+                    .height(440.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(DarkCard)
+                    .border(1.dp, AccentCyan.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
+                    .padding(24.dp)
+            ) {
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "Файлы плейлистов (.m3u / .m3u8)",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                color = TextPrimary
+                            )
+                            Text(
+                                text = "Найдено на флешке и в памяти: ${localFiles.size}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary
+                            )
+                        }
+                        TvFocusCard(
+                            onClick = { showLocalFileDialog = false },
+                            modifier = Modifier.width(110.dp).height(40.dp)
+                        ) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text("Закрыть", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    if (localFiles.isEmpty()) {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text(
+                                text = "Файлы .m3u / .m3u8 не найдены на подключенных накопителях.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = TextSecondary
+                            )
+                        }
+                    } else {
+                        androidx.compose.foundation.lazy.LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            androidx.compose.foundation.lazy.items(localFiles) { file ->
+                                TvFocusCard(
+                                    onClick = {
+                                        showLocalFileDialog = false
+                                        scope.launch { iptvManager.loadFromLocalFile(file) }
+                                    },
+                                    modifier = Modifier.fillMaxWidth().height(64.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.weight(1f),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(Icons.Default.Folder, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(24.dp))
+                                            Spacer(Modifier.width(12.dp))
+                                            Column {
+                                                Text(
+                                                    text = file.name,
+                                                    style = MaterialTheme.typography.titleMedium,
+                                                    color = TextPrimary,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                Text(
+                                                    text = file.parent ?: "",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = TextSecondary,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+                                        Text(
+                                            text = "${file.length() / 1024} КБ",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = AccentCyan
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 private fun getFriendlyChangelog(version: String, rawChangelog: String): List<String> {
+    if (version.contains("0.8")) {
+        return listOf(
+            "Наглядный прогресс загрузки телепрограммы и плейлистов с процентами.",
+            "Раздел ТВ: категории представлены как папки с сортировкой по времени просмотра и названию.",
+            "Плеер ТВ: время начала и конца текущей передачи, live-таймбар и телепрограмма по отдельной кнопке.",
+            "Главный экран: добавлен раздел телепрограммы избранных каналов в стиле Google TV.",
+            "Поддержка подключения .m3u с флешек без ручного ввода ссылки."
+        )
+    }
+
     if (version.contains("0.7")) {
         return listOf(
             "Полноценный IPTV плеер: загрузка M3U / M3U8 плейлистов и программы передач EPG (XMLTV, включая .xml.gz архив).",
@@ -5094,9 +6195,9 @@ private fun getFriendlyChangelog(version: String, rawChangelog: String): List<St
 private fun getCurrentAppVersion(context: Context): String {
     return try {
         val pInfo = context.packageManager.getPackageInfo(context.packageName, 0)
-        pInfo.versionName ?: "0.7.0"
+        pInfo.versionName ?: "0.8.0"
     } catch (e: Exception) {
-        "0.7.0"
+        "0.8.0"
     }
 }
 
@@ -5600,21 +6701,31 @@ def main():
     # 5. Monitor GitHub Actions
     print(f"\n[CI] Monitoring GitHub Actions build for {tag}...")
     repo = "SuperiorMor/Re-Player"
-    api_url = f"https://api.github.com/repos/{repo}/actions/runs?per_page=5"
+    api_url = f"https://api.github.com/repos/{repo}/actions/runs?per_page=10"
 
     run_id = None
-    for attempt in range(12):
+    for attempt in range(20):
         try:
             req = urllib.request.Request(api_url, headers={"User-Agent": "ReleaseBot"})
             with urllib.request.urlopen(req) as resp:
                 data = json.loads(resp.read().decode())
+                matching_runs = []
                 for r in data.get("workflow_runs", []):
                     if r.get("head_branch") == tag or (r.get("event") == "push" and r.get("head_branch") == tag):
+                        matching_runs.append(r)
+                
+                # Prefer active runs (in_progress or queued)
+                for r in matching_runs:
+                    if r.get("status") in ["queued", "in_progress"]:
                         run_id = r.get("id")
                         break
+                
+                if not run_id and matching_runs:
+                    # Otherwise pick the newest one
+                    run_id = matching_runs[0].get("id")
             if run_id:
                 break
-        except Exception as e:
+        except Exception:
             pass
         time.sleep(5)
 

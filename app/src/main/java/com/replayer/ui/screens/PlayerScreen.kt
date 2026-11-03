@@ -34,6 +34,14 @@ import androidx.compose.material.icons.filled.Forward10
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Replay10
+import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.LinearProgressIndicator
+import com.replayer.data.IptvManager
+import com.replayer.model.IptvChannel
+import com.replayer.model.MediaSourceType
+import kotlinx.coroutines.isActive
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -93,7 +101,30 @@ fun PlayerScreen(
     var showControls by remember { mutableStateOf(true) }
     var showAudioDialog by remember { mutableStateOf(false) }
     var showSubtitleDialog by remember { mutableStateOf(false) }
+    var showEpgDialog by remember { mutableStateOf(false) }
     var lastInteractionTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
+
+    val isIptv = mediaItem.sourceType == MediaSourceType.IPTV
+    val iptvManager = remember { IptvManager(context) }
+    var currentProgram by remember(mediaItem) {
+        mutableStateOf(if (isIptv) iptvManager.getCurrentProgram(IptvChannel(id = mediaItem.id, name = mediaItem.title, streamUrl = mediaItem.uri)) else null)
+    }
+    val channelSchedule = remember(mediaItem) {
+        if (isIptv) iptvManager.getProgramsForChannel(IptvChannel(id = mediaItem.id, name = mediaItem.title, streamUrl = mediaItem.uri)) else emptyList()
+    }
+
+    // Periodic EPG check and watch duration tracking
+    LaunchedEffect(isIptv) {
+        if (isIptv) {
+            while (isActive) {
+                delay(5000)
+                currentProgram = iptvManager.getCurrentProgram(IptvChannel(id = mediaItem.id, name = mediaItem.title, streamUrl = mediaItem.uri))
+                if (playerState.isPlaying) {
+                    iptvManager.recordWatchTime(mediaItem.id, 5)
+                }
+            }
+        }
+    }
 
     val playButtonFocusRequester = remember { FocusRequester() }
     val rootFocusRequester = remember { FocusRequester() }
@@ -128,7 +159,10 @@ fun PlayerScreen(
     }
 
     BackHandler(enabled = true) {
-        if (showAudioDialog || showSubtitleDialog) {
+        if (showEpgDialog) {
+            showEpgDialog = false
+            lastInteractionTime = System.currentTimeMillis()
+        } else if (showAudioDialog || showSubtitleDialog) {
             showAudioDialog = false
             showSubtitleDialog = false
             lastInteractionTime = System.currentTimeMillis()
@@ -255,37 +289,81 @@ fun PlayerScreen(
                         .fillMaxWidth()
                         .align(Alignment.BottomCenter)
                 ) {
-                    // Time Labels & Interactive Seek Bar
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = formatTime(playerState.currentPositionMs),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = TextPrimary
-                        )
+                    // Time Labels & Interactive Seek Bar / IPTV EPG Timebar (Requirement 10)
+                    if (isIptv) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            if (currentProgram != null) {
+                                Text(
+                                    text = currentProgram!!.title,
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = TextPrimary,
+                                    maxLines = 1,
+                                    modifier = Modifier.padding(bottom = 8.dp)
+                                )
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = currentProgram?.formattedStartTime() ?: "В эфире",
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = AccentCyan
+                                )
 
-                        Spacer(modifier = Modifier.width(16.dp))
+                                Spacer(modifier = Modifier.width(16.dp))
 
-                        // Interactive Focusable Timeline Seek Bar
-                        TvTimelineBar(
-                            currentPositionMs = playerState.currentPositionMs,
-                            durationMs = playerState.durationMs,
-                            onSeekRelative = { delta ->
-                                engine.seekRelative(delta)
-                                lastInteractionTime = System.currentTimeMillis()
-                            },
-                            modifier = Modifier.weight(1f)
-                        )
+                                LinearProgressIndicator(
+                                    progress = { currentProgram?.progress() ?: 0.5f },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(8.dp)
+                                        .clip(RoundedCornerShape(4.dp)),
+                                    color = AccentCyan,
+                                    trackColor = DarkSurface
+                                )
 
-                        Spacer(modifier = Modifier.width(16.dp))
+                                Spacer(modifier = Modifier.width(16.dp))
 
-                        Text(
-                            text = formatTime(playerState.durationMs),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = TextSecondary
-                        )
+                                Text(
+                                    text = currentProgram?.formattedEndTime() ?: "Прямой эфир",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = TextSecondary
+                                )
+                            }
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = formatTime(playerState.currentPositionMs),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = TextPrimary
+                            )
+
+                            Spacer(modifier = Modifier.width(16.dp))
+
+                            // Interactive Focusable Timeline Seek Bar
+                            TvTimelineBar(
+                                currentPositionMs = playerState.currentPositionMs,
+                                durationMs = playerState.durationMs,
+                                onSeekRelative = { delta ->
+                                    engine.seekRelative(delta)
+                                    lastInteractionTime = System.currentTimeMillis()
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            Spacer(modifier = Modifier.width(16.dp))
+
+                            Text(
+                                text = formatTime(playerState.durationMs),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = TextSecondary
+                            )
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(20.dp))
@@ -296,16 +374,18 @@ fun PlayerScreen(
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        TvPlayerIconButton(
-                            icon = Icons.Default.Replay10,
-                            contentDescription = "Назад на 10 сек",
-                            onClick = {
-                                engine.seekRelative(-10000)
-                                lastInteractionTime = System.currentTimeMillis()
-                            }
-                        )
+                        if (!isIptv) {
+                            TvPlayerIconButton(
+                                icon = Icons.Default.Replay10,
+                                contentDescription = "Назад на 10 сек",
+                                onClick = {
+                                    engine.seekRelative(-10000)
+                                    lastInteractionTime = System.currentTimeMillis()
+                                }
+                            )
 
-                        Spacer(modifier = Modifier.width(20.dp))
+                            Spacer(modifier = Modifier.width(20.dp))
+                        }
 
                         TvPlayerIconButton(
                             icon = if (playerState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
@@ -317,16 +397,18 @@ fun PlayerScreen(
                             }
                         )
 
-                        Spacer(modifier = Modifier.width(20.dp))
+                        if (!isIptv) {
+                            Spacer(modifier = Modifier.width(20.dp))
 
-                        TvPlayerIconButton(
-                            icon = Icons.Default.Forward10,
-                            contentDescription = "Вперед на 10 сек",
-                            onClick = {
-                                engine.seekRelative(10000)
-                                lastInteractionTime = System.currentTimeMillis()
-                            }
-                        )
+                            TvPlayerIconButton(
+                                icon = Icons.Default.Forward10,
+                                contentDescription = "Вперед на 10 сек",
+                                onClick = {
+                                    engine.seekRelative(10000)
+                                    lastInteractionTime = System.currentTimeMillis()
+                                }
+                            )
+                        }
 
                         Spacer(modifier = Modifier.width(36.dp))
 
@@ -351,6 +433,20 @@ fun PlayerScreen(
                                 lastInteractionTime = System.currentTimeMillis()
                             }
                         )
+
+                        if (isIptv) {
+                            Spacer(modifier = Modifier.width(16.dp))
+
+                            // EPG Schedule Button (Requirement 11)
+                            TvPlayerIconButton(
+                                icon = Icons.Default.MenuBook,
+                                contentDescription = "Телепрограмма",
+                                onClick = {
+                                    showEpgDialog = true
+                                    lastInteractionTime = System.currentTimeMillis()
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -382,6 +478,126 @@ fun PlayerScreen(
                 },
                 onDismiss = { showSubtitleDialog = false }
             )
+        }
+
+        // IPTV EPG Schedule Dialog (Requirement 11)
+        if (showEpgDialog) {
+            androidx.compose.ui.window.Dialog(onDismissRequest = { showEpgDialog = false }) {
+                Box(
+                    modifier = Modifier
+                        .width(540.dp)
+                        .height(480.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(DarkCard)
+                        .border(1.dp, AccentCyan.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
+                        .padding(24.dp)
+                ) {
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = mediaItem.title,
+                                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                    color = TextPrimary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "Телепрограмма",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextSecondary
+                                )
+                            }
+                            TvFocusCard(
+                                onClick = { showEpgDialog = false },
+                                modifier = Modifier
+                                    .width(110.dp)
+                                    .height(40.dp)
+                            ) {
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Text("Закрыть", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        if (channelSchedule.isEmpty()) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = "Для этого канала нет данных программы передач",
+                                    color = TextSecondary,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier.fillMaxSize(),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                items(channelSchedule) { prog ->
+                                    val isCurrent = prog.isCurrent()
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(if (isCurrent) AccentCyan.copy(alpha = 0.15f) else DarkSurface)
+                                            .border(
+                                                width = if (isCurrent) 1.dp else 0.dp,
+                                                color = if (isCurrent) AccentCyan else Color.Transparent,
+                                                shape = RoundedCornerShape(10.dp)
+                                            )
+                                            .padding(12.dp)
+                                    ) {
+                                        Column {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = prog.formattedTimeRange(),
+                                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                                    color = if (isCurrent) AccentCyan else TextSecondary
+                                                )
+                                                if (isCurrent) {
+                                                    Text(
+                                                        text = "СЕЙЧАС В ЭФИРЕ",
+                                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                                        color = AccentCyan
+                                                    )
+                                                }
+                                            }
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                text = prog.title,
+                                                style = MaterialTheme.typography.bodyMedium.copy(
+                                                    fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal
+                                                ),
+                                                color = TextPrimary
+                                            )
+                                            if (!prog.description.isNullOrBlank()) {
+                                                Spacer(modifier = Modifier.height(2.dp))
+                                                Text(
+                                                    text = prog.description,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = TextSecondary,
+                                                    maxLines = 2,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

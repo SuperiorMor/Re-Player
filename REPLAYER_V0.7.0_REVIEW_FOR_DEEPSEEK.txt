@@ -1,0 +1,3294 @@
+================================================================================
+АРХИТЕКТУРНЫЙ И КОДОВЫЙ АУДИТ ДЛЯ DEEPSEEK: ОБНОВЛЕНИЕ RE:PLAYER v0.7.0
+================================================================================
+
+ПРОЕКТ: Re:Player
+ПЛАТФОРМА: Android TV (API 24..35)
+ТЕХНОЛОГИИ: Jetpack Compose for TV, Kotlin 2.0, LibVLC 3.5.1, OkHttp, Kotlinx Serialization, Coil
+АРХИТЕКТУРА: Unidirectional Data Flow, StateFlow, Coroutines
+
+--------------------------------------------------------------------------------
+1. ИСХОДНЫЕ ЗАДАЧИ ОТ ПОЛЬЗОВАТЕЛЯ
+--------------------------------------------------------------------------------
+Задача 1 (Настройки DLNA):
+  "В настройках меню не выделять Доступные медиасерверы в сети в такой большой блок,
+   если у нас уже один подключен. Сделать маленькой кнопкой внутри «Серверы DLNA»,
+   при нажатии на которую появятся доступные, но ещё не подключенные серверы."
+
+Задача 2 (Чистый проводник файлов):
+  "Не подписывать пока разрешение или тип файла в папках. Всё и так наглядно на иконке
+   (папка, видео, аудио и тд). На формат АВИ или МПЕГ конечному пользователю в целом плевать,
+   если всё работает."
+
+Задача 3 (Полноценный IPTV с программой передач):
+  "Сделать ещё один раздел с IPTV. В настройки внести добавление формата .m3u и .m3u8,
+   а также программы передач для них (EPG). Обычно подтягивается XML из сети (.xml и .xml.gz).
+   Ориентиром в плане функционала держать в голове приложение Televizo."
+
+Задача 4 (Главный экран в дизайне Android TV):
+  "Держать курс в плане дизайна на Android TV. На главном экране:
+   - Первая основная строка: текущие просматриваемые файлы из DLNA и избранные ТВ каналы из IPTV.
+   - Вторая строка потоньше: избранные папки DLNA."
+
+--------------------------------------------------------------------------------
+2. АРХИТЕКТУРНЫЕ РЕШЕНИЯ И РЕАЛИЗАЦИЯ
+--------------------------------------------------------------------------------
+1) Потоковый парсинг M3U/M3U8 (M3uParser.kt):
+   - Однопроходный построчный стриминг.
+   - Извлечение атрибутов tvg-id, tvg-name, tvg-logo, group-title через регулярные выражения.
+   - Автоматический поиск ссылки на телепрограмму в шапке плейлиста (#EXTM3U url-tvg="...").
+
+2) Потоковый низкопотребляющий EPG XMLTV парсер (XmlTvParser.kt):
+   - Использование XmlPullParser без загрузки DOM-дерева в память (предотвращает OOM на 50-100 МБ XMLTV).
+   - Прозрачная поддержка сжатых архивов .xml.gz через GZIPInputStream.
+   - Индексация программ по каналу (channel ID) и времени начала/конца.
+
+3) Управление состоянием IPTV (IptvManager.kt):
+   - Реактивное состояние через StateFlow: список каналов, группы/категории, избранные каналы, EPG.
+   - Персистентность избранных каналов и ссылок в SharedPreferences.
+   - Расчет текущей передачи с прогрессом воспроизведения в реальном времени.
+
+4) История недавнего воспроизведения (RecentMediaManager.kt):
+   - Сохранение последних 15 воспроизведенных элементов из DLNA с временными метками.
+
+5) Главный экран в стиле полок Android TV (HomeScreen.kt):
+   - Полка 1 (Hero Shelf, карточки 240x138dp): недавние фильмы DLNA + избранные ТВ-каналы с логотипами и передачей в эфире.
+   - Полка 2 (Компактная полка, 220x68dp): закрепленные папки DLNA.
+
+6) Экран IPTV (IptvScreen.kt):
+   - Горизонтальная фильтрация категорий («Все», «Избранное», группы из плейлиста).
+   - Список каналов с отображением текущей телепередачи и прогресс-баром эфира.
+   - Быстрое переключение избранного (сердечко).
+   - Мгновенный запуск потока в полноэкранном LibVLC плеере.
+
+7) Оптимизация экрана настроек (SettingsScreen.kt):
+   - Карточка активного DLNA с кнопками «Сменить сервер» (раскрывает список доступных) и «Отключить».
+   - Секция «IPTV / Онлайн ТВ» с полями ввода M3U и EPG и валидацией.
+
+8) Очистка UpnpBrowseScreen.kt:
+   - Удалены бейджи технических форматов (AVI, MKV) из списочного и сеточного отображения.
+
+--------------------------------------------------------------------------------
+3. ПОЛНЫЙ ИСХОДНЫЙ КОД ДЛЯ РЕВЬЮ
+--------------------------------------------------------------------------------
+
+================================================================================
+ФАЙЛ: 1. app/src/main/java/com/replayer/model/IptvChannel.kt
+ПУТЬ: app/src/main/java/com/replayer/model/IptvChannel.kt
+================================================================================
+
+package com.replayer.model
+
+import kotlinx.serialization.Serializable
+
+@Serializable
+data class IptvChannel(
+    val id: String,
+    val name: String,
+    val streamUrl: String,
+    val logoUrl: String? = null,
+    val group: String = "Все",
+    val tvgId: String? = null,
+    val tvgName: String? = null
+) {
+    fun toMediaItem(): MediaItem = MediaItem(
+        id = id,
+        title = name,
+        uri = streamUrl,
+        type = MediaType.VIDEO,
+        sourceType = MediaSourceType.IPTV,
+        thumbnailUrl = logoUrl
+    )
+}
+
+
+
+
+================================================================================
+ФАЙЛ: 2. app/src/main/java/com/replayer/model/EpgProgram.kt
+ПУТЬ: app/src/main/java/com/replayer/model/EpgProgram.kt
+================================================================================
+
+package com.replayer.model
+
+import kotlinx.serialization.Serializable
+
+@Serializable
+data class EpgProgram(
+    val channelId: String,
+    val title: String,
+    val description: String? = null,
+    val startTime: Long,
+    val endTime: Long
+) {
+    fun isCurrent(now: Long = System.currentTimeMillis()): Boolean {
+        return now in startTime..endTime
+    }
+
+    fun progress(now: Long = System.currentTimeMillis()): Float {
+        if (endTime <= startTime) return 0f
+        return ((now - startTime).toFloat() / (endTime - startTime).toFloat()).coerceIn(0f, 1f)
+    }
+
+    fun formattedTimeRange(): String {
+        val s = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+        return "${s.format(java.util.Date(startTime))} - ${s.format(java.util.Date(endTime))}"
+    }
+}
+
+
+
+================================================================================
+ФАЙЛ: 3. app/src/main/java/com/replayer/model/RecentMedia.kt
+ПУТЬ: app/src/main/java/com/replayer/model/RecentMedia.kt
+================================================================================
+
+package com.replayer.model
+
+import kotlinx.serialization.Serializable
+
+@Serializable
+data class RecentMedia(
+    val id: String,
+    val title: String,
+    val uri: String,
+    val timestamp: Long = System.currentTimeMillis()
+) {
+    fun toMediaItem(): MediaItem = MediaItem(
+        id = id,
+        title = title,
+        uri = uri,
+        type = MediaType.VIDEO,
+        sourceType = MediaSourceType.UPNP_DLNA
+    )
+}
+
+
+
+
+================================================================================
+ФАЙЛ: 4. app/src/main/java/com/replayer/model/MediaSourceType.kt
+ПУТЬ: app/src/main/java/com/replayer/model/MediaSourceType.kt
+================================================================================
+
+package com.replayer.model
+
+enum class MediaSourceType {
+    UPNP_DLNA,
+    LOCAL_STORAGE,
+    IPTV
+}
+
+
+
+
+================================================================================
+ФАЙЛ: 5. app/src/main/java/com/replayer/network/iptv/M3uParser.kt
+ПУТЬ: app/src/main/java/com/replayer/network/iptv/M3uParser.kt
+================================================================================
+
+package com.replayer.network.iptv
+
+import com.replayer.model.IptvChannel
+import java.io.BufferedReader
+import java.io.InputStream
+import java.io.InputStreamReader
+
+data class M3uParseResult(
+    val channels: List<IptvChannel>,
+    val epgUrl: String?
+)
+
+object M3uParser {
+
+    private val TVG_ID_REGEX = Regex("""tvg-id="([^"]*)"""", RegexOption.IGNORE_CASE)
+    private val TVG_NAME_REGEX = Regex("""tvg-name="([^"]*)"""", RegexOption.IGNORE_CASE)
+    private val TVG_LOGO_REGEX = Regex("""tvg-logo="([^"]*)"""", RegexOption.IGNORE_CASE)
+    private val GROUP_TITLE_REGEX = Regex("""group-title="([^"]*)"""", RegexOption.IGNORE_CASE)
+    private val URL_TVG_REGEX = Regex("""(?:url-tvg|x-tvg-url)="([^"]*)"""", RegexOption.IGNORE_CASE)
+
+    fun parse(inputStream: InputStream): M3uParseResult {
+        val reader = BufferedReader(InputStreamReader(inputStream, Charsets.UTF_8))
+        val channels = mutableListOf<IptvChannel>()
+        var detectedEpgUrl: String? = null
+
+        var currentExtInf: String? = null
+        var index = 0
+
+        reader.forEachLine { rawLine ->
+            val line = rawLine.trim()
+            if (line.isEmpty()) return@forEachLine
+
+            if (line.startsWith("#EXTM3U", ignoreCase = true)) {
+                URL_TVG_REGEX.find(line)?.groupValues?.getOrNull(1)?.let {
+                    val firstUrl = it.split(",", ";").firstOrNull()?.trim()
+                    if (!firstUrl.isNullOrBlank()) {
+                        detectedEpgUrl = firstUrl
+                    }
+                }
+            } else if (line.startsWith("#EXTINF:", ignoreCase = true)) {
+                currentExtInf = line
+            } else if (!line.startsWith("#")) {
+                // This is the stream URL
+                val extInf = currentExtInf
+                val streamUrl = line
+
+                val tvgId = extInf?.let { TVG_ID_REGEX.find(it)?.groupValues?.getOrNull(1)?.trim() }
+                val tvgName = extInf?.let { TVG_NAME_REGEX.find(it)?.groupValues?.getOrNull(1)?.trim() }
+                val logoUrl = extInf?.let { TVG_LOGO_REGEX.find(it)?.groupValues?.getOrNull(1)?.trim() }
+                val groupTitle = extInf?.let { GROUP_TITLE_REGEX.find(it)?.groupValues?.getOrNull(1)?.trim() }
+                    ?.ifBlank { null } ?: "Общие"
+
+                // Extract title after last comma
+                val commaIdx = extInf?.lastIndexOf(',') ?: -1
+                val title = if (commaIdx != -1 && extInf != null && commaIdx + 1 < extInf.length) {
+                    extInf.substring(commaIdx + 1).trim()
+                } else {
+                    tvgName ?: "Канал ${index + 1}"
+                }
+
+                if (title.isNotBlank() && streamUrl.isNotBlank()) {
+                    index++
+                    val channelId = tvgId?.ifBlank { null } ?: "ch_${index}_${title.hashCode()}"
+                    channels.add(
+                        IptvChannel(
+                            id = channelId,
+                            name = title,
+                            streamUrl = streamUrl,
+                            logoUrl = logoUrl?.ifBlank { null },
+                            group = groupTitle,
+                            tvgId = tvgId?.ifBlank { null },
+                            tvgName = tvgName?.ifBlank { null }
+                        )
+                    )
+                }
+                currentExtInf = null
+            }
+        }
+
+        return M3uParseResult(channels = channels, epgUrl = detectedEpgUrl)
+    }
+}
+
+
+
+================================================================================
+ФАЙЛ: 6. app/src/main/java/com/replayer/network/iptv/XmlTvParser.kt
+ПУТЬ: app/src/main/java/com/replayer/network/iptv/XmlTvParser.kt
+================================================================================
+
+package com.replayer.network.iptv
+
+import android.util.Xml
+import com.replayer.model.EpgProgram
+import org.xmlpull.v1.XmlPullParser
+import java.io.InputStream
+import java.text.SimpleDateFormat
+import java.util.Locale
+import java.util.zip.GZIPInputStream
+
+object XmlTvParser {
+
+    private val DATE_FORMAT_TZ = SimpleDateFormat("yyyyMMddHHmmss Z", Locale.US)
+    private val DATE_FORMAT_NO_TZ = SimpleDateFormat("yyyyMMddHHmmss", Locale.US)
+
+    fun parse(inputStream: InputStream, isGzip: Boolean = false): Map<String, List<EpgProgram>> {
+        val stream = if (isGzip) GZIPInputStream(inputStream) else inputStream
+        val parser = Xml.newPullParser()
+        parser.setInput(stream, "UTF-8")
+
+        val result = mutableMapOf<String, MutableList<EpgProgram>>()
+        val now = System.currentTimeMillis()
+        val minTime = now - 12 * 3600 * 1000L // last 12h
+        val maxTime = now + 36 * 3600 * 1000L // next 36h
+
+        var eventType = parser.eventType
+        while (eventType != XmlPullParser.END_DOCUMENT) {
+            if (eventType == XmlPullParser.START_TAG && parser.name == "programme") {
+                val channel = parser.getAttributeValue(null, "channel")
+                val startStr = parser.getAttributeValue(null, "start")
+                val stopStr = parser.getAttributeValue(null, "stop")
+
+                if (!channel.isNullOrBlank() && !startStr.isNullOrBlank() && !stopStr.isNullOrBlank()) {
+                    val start = parseXmlDate(startStr)
+                    val stop = parseXmlDate(stopStr)
+
+                    if (start != null && stop != null && stop >= minTime && start <= maxTime) {
+                        var title: String? = null
+                        var desc: String? = null
+
+                        // Inner tags
+                        while (true) {
+                            val innerEvent = parser.next()
+                            if (innerEvent == XmlPullParser.START_TAG) {
+                                when (parser.name) {
+                                    "title" -> title = parser.nextText()
+                                    "desc" -> desc = parser.nextText()
+                                }
+                            } else if (innerEvent == XmlPullParser.END_TAG && parser.name == "programme") {
+                                break
+                            } else if (innerEvent == XmlPullParser.END_DOCUMENT) {
+                                break
+                            }
+                        }
+
+                        if (!title.isNullOrBlank()) {
+                            val list = result.getOrPut(channel) { mutableListOf() }
+                            list.add(
+                                EpgProgram(
+                                    channelId = channel,
+                                    title = title,
+                                    description = desc,
+                                    startTime = start,
+                                    endTime = stop
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+            eventType = parser.next()
+        }
+
+        // Sort each channel's programs by startTime
+        return result.mapValues { (_, progs) -> progs.sortedBy { it.startTime } }
+    }
+
+    private fun parseXmlDate(dateStr: String): Long? {
+        val trimmed = dateStr.trim()
+        return try {
+            if (trimmed.length >= 15 && (trimmed.contains("+") || trimmed.contains("-"))) {
+                DATE_FORMAT_TZ.parse(trimmed)?.time
+            } else {
+                val clean = trimmed.take(14)
+                DATE_FORMAT_NO_TZ.parse(clean)?.time
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+}
+
+
+
+================================================================================
+ФАЙЛ: 7. app/src/main/java/com/replayer/data/IptvManager.kt
+ПУТЬ: app/src/main/java/com/replayer/data/IptvManager.kt
+================================================================================
+
+package com.replayer.data
+
+import android.content.Context
+import android.content.SharedPreferences
+import com.replayer.model.EpgProgram
+import com.replayer.model.IptvChannel
+import com.replayer.network.iptv.M3uParser
+import com.replayer.network.iptv.XmlTvParser
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.io.File
+import java.util.concurrent.TimeUnit
+
+class IptvManager(private val context: Context) {
+
+    private val prefs: SharedPreferences =
+        context.getSharedPreferences("replayer_iptv", Context.MODE_PRIVATE)
+
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .build()
+
+    private val json = Json { ignoreUnknownKeys = true }
+    private val scope = CoroutineScope(Dispatchers.IO)
+
+    private val _channels = MutableStateFlow<List<IptvChannel>>(loadCachedChannels())
+    val channels: StateFlow<List<IptvChannel>> = _channels.asStateFlow()
+
+    private val _favoriteChannelIds = MutableStateFlow<Set<String>>(loadFavoriteChannelIds())
+    val favoriteChannelIds: StateFlow<Set<String>> = _favoriteChannelIds.asStateFlow()
+
+    private val _epgMap = MutableStateFlow<Map<String, List<EpgProgram>>>(emptyMap())
+    val epgMap: StateFlow<Map<String, List<EpgProgram>>> = _epgMap.asStateFlow()
+
+    private val _isLoading = MutableStateFlow(false)
+    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+
+    private val _statusMessage = MutableStateFlow<String?>(null)
+    val statusMessage: StateFlow<String?> = _statusMessage.asStateFlow()
+
+    init {
+        // Load EPG if cached or available
+        val savedEpg = getSavedEpgUrl()
+        if (!savedEpg.isNullOrBlank()) {
+            scope.launch { fetchEpg(savedEpg) }
+        }
+    }
+
+    fun getSavedPlaylistUrl(): String? = prefs.getString("iptv_playlist_url", null)
+
+    fun getSavedEpgUrl(): String? = prefs.getString("iptv_epg_url", null)
+
+    fun getGroups(): List<String> {
+        val groups = _channels.value.map { it.group }.distinct().sorted()
+        return listOf("Все", "Избранное") + groups
+    }
+
+    fun isFavorite(channelId: String): Boolean = _favoriteChannelIds.value.contains(channelId)
+
+    fun toggleFavorite(channelId: String) {
+        val current = _favoriteChannelIds.value.toMutableSet()
+        if (current.contains(channelId)) {
+            current.remove(channelId)
+        } else {
+            current.add(channelId)
+        }
+        _favoriteChannelIds.value = current
+        prefs.edit().putStringSet("iptv_favorites", current).apply()
+    }
+
+    fun getFavoriteChannels(): List<IptvChannel> {
+        val favIds = _favoriteChannelIds.value
+        return _channels.value.filter { favIds.contains(it.id) }
+    }
+
+    fun getCurrentProgram(channel: IptvChannel): EpgProgram? {
+        val map = _epgMap.value
+        val list = (channel.tvgId?.let { map[it] }) ?: map[channel.name] ?: return null
+        val now = System.currentTimeMillis()
+        return list.firstOrNull { it.isCurrent(now) }
+    }
+
+    fun saveConfigAndLoad(playlistUrl: String, epgUrl: String?) {
+        val cleanPlaylist = playlistUrl.trim()
+        val cleanEpg = epgUrl?.trim()?.ifBlank { null }
+        prefs.edit()
+            .putString("iptv_playlist_url", cleanPlaylist)
+            .putString("iptv_epg_url", cleanEpg)
+            .apply()
+
+        scope.launch {
+            loadPlaylist(cleanPlaylist, cleanEpg)
+        }
+    }
+
+    suspend fun refreshPlaylist() {
+        val url = getSavedPlaylistUrl() ?: return
+        val epg = getSavedEpgUrl()
+        loadPlaylist(url, epg)
+    }
+
+    private suspend fun loadPlaylist(url: String, manualEpgUrl: String?) = withContext(Dispatchers.IO) {
+        if (url.isBlank()) return@withContext
+        _isLoading.value = true
+        _statusMessage.value = "Загрузка плейлиста..."
+
+        try {
+            val req = Request.Builder()
+                .url(url)
+                .header("User-Agent", "RePlayer-TV")
+                .build()
+
+            val resp = client.newCall(req).execute()
+            if (!resp.isSuccessful) {
+                _statusMessage.value = "Ошибка загрузки: HTTP ${resp.code}"
+                _isLoading.value = false
+                return@withContext
+            }
+
+            val bodyStream = resp.body?.byteStream()
+            if (bodyStream == null) {
+                _statusMessage.value = "Пустой ответ сервера"
+                _isLoading.value = false
+                return@withContext
+            }
+
+            val parseResult = M3uParser.parse(bodyStream)
+            _channels.value = parseResult.channels
+            saveCachedChannels(parseResult.channels)
+
+            val detectedOrManualEpg = manualEpgUrl ?: parseResult.epgUrl
+            if (!detectedOrManualEpg.isNullOrBlank()) {
+                prefs.edit().putString("iptv_epg_url", detectedOrManualEpg).apply()
+                _statusMessage.value = "Каналов: ${parseResult.channels.size}. Загрузка программы передач..."
+                fetchEpg(detectedOrManualEpg)
+            } else {
+                _statusMessage.value = "Каналов загружено: ${parseResult.channels.size}"
+            }
+        } catch (e: Exception) {
+            _statusMessage.value = "Ошибка: ${e.localizedMessage ?: "Сбой соединения"}"
+        } finally {
+            _isLoading.value = false
+        }
+    }
+
+    private suspend fun fetchEpg(epgUrl: String) = withContext(Dispatchers.IO) {
+        try {
+            val req = Request.Builder()
+                .url(epgUrl)
+                .header("User-Agent", "RePlayer-TV")
+                .build()
+
+            val resp = client.newCall(req).execute()
+            if (!resp.isSuccessful) return@withContext
+
+            val stream = resp.body?.byteStream() ?: return@withContext
+            val isGzip = epgUrl.endsWith(".gz", ignoreCase = true)
+            val parsed = XmlTvParser.parse(stream, isGzip = isGzip)
+            _epgMap.value = parsed
+            _statusMessage.value = "Каналов: ${_channels.value.size}. Программа передач обновлена."
+        } catch (_: Exception) {}
+    }
+
+    private fun loadFavoriteChannelIds(): Set<String> {
+        return prefs.getStringSet("iptv_favorites", emptySet()) ?: emptySet()
+    }
+
+    private fun loadCachedChannels(): List<IptvChannel> {
+        return try {
+            val file = File(context.cacheDir, "iptv_channels.json")
+            if (file.exists()) {
+                json.decodeFromString<List<IptvChannel>>(file.readText())
+            } else emptyList()
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun saveCachedChannels(channels: List<IptvChannel>) {
+        try {
+            val file = File(context.cacheDir, "iptv_channels.json")
+            file.writeText(json.encodeToString(channels))
+        } catch (_: Exception) {}
+    }
+}
+
+
+
+================================================================================
+ФАЙЛ: 8. app/src/main/java/com/replayer/data/RecentMediaManager.kt
+ПУТЬ: app/src/main/java/com/replayer/data/RecentMediaManager.kt
+================================================================================
+
+package com.replayer.data
+
+import android.content.Context
+import android.content.SharedPreferences
+import com.replayer.model.RecentMedia
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+
+class RecentMediaManager(context: Context) {
+    private val prefs: SharedPreferences =
+        context.getSharedPreferences("replayer_recent_media", Context.MODE_PRIVATE)
+
+    private val json = Json { ignoreUnknownKeys = true }
+
+    private val _recentList = MutableStateFlow<List<RecentMedia>>(loadRecent())
+    val recentList: StateFlow<List<RecentMedia>> = _recentList.asStateFlow()
+
+    private fun loadRecent(): List<RecentMedia> {
+        val raw = prefs.getString("recent_media_json", null) ?: return emptyList()
+        return try {
+            json.decodeFromString<List<RecentMedia>>(raw)
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun saveRecent(list: List<RecentMedia>) {
+        _recentList.value = list
+        try {
+            val encoded = json.encodeToString(list)
+            prefs.edit().putString("recent_media_json", encoded).apply()
+        } catch (_: Exception) {}
+    }
+
+    fun addRecent(id: String, title: String, uri: String) {
+        val current = _recentList.value.toMutableList()
+        current.removeAll { it.id == id || it.uri == uri }
+        current.add(0, RecentMedia(id = id, title = title, uri = uri, timestamp = System.currentTimeMillis()))
+        // Keep last 15 items
+        val trimmed = current.take(15)
+        saveRecent(trimmed)
+    }
+
+    fun removeRecent(id: String) {
+        val current = _recentList.value.filterNot { it.id == id }
+        saveRecent(current)
+    }
+}
+
+
+
+================================================================================
+ФАЙЛ: 9. app/src/main/java/com/replayer/ui/screens/IptvScreen.kt
+ПУТЬ: app/src/main/java/com/replayer/ui/screens/IptvScreen.kt
+================================================================================
+
+package com.replayer.ui.screens
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Tv
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import com.replayer.data.IptvManager
+import com.replayer.model.IptvChannel
+import com.replayer.ui.components.TvFocusCard
+import com.replayer.ui.theme.*
+import kotlinx.coroutines.launch
+
+@Composable
+fun IptvScreen(
+    onPlayChannel: (IptvChannel) -> Unit,
+    onNavigateToSettings: () -> Unit,
+    onBackToHome: () -> Unit = {},
+    modifier: Modifier = Modifier
+) {
+    BackHandler(enabled = true) {
+        onBackToHome()
+    }
+
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val iptvManager = remember { IptvManager(context) }
+
+    val channels by iptvManager.channels.collectAsState()
+    val favoriteIds by iptvManager.favoriteChannelIds.collectAsState()
+    val epgMap by iptvManager.epgMap.collectAsState()
+    val isLoading by iptvManager.isLoading.collectAsState()
+    val statusMsg by iptvManager.statusMessage.collectAsState()
+
+    val groups = remember(channels) { iptvManager.getGroups() }
+    var selectedGroup by remember { mutableStateOf("Все") }
+
+    val filteredChannels = remember(channels, selectedGroup, favoriteIds) {
+        when (selectedGroup) {
+            "Все" -> channels
+            "Избранное" -> channels.filter { favoriteIds.contains(it.id) }
+            else -> channels.filter { it.group == selectedGroup }
+        }
+    }
+
+    val firstItemFocusRequester = remember { FocusRequester() }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 32.dp, vertical = 24.dp)
+    ) {
+        // Top Header
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text(
+                    text = "ТВ каналы",
+                    style = MaterialTheme.typography.displayLarge
+                )
+                Text(
+                    text = if (channels.isEmpty()) "Плейлист не настроен" else "Каналов: ${channels.size} • $selectedGroup",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextSecondary,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (channels.isNotEmpty()) {
+                    TvFocusCard(
+                        onClick = { scope.launch { iptvManager.refreshPlaylist() } },
+                        modifier = Modifier
+                            .width(150.dp)
+                            .height(44.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (isLoading) {
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp), color = AccentCyan, strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Default.Refresh, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(text = "Обновить", style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+
+                TvFocusCard(
+                    onClick = onNavigateToSettings,
+                    modifier = Modifier
+                        .width(160.dp)
+                        .height(44.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Settings, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(text = "Настройки ТВ", style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Empty Playlist State
+        if (channels.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(bottom = 60.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(72.dp)
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(DarkCard),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Tv,
+                            contentDescription = null,
+                            tint = AccentCyan.copy(alpha = 0.7f),
+                            modifier = Modifier.size(38.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "Плейлист IPTV не добавлен",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = TextPrimary
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Добавьте ссылку на плейлист M3U / M3U8 в настройках приложения",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextSecondary
+                    )
+                    Spacer(modifier = Modifier.height(20.dp))
+                    TvFocusCard(
+                        onClick = onNavigateToSettings,
+                        modifier = Modifier
+                            .width(220.dp)
+                            .height(48.dp)
+                    ) {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text(
+                                text = "Настроить IPTV",
+                                color = AccentCyan,
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                        }
+                    }
+                }
+            }
+        } else {
+            // Categories Row (Horizontal Pills)
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(groups) { group ->
+                    val isSelected = group == selectedGroup
+                    TvFocusCard(
+                        onClick = { selectedGroup = group },
+                        modifier = Modifier.height(40.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .background(if (isSelected) AccentCyan.copy(alpha = 0.25f) else Color.Transparent)
+                                .padding(horizontal = 16.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = group,
+                                color = if (isSelected) AccentCyan else TextPrimary,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Channel List with Televizo-style EPG
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(bottom = 32.dp)
+            ) {
+                itemsIndexed(filteredChannels, key = { _, ch -> ch.id }) { index, channel ->
+                    val isFav = favoriteIds.contains(channel.id)
+                    val prog = remember(channel, epgMap) { iptvManager.getCurrentProgram(channel) }
+                    val isFirst = index == 0
+
+                    TvFocusCard(
+                        onClick = { onPlayChannel(channel) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(76.dp)
+                            .then(if (isFirst) Modifier.focusRequester(firstItemFocusRequester) else Modifier)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Channel Logo or Placeholder
+                            Box(
+                                modifier = Modifier
+                                    .size(52.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(DarkSurface),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (!channel.logoUrl.isNullOrBlank()) {
+                                    AsyncImage(
+                                        model = channel.logoUrl,
+                                        contentDescription = channel.name,
+                                        modifier = Modifier.size(44.dp)
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.Tv,
+                                        contentDescription = null,
+                                        tint = AccentCyan,
+                                        modifier = Modifier.size(26.dp)
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.width(16.dp))
+
+                            // Channel Title & EPG Program
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = channel.name,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = TextPrimary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(AccentCyan.copy(alpha = 0.15f))
+                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = "LIVE",
+                                            color = AccentCyan,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(4.dp))
+
+                                if (prog != null) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = "${prog.formattedTimeRange()}  ${prog.title}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = TextSecondary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    LinearProgressIndicator(
+                                        progress = { prog.progress() },
+                                        modifier = Modifier
+                                            .width(180.dp)
+                                            .height(3.dp)
+                                            .clip(RoundedCornerShape(2.dp)),
+                                        color = AccentCyan,
+                                        trackColor = DarkSurface
+                                    )
+                                } else {
+                                    Text(
+                                        text = channel.group,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TextSecondary
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.width(16.dp))
+
+                            // Favorite Toggle Button
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .background(if (isFav) Color(0xFFFF4081).copy(alpha = 0.2f) else DarkSurface)
+                                    .clickable { iptvManager.toggleFavorite(channel.id) },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                    contentDescription = "Избранное",
+                                    tint = if (isFav) Color(0xFFFF4081) else TextSecondary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+
+================================================================================
+ФАЙЛ: 10. app/src/main/java/com/replayer/ui/screens/HomeScreen.kt
+ПУТЬ: app/src/main/java/com/replayer/ui/screens/HomeScreen.kt
+================================================================================
+
+package com.replayer.ui.screens
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Tv
+import androidx.compose.material.icons.filled.VideoFile
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import com.replayer.data.FavoritesManager
+import com.replayer.data.IptvManager
+import com.replayer.data.RecentMediaManager
+import com.replayer.model.FavoriteFolder
+import com.replayer.model.IptvChannel
+import com.replayer.model.MediaItem
+import com.replayer.ui.components.TvFocusCard
+import com.replayer.ui.theme.*
+
+@Composable
+fun HomeScreen(
+    onOpenFavorite: (FavoriteFolder) -> Unit,
+    onPlayMedia: (MediaItem) -> Unit,
+    onPlayChannel: (IptvChannel) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val favoritesManager = remember { FavoritesManager(context) }
+    val recentManager = remember { RecentMediaManager(context) }
+    val iptvManager = remember { IptvManager(context) }
+
+    val favorites by favoritesManager.favorites.collectAsState()
+    val recentList by recentManager.recentList.collectAsState()
+    val channels by iptvManager.channels.collectAsState()
+    val favoriteChannelIds by iptvManager.favoriteChannelIds.collectAsState()
+    val epgMap by iptvManager.epgMap.collectAsState()
+
+    val favoriteChannels = remember(channels, favoriteChannelIds) {
+        iptvManager.getFavoriteChannels()
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 32.dp, vertical = 24.dp)
+    ) {
+        // App / Screen Header
+        Text(
+            text = "Главная",
+            style = MaterialTheme.typography.displayLarge
+        )
+        Text(
+            text = "Недавнее воспроизведение, избранные телеканалы и папки",
+            style = MaterialTheme.typography.bodyLarge,
+            color = TextSecondary,
+            modifier = Modifier.padding(top = 4.dp, bottom = 28.dp)
+        )
+
+        // -------------------------------------------------------------
+        // СТРОКА 1: ОСНОВНАЯ ЛЕНТА (Android TV Shelf)
+        // Недавние файлы DLNA + Избранные ТВ каналы
+        // -------------------------------------------------------------
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Недавнее и ТВ каналы",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                color = TextPrimary
+            )
+            if (recentList.isNotEmpty() || favoriteChannels.isNotEmpty()) {
+                Text(
+                    text = "${recentList.size + favoriteChannels.size} элементов",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        if (recentList.isEmpty() && favoriteChannels.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(DarkCard)
+                    .padding(horizontal = 24.dp, vertical = 32.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = null,
+                        tint = AccentCyan.copy(alpha = 0.6f),
+                        modifier = Modifier.size(40.dp)
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "Здесь появятся ваши фильмы и избранные телеканалы",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = TextPrimary
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Запустите видео из папки DLNA или отметьте канал сердечком в разделе ТВ",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary
+                    )
+                }
+            }
+        } else {
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                contentPadding = PaddingValues(vertical = 4.dp)
+            ) {
+                // 1. Recent DLNA media cards
+                items(recentList, key = { "recent_${it.id}" }) { recent ->
+                    TvFocusCard(
+                        onClick = { onPlayMedia(recent.toMediaItem()) },
+                        modifier = Modifier
+                            .width(240.dp)
+                            .height(138.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(14.dp),
+                            verticalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(34.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(AccentCyan.copy(alpha = 0.15f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.VideoFile,
+                                        contentDescription = null,
+                                        tint = AccentCyan,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(AccentCyan.copy(alpha = 0.18f))
+                                        .padding(horizontal = 7.dp, vertical = 3.dp)
+                                ) {
+                                    Text(
+                                        text = "DLNA",
+                                        color = AccentCyan,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+
+                            Column {
+                                Text(
+                                    text = recent.title,
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    color = TextPrimary,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    lineHeight = 18.sp
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Продолжить просмотр",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextSecondary,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // 2. Favorite IPTV channel cards
+                items(favoriteChannels, key = { "iptv_${it.id}" }) { channel ->
+                    val currentProg = remember(channel, epgMap) {
+                        iptvManager.getCurrentProgram(channel)
+                    }
+
+                    TvFocusCard(
+                        onClick = { onPlayChannel(channel) },
+                        modifier = Modifier
+                            .width(240.dp)
+                            .height(138.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(14.dp),
+                            verticalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                if (!channel.logoUrl.isNullOrBlank()) {
+                                    AsyncImage(
+                                        model = channel.logoUrl,
+                                        contentDescription = null,
+                                        modifier = Modifier
+                                            .size(34.dp)
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(Color.White.copy(alpha = 0.08f)),
+                                        contentScale = ContentScale.Fit
+                                    )
+                                } else {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(34.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(Color(0xFFFF4081).copy(alpha = 0.15f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Tv,
+                                            contentDescription = null,
+                                            tint = Color(0xFFFF4081),
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                }
+
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(Color(0xFFFF4081).copy(alpha = 0.18f))
+                                            .padding(horizontal = 7.dp, vertical = 3.dp)
+                                    ) {
+                                        Text(
+                                            text = "ТВ КАНАЛ",
+                                            color = Color(0xFFFF4081),
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    Icon(
+                                        imageVector = Icons.Default.Favorite,
+                                        contentDescription = null,
+                                        tint = Color(0xFFFF4081),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+
+                            Column {
+                                Text(
+                                    text = channel.name,
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = TextPrimary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                if (currentProg != null) {
+                                    Text(
+                                        text = currentProg.title,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TextSecondary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        fontSize = 11.sp
+                                    )
+                                } else {
+                                    Text(
+                                        text = channel.group,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TextSecondary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(34.dp))
+
+        // -------------------------------------------------------------
+        // СТРОКА 2: ИЗБРАННЫЕ ПАПКИ DLNA (Потоньше)
+        // -------------------------------------------------------------
+        Text(
+            text = "Избранные папки DLNA",
+            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+            color = TextPrimary
+        )
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        if (favorites.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(DarkCard)
+                    .padding(horizontal = 20.dp, vertical = 20.dp),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Folder,
+                        contentDescription = null,
+                        tint = TextSecondary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = "Нет избранных папок. Нажимайте сердечко рядом с папкой в UPnP / DLNA для быстрого доступа.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextSecondary
+                    )
+                }
+            }
+        } else {
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                contentPadding = PaddingValues(vertical = 4.dp)
+            ) {
+                items(favorites, key = { it.id }) { fav ->
+                    TvFocusCard(
+                        onClick = { onOpenFavorite(fav) },
+                        modifier = Modifier
+                            .width(220.dp)
+                            .height(68.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Folder,
+                                    contentDescription = null,
+                                    tint = AccentCyan,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(
+                                    text = fav.title,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = TextPrimary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Icon(
+                                imageVector = Icons.Default.Favorite,
+                                contentDescription = "В избранном",
+                                tint = Color(0xFFFF4081),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+
+================================================================================
+ФАЙЛ: 11. app/src/main/java/com/replayer/ui/screens/SettingsScreen.kt
+ПУТЬ: app/src/main/java/com/replayer/ui/screens/SettingsScreen.kt
+================================================================================
+
+package com.replayer.ui.screens
+
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import coil.compose.AsyncImage
+import com.replayer.data.IptvManager
+import com.replayer.data.ServerConfigManager
+import com.replayer.model.UpnpDevice
+import com.replayer.network.upnp.SsdpDiscovery
+import com.replayer.ui.components.TvFocusCard
+import com.replayer.ui.theme.*
+import com.replayer.updater.ReleaseInfo
+import com.replayer.updater.UpdateCheckResult
+import com.replayer.updater.UpdateManager
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import java.io.File
+
+private sealed class UpdateUiState {
+    object Idle : UpdateUiState()
+    object Checking : UpdateUiState()
+    object UpToDate : UpdateUiState()
+    object NoReleases : UpdateUiState()
+    data class Available(val release: ReleaseInfo) : UpdateUiState()
+    data class Downloading(val progress: Float) : UpdateUiState()
+    data class ReadyToInstall(val apkFile: File) : UpdateUiState()
+    data class Error(val message: String) : UpdateUiState()
+}
+
+@Composable
+fun SettingsScreen(
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val serverConfigManager = remember { ServerConfigManager(context) }
+    val discovery = remember { SsdpDiscovery(context) }
+    val updateManager = remember { UpdateManager(context) }
+    val currentVersion = remember { getCurrentAppVersion(context) }
+
+    val connectedUpnpDevice by serverConfigManager.connectedUpnpDevice.collectAsState()
+
+    // UPnP scanning state
+    var discoveredDevices by remember { mutableStateOf<List<UpnpDevice>>(emptyList()) }
+    var isScanningUpnp by remember { mutableStateOf(false) }
+    var showAvailableServers by remember { mutableStateOf(false) }
+
+    // IPTV state
+    val iptvManager = remember { IptvManager(context) }
+    var iptvPlaylistInput by remember { mutableStateOf(iptvManager.getSavedPlaylistUrl() ?: "") }
+    var iptvEpgInput by remember { mutableStateOf(iptvManager.getSavedEpgUrl() ?: "") }
+    val iptvIsLoading by iptvManager.isLoading.collectAsState()
+    val iptvStatusMessage by iptvManager.statusMessage.collectAsState()
+
+    // App updates state
+    var updateUiState by remember { mutableStateOf<UpdateUiState>(UpdateUiState.Idle) }
+    var downloadProgress by remember { mutableFloatStateOf(0f) }
+    var showChangelogDialog by remember { mutableStateOf(false) }
+    var changelogRelease by remember { mutableStateOf<ReleaseInfo?>(null) }
+    val updateActionFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(updateUiState) {
+        if (updateUiState is UpdateUiState.Downloading || updateUiState is UpdateUiState.ReadyToInstall) {
+            delay(60)
+            try {
+                updateActionFocusRequester.requestFocus()
+            } catch (_: Exception) {}
+        }
+    }
+
+    BackHandler(enabled = true) {
+        onBack()
+    }
+
+    // Auto-scan for DLNA on entering settings if none connected
+    LaunchedEffect(Unit) {
+        if (connectedUpnpDevice == null) {
+            isScanningUpnp = true
+            discovery.discoverDevices().collect { list ->
+                discoveredDevices = list
+                isScanningUpnp = false
+            }
+        }
+    }
+
+    fun rescanUpnp() {
+        isScanningUpnp = true
+        scope.launch {
+            discovery.discoverDevices().collect { list ->
+                discoveredDevices = list
+                isScanningUpnp = false
+            }
+        }
+    }
+
+    fun startCheckUpdates() {
+        updateUiState = UpdateUiState.Checking
+        scope.launch {
+            val result = updateManager.checkForUpdates(currentVersion)
+            updateUiState = when (result) {
+                is UpdateCheckResult.UpdateAvailable -> UpdateUiState.Available(result.release)
+                is UpdateCheckResult.UpToDate -> UpdateUiState.UpToDate
+                is UpdateCheckResult.NoReleasesFound -> UpdateUiState.NoReleases
+                is UpdateCheckResult.Error -> UpdateUiState.Error(result.message)
+            }
+        }
+    }
+
+    fun startDownload(release: ReleaseInfo) {
+        updateUiState = UpdateUiState.Downloading(0f)
+        downloadProgress = 0f
+        scope.launch {
+            val file = updateManager.downloadApk(release.downloadUrl, release.fileName) { progress ->
+                downloadProgress = progress
+                updateUiState = UpdateUiState.Downloading(progress)
+            }
+            updateUiState = if (file != null) {
+                UpdateUiState.ReadyToInstall(file)
+            } else {
+                UpdateUiState.Error("Не удалось загрузить файл обновления")
+            }
+        }
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 32.dp, vertical = 24.dp)
+    ) {
+        Text(
+            text = "Настройки",
+            style = MaterialTheme.typography.displayLarge
+        )
+        Text(
+            text = "Управление сетевыми серверами DLNA / UPnP и обновлениями",
+            style = MaterialTheme.typography.bodyMedium,
+            color = TextSecondary,
+            modifier = Modifier.padding(bottom = 24.dp)
+        )
+
+        // ---------------------------------------------------------
+        // 1. Серверы DLNA / UPnP
+        // ---------------------------------------------------------
+        Text(
+            text = "Серверы DLNA / UPnP",
+            style = MaterialTheme.typography.titleLarge,
+            color = TextPrimary,
+            modifier = Modifier.padding(bottom = 12.dp)
+        )
+
+        // Connected Device Card
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(DarkCard)
+                .padding(20.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (connectedUpnpDevice != null) AccentCyan.copy(alpha = 0.15f) else DarkSurface),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Folder,
+                            contentDescription = null,
+                            tint = if (connectedUpnpDevice != null) AccentCyan else TextSecondary
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = connectedUpnpDevice?.friendlyName ?: "Сервер не выбран",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = TextPrimary
+                            )
+                            if (connectedUpnpDevice != null) {
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(AccentCyan)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = connectedUpnpDevice?.location ?: "Выберите сервер из списка найденных в локальной сети",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary
+                        )
+                    }
+                }
+
+                if (connectedUpnpDevice != null) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        TvFocusCard(
+                            onClick = {
+                                showAvailableServers = !showAvailableServers
+                                if (showAvailableServers) rescanUpnp()
+                            },
+                            modifier = Modifier
+                                .width(150.dp)
+                                .height(44.dp)
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = if (showAvailableServers) "Скрыть серверы" else "Сменить сервер",
+                                    color = AccentCyan,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        }
+
+                        TvFocusCard(
+                            onClick = {
+                                serverConfigManager.disconnectUpnpDevice()
+                                showAvailableServers = true
+                            },
+                            modifier = Modifier
+                                .width(120.dp)
+                                .height(44.dp)
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text(text = "Отключить", color = Color(0xFFFF5252), style = MaterialTheme.typography.bodyMedium)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Discovered Devices Section (shown when none connected or when toggled via "Сменить сервер")
+        if (connectedUpnpDevice == null || showAvailableServers) {
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text(
+                text = "Доступные медиасерверы в сети",
+                style = MaterialTheme.typography.titleMedium,
+                color = TextSecondary,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(DarkCard)
+                    .padding(16.dp)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (discoveredDevices.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 24.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = if (isScanningUpnp) "Поиск серверов в локальной сети..." else "Серверы не найдены. Убедитесь, что ПК или NAS включены и находятся в одной сети Wi-Fi.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = TextSecondary
+                            )
+                        }
+                    } else {
+                        discoveredDevices.forEach { device ->
+                            TvFocusCard(
+                                onClick = {
+                                    serverConfigManager.connectUpnpDevice(device)
+                                    showAvailableServers = false
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(72.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(horizontal = 20.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Folder, contentDescription = null, tint = AccentCyan)
+                                        Spacer(modifier = Modifier.width(16.dp))
+                                        Column {
+                                            Text(text = device.friendlyName, style = MaterialTheme.typography.titleMedium, color = TextPrimary)
+                                            Text(text = device.manufacturer.ifEmpty { device.location }, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                                        }
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(AccentCyan.copy(alpha = 0.15f))
+                                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                                    ) {
+                                        Text(text = "Подключить", color = AccentCyan, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Rescan button
+                    TvFocusCard(
+                        onClick = { rescanUpnp() },
+                        modifier = Modifier
+                            .width(220.dp)
+                            .height(48.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (isScanningUpnp) {
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp), color = AccentCyan, strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Default.Refresh, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(text = if (isScanningUpnp) "Поиск..." else "Обновить список", style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(28.dp))
+
+        // ---------------------------------------------------------
+        // 2. IPTV / Онлайн ТВ
+        // ---------------------------------------------------------
+        Text(
+            text = "IPTV / Онлайн ТВ",
+            style = MaterialTheme.typography.titleLarge,
+            color = TextPrimary,
+            modifier = Modifier.padding(bottom = 12.dp)
+        )
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(DarkCard)
+                .padding(20.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Text(
+                    text = "Добавьте ссылку на плейлист каналов (M3U / M3U8) и программу передач EPG (XMLTV).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary
+                )
+
+                OutlinedTextField(
+                    value = iptvPlaylistInput,
+                    onValueChange = { iptvPlaylistInput = it },
+                    label = { Text("URL плейлиста (.m3u / .m3u8)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        focusedBorderColor = AccentCyan,
+                        unfocusedBorderColor = DarkSurface,
+                        focusedLabelColor = AccentCyan,
+                        unfocusedLabelColor = TextSecondary,
+                        cursorColor = AccentCyan
+                    )
+                )
+
+                OutlinedTextField(
+                    value = iptvEpgInput,
+                    onValueChange = { iptvEpgInput = it },
+                    label = { Text("URL программы передач (.xml / .xml.gz, необязательно)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        focusedBorderColor = AccentCyan,
+                        unfocusedBorderColor = DarkSurface,
+                        focusedLabelColor = AccentCyan,
+                        unfocusedLabelColor = TextSecondary,
+                        cursorColor = AccentCyan
+                    )
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TvFocusCard(
+                        onClick = {
+                            iptvManager.saveConfigAndLoad(iptvPlaylistInput, iptvEpgInput)
+                        },
+                        modifier = Modifier
+                            .width(240.dp)
+                            .height(48.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (iptvIsLoading) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    color = AccentCyan,
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Загрузка...",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = AccentCyan
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.CloudDownload,
+                                    contentDescription = null,
+                                    tint = AccentCyan,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Сохранить и загрузить",
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = AccentCyan
+                                )
+                            }
+                        }
+                    }
+
+                    if (!iptvStatusMessage.isNullOrBlank()) {
+                        Text(
+                            text = iptvStatusMessage ?: "",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (iptvStatusMessage?.contains("Ошибка", ignoreCase = true) == true) {
+                                Color(0xFFFF5252)
+                            } else {
+                                AccentCyan
+                            },
+                            modifier = Modifier.padding(start = 16.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(28.dp))
+
+        // ---------------------------------------------------------
+        // 3. Обновление приложения
+        // ---------------------------------------------------------
+        Text(
+            text = "Обновление приложения",
+            style = MaterialTheme.typography.titleLarge,
+            color = TextPrimary,
+            modifier = Modifier.padding(bottom = 12.dp)
+        )
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(DarkCard)
+                .padding(horizontal = 20.dp, vertical = 18.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.SystemUpdate,
+                        contentDescription = null,
+                        tint = AccentCyan,
+                        modifier = Modifier.size(32.dp)
+                    )
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(text = "Re:Player", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(AccentCyan.copy(alpha = 0.2f))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "v$currentVersion",
+                                    color = AccentCyan,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = when (val state = updateUiState) {
+                                is UpdateUiState.Checking -> "Проверка обновлений на GitHub..."
+                                is UpdateUiState.UpToDate -> "У вас установлена актуальная версия"
+                                is UpdateUiState.NoReleases -> "Релизы на GitHub не найдены"
+                                is UpdateUiState.Available -> "Доступна новая версия: ${state.release.tagName}"
+                                is UpdateUiState.Downloading -> "Загрузка обновления: ${(state.progress * 100).toInt()}%"
+                                is UpdateUiState.ReadyToInstall -> "Загрузка завершена! Нажмите «Установить»."
+                                is UpdateUiState.Error -> state.message
+                                else -> "Проверка новых версий на GitHub и установка в один клик"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = when (updateUiState) {
+                                is UpdateUiState.Available -> AccentCyan
+                                is UpdateUiState.Error -> Color(0xFFFF5252)
+                                else -> TextSecondary
+                            }
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(16.dp))
+
+                when (val state = updateUiState) {
+                    is UpdateUiState.Checking -> {
+                        TvFocusCard(
+                            onClick = {},
+                            modifier = Modifier
+                                .width(170.dp)
+                                .height(44.dp)
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    color = AccentCyan,
+                                    strokeWidth = 2.dp
+                                )
+                            }
+                        }
+                    }
+
+                    is UpdateUiState.Available -> {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            TvFocusCard(
+                                onClick = {
+                                    changelogRelease = state.release
+                                    showChangelogDialog = true
+                                },
+                                modifier = Modifier
+                                    .width(150.dp)
+                                    .height(44.dp)
+                            ) {
+                                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = "Что нового",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = TextSecondary
+                                    )
+                                }
+                            }
+
+                            TvFocusCard(
+                                onClick = { startDownload(state.release) },
+                                modifier = Modifier
+                                    .width(150.dp)
+                                    .height(44.dp)
+                                    .focusRequester(updateActionFocusRequester)
+                            ) {
+                                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = "Загрузить",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = AccentCyan,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    is UpdateUiState.Downloading -> {
+                        Column(
+                            modifier = Modifier.width(170.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            LinearProgressIndicator(
+                                progress = { downloadProgress },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(8.dp)
+                                    .clip(RoundedCornerShape(4.dp)),
+                                color = AccentCyan,
+                                trackColor = DarkSurface
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "${(downloadProgress * 100).toInt()}%",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = AccentCyan
+                            )
+                        }
+                    }
+
+                    is UpdateUiState.ReadyToInstall -> {
+                        TvFocusCard(
+                            onClick = { updateManager.installApk(state.apkFile) },
+                            modifier = Modifier
+                                .width(170.dp)
+                                .height(44.dp)
+                                .focusRequester(updateActionFocusRequester)
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = "Установить",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = AccentCyan,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+
+                    else -> {
+                        TvFocusCard(
+                            onClick = { startCheckUpdates() },
+                            modifier = Modifier
+                                .width(170.dp)
+                                .height(44.dp)
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = "Проверить сейчас",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = TextPrimary
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ---------------------------------------------------------
+    // Changelog Dialog
+    // ---------------------------------------------------------
+    if (showChangelogDialog && changelogRelease != null) {
+        val release = changelogRelease!!
+        Dialog(onDismissRequest = { showChangelogDialog = false }) {
+            Box(
+                modifier = Modifier
+                    .width(520.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(DarkCard)
+                    .border(1.dp, AccentCyan.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
+                    .padding(28.dp)
+            ) {
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "Что нового в ${release.tagName}",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                color = TextPrimary
+                            )
+                            Text(
+                                text = "Обновление готово к установке",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(AccentCyan.copy(alpha = 0.15f))
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = release.tagName,
+                                color = AccentCyan,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(18.dp))
+
+                    val changelogItems = remember(release) {
+                        getFriendlyChangelog(release.tagName, release.changelog)
+                    }
+
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        changelogItems.forEach { item ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .padding(top = 6.dp)
+                                        .size(6.dp)
+                                        .clip(RoundedCornerShape(3.dp))
+                                        .background(AccentCyan)
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    text = item,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = TextPrimary,
+                                    lineHeight = 20.sp
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TvFocusCard(
+                            onClick = { showChangelogDialog = false },
+                            modifier = Modifier
+                                .width(120.dp)
+                                .height(44.dp)
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text("Закрыть", color = TextSecondary)
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.width(12.dp))
+
+                        TvFocusCard(
+                            onClick = {
+                                showChangelogDialog = false
+                                startDownload(release)
+                            },
+                            modifier = Modifier
+                                .width(140.dp)
+                                .height(44.dp)
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text("Загрузить", color = AccentCyan, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun getFriendlyChangelog(version: String, rawChangelog: String): List<String> {
+    if (version.contains("0.7")) {
+        return listOf(
+            "Полноценный IPTV плеер: загрузка M3U / M3U8 плейлистов и программы передач EPG (XMLTV, включая .xml.gz архив).",
+            "Главный экран в стиле Android TV: верхняя лента недавнего видео и избранных ТВ-каналов, а также компактные папки DLNA.",
+            "Компактные настройки серверов: аккуратная карточка подключенного DLNA с кнопкой смены сервера.",
+            "Чистый проводник файлов: скрыты лишние технические плашки форматов для быстрого и наглядного выбора видео."
+        )
+    }
+
+    if (version.contains("0.6")) {
+        return listOf(
+            "Глобальная оптимизация и стабильность: проект полностью сфокусирован на молниеносной работе с домашними серверами DLNA / UPnP.",
+            "Надёжный LibVLC: устранены вылеты при закрытии плеера и исправлено переключение звуковых дорожек.",
+            "Плавный фокус пульта: мгновенное и предсказуемое управление кнопками Android TV без потери курсора."
+        )
+    }
+
+    if (version.contains("0.5")) {
+        return listOf(
+            "Полный переход на плеерный движок LibVLC: встроенный нативный FFmpeg гарантирует 100% плавное воспроизведение любых AVI (DivX, Xvid) и идеальную синхронизацию звука.",
+            "Аппаратное и программное декодирование: плавная картинка и чистый звук на любых ТВ без задержек и артефактов.",
+            "Прямое воспроизведение DLNA: мгновенный старт потокового видео с выбором звуковых дорожек и субтитров."
+        )
+    }
+
+    if (version.contains("0.4")) {
+        return listOf(
+            "Точный расчёт времени аудиочанков в AVI: устранена рассинхронизация звука через накопление реального времени сэмплов в ChunkReader.",
+            "Автооткрытие папок: мгновенный доступ к видеофайлам."
+        )
+    }
+
+    val extracted = rawChangelog.lines()
+        .map { it.trim() }
+        .filter { it.startsWith("-") || it.startsWith("*") || (it.length > 2 && it[0].isDigit() && it[1] == '.') }
+        .map { line ->
+            line.removePrefix("-").removePrefix("*").replace(Regex("^\\d+\\.\\s*"), "").trim()
+        }
+        .filter { it.isNotEmpty() && !it.contains("Full Changelog", ignoreCase = true) }
+        .take(5)
+
+    if (extracted.size >= 2) {
+        return extracted
+    }
+
+    return listOf(
+        "Повышена стабильность и плавность воспроизведения видео и звука.",
+        "Улучшена отзывчивость управления пультом Android TV.",
+        "Оптимизирована работа с сетевыми папками и хранилищем."
+    )
+}
+
+private fun getCurrentAppVersion(context: Context): String {
+    return try {
+        val pInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+        pInfo.versionName ?: "0.7.0"
+    } catch (e: Exception) {
+        "0.7.0"
+    }
+}
+
+private fun Context.findActivity(): Activity? {
+    var ctx = this
+    while (ctx is ContextWrapper) {
+        if (ctx is Activity) return ctx
+        ctx = ctx.baseContext
+    }
+    return null
+}
+
+
+
+================================================================================
+ФАЙЛ: 12. app/src/main/java/com/replayer/ui/components/TvNavigationRail.kt
+ПУТЬ: app/src/main/java/com/replayer/ui/components/TvNavigationRail.kt
+================================================================================
+
+package com.replayer.ui.components
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Tv
+import androidx.compose.material3.Icon
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.material3.Text
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.res.painterResource
+import com.replayer.ui.theme.AccentCyan
+import com.replayer.ui.theme.SurfaceDark
+import com.replayer.ui.theme.TextSecondary
+
+enum class NavItem(val label: String, val icon: ImageVector) {
+    HOME("Главная", Icons.Default.Home),
+    UPNP("UPnP / DLNA", Icons.Default.Folder),
+    IPTV("ТВ каналы", Icons.Default.Tv),
+    SETTINGS("Настройки", Icons.Default.Settings)
+}
+
+@Composable
+fun TvNavigationRail(
+    selectedItem: NavItem,
+    onItemSelected: (NavItem) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxHeight()
+            .width(96.dp)
+            .background(SurfaceDark)
+            .padding(vertical = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Top
+    ) {
+        // Official App Logo
+        Image(
+            painter = painterResource(id = com.replayer.R.drawable.app_logo_transparent),
+            contentDescription = "Re:Player",
+            modifier = Modifier
+                .padding(bottom = 20.dp)
+                .size(72.dp)
+        )
+
+        NavItem.entries.forEach { item ->
+            val isSelected = item == selectedItem
+            TvFocusCard(
+                onClick = { onItemSelected(item) },
+                modifier = Modifier
+                    .padding(vertical = 8.dp)
+                    .width(52.dp)
+                    .height(52.dp)
+            ) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = item.icon,
+                        contentDescription = item.label,
+                        tint = if (isSelected) AccentCyan else TextSecondary
+                    )
+                }
+            }
+        }
+    }
+}
+
+
+
+================================================================================
+ФАЙЛ: 13. app/src/main/java/com/replayer/MainActivity.kt
+ПУТЬ: app/src/main/java/com/replayer/MainActivity.kt
+================================================================================
+
+package com.replayer
+
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ExitToApp
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import com.replayer.model.FavoriteFolder
+import com.replayer.model.MediaItem
+import com.replayer.model.MediaSourceType
+import com.replayer.ui.components.NavItem
+import com.replayer.ui.components.TvFocusCard
+import com.replayer.ui.components.TvNavigationRail
+import com.replayer.ui.screens.HomeScreen
+import com.replayer.ui.screens.IptvScreen
+import com.replayer.ui.screens.PlayerScreen
+import com.replayer.ui.screens.SettingsScreen
+import com.replayer.ui.screens.UpnpBrowseScreen
+import com.replayer.ui.theme.AccentCyan
+import com.replayer.ui.theme.DarkBackground
+import com.replayer.ui.theme.DarkCard
+import com.replayer.ui.theme.RePlayerTheme
+import com.replayer.ui.theme.TextPrimary
+import com.replayer.ui.theme.TextSecondary
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent {
+            RePlayerTheme {
+                var selectedNav by remember { mutableStateOf(NavItem.HOME) }
+                var activeMediaItem by remember { mutableStateOf<MediaItem?>(null) }
+                var showExitDialog by remember { mutableStateOf(false) }
+                var initialUpnpFolder by remember { mutableStateOf<Pair<String, String>?>(null) }
+                var lastPlayedMediaId by remember { mutableStateOf<String?>(null) }
+
+                // Exit confirmation dialog on Home screen
+                if (activeMediaItem == null && selectedNav == NavItem.HOME && !showExitDialog) {
+                    BackHandler(enabled = true) {
+                        showExitDialog = true
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(DarkBackground)
+                ) {
+                    // TV Navigation & Main UI (always kept alive so state is preserved on player close)
+                    Row(modifier = Modifier.fillMaxSize()) {
+                        TvNavigationRail(
+                            selectedItem = selectedNav,
+                            onItemSelected = {
+                                selectedNav = it
+                                initialUpnpFolder = null
+                            }
+                        )
+
+                        Box(modifier = Modifier.weight(1f).fillMaxSize()) {
+                            when (selectedNav) {
+                                NavItem.HOME -> HomeScreen(
+                                    onOpenFavorite = { fav ->
+                                        if (fav.sourceType == MediaSourceType.UPNP_DLNA) {
+                                            initialUpnpFolder = Pair(fav.id, fav.title)
+                                            selectedNav = NavItem.UPNP
+                                        }
+                                    },
+                                    onPlayMedia = { mediaItem ->
+                                        lastPlayedMediaId = mediaItem.id
+                                        activeMediaItem = mediaItem
+                                    },
+                                    onPlayChannel = { channel ->
+                                        activeMediaItem = channel.toMediaItem()
+                                    }
+                                )
+                                NavItem.UPNP -> UpnpBrowseScreen(
+                                    onPlayMedia = {
+                                        lastPlayedMediaId = it.id
+                                        activeMediaItem = it
+                                    },
+                                    onNavigateToSettings = { selectedNav = NavItem.SETTINGS },
+                                    onBackToHome = { selectedNav = NavItem.HOME },
+                                    initialFolder = initialUpnpFolder,
+                                    lastPlayedMediaId = lastPlayedMediaId,
+                                    isPlayerActive = (activeMediaItem != null),
+                                    onFolderLoaded = { initialUpnpFolder = null },
+                                    onConsumeLastPlayedMediaId = { lastPlayedMediaId = null }
+                                )
+                                NavItem.IPTV -> IptvScreen(
+                                    onPlayChannel = { channel ->
+                                        activeMediaItem = channel.toMediaItem()
+                                    },
+                                    onNavigateToSettings = { selectedNav = NavItem.SETTINGS },
+                                    onBackToHome = { selectedNav = NavItem.HOME }
+                                )
+                                NavItem.SETTINGS -> SettingsScreen(
+                                    onBack = { selectedNav = NavItem.HOME }
+                                )
+                            }
+                        }
+                    }
+
+                    // Fullscreen Player Overlay
+                    if (activeMediaItem != null) {
+                        PlayerScreen(
+                            mediaItem = activeMediaItem!!,
+                            onBack = { activeMediaItem = null }
+                        )
+                    }
+
+                    // TV Exit Confirmation Dialog
+                    if (showExitDialog) {
+                        BackHandler(enabled = true) {
+                            showExitDialog = false
+                        }
+
+                        Dialog(onDismissRequest = { showExitDialog = false }) {
+                            Box(
+                                modifier = Modifier
+                                    .width(440.dp)
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(DarkCard)
+                                    .border(1.dp, AccentCyan.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
+                                    .padding(28.dp)
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        Icons.Default.ExitToApp,
+                                        contentDescription = null,
+                                        tint = AccentCyan,
+                                        modifier = Modifier.size(44.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    Text(
+                                        text = "Выход из Re:Player",
+                                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                        color = TextPrimary
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = "Вы точно хотите закрыть приложение?",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = TextSecondary,
+                                        textAlign = TextAlign.Center
+                                    )
+                                    Spacer(modifier = Modifier.height(24.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                    ) {
+                                        TvFocusCard(
+                                            onClick = {
+                                                showExitDialog = false
+                                                this@MainActivity.finish()
+                                            },
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(52.dp)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = "Да, выйти",
+                                                    style = MaterialTheme.typography.titleMedium,
+                                                    color = Color(0xFFFF5252)
+                                                )
+                                            }
+                                        }
+
+                                        TvFocusCard(
+                                            onClick = { showExitDialog = false },
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(52.dp)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = "Отмена",
+                                                    style = MaterialTheme.typography.titleMedium,
+                                                    color = TextPrimary
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+
+================================================================================
+ФАЙЛ: 14. app/src/main/java/com/replayer/ui/screens/UpnpBrowseScreen.kt
+ПУТЬ: app/src/main/java/com/replayer/ui/screens/UpnpBrowseScreen.kt
+================================================================================
+
+package com.replayer.ui.screens
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AudioFile
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Sort
+import androidx.compose.material.icons.filled.VideoFile
+import androidx.compose.material.icons.filled.ViewList
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.replayer.data.FavoritesManager
+import com.replayer.data.RecentMediaManager
+import com.replayer.data.ServerConfigManager
+import com.replayer.model.FavoriteFolder
+import com.replayer.model.MediaItem
+import com.replayer.model.MediaSourceType
+import com.replayer.model.MediaType
+import com.replayer.model.SortMode
+import com.replayer.model.ViewMode
+import com.replayer.network.upnp.ContentDirectoryService
+import com.replayer.ui.components.TvFocusCard
+import com.replayer.ui.theme.AccentCyan
+import com.replayer.ui.theme.DarkCard
+import com.replayer.ui.theme.DarkSurface
+import com.replayer.ui.theme.TextPrimary
+import com.replayer.ui.theme.TextSecondary
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+
+@Composable
+fun UpnpBrowseScreen(
+    onPlayMedia: (MediaItem) -> Unit,
+    onNavigateToSettings: () -> Unit,
+    onBackToHome: () -> Unit,
+    modifier: Modifier = Modifier,
+    initialFolder: Pair<String, String>? = null,
+    lastPlayedMediaId: String? = null,
+    isPlayerActive: Boolean = false,
+    onFolderLoaded: () -> Unit = {},
+    onConsumeLastPlayedMediaId: () -> Unit = {}
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val serverConfigManager = remember { ServerConfigManager(context) }
+    val favoritesManager = remember { FavoritesManager(context) }
+    val recentManager = remember { RecentMediaManager(context) }
+    val contentDirectory = remember { ContentDirectoryService() }
+
+    val connectedDevice by serverConfigManager.connectedUpnpDevice.collectAsState()
+    val favorites by favoritesManager.favorites.collectAsState()
+
+    var currentItems by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
+    var folderStack by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
+    var isLoadingFolder by remember { mutableStateOf(false) }
+
+    // User preferences: Default view is LIST
+    var viewMode by remember { mutableStateOf(ViewMode.LIST) }
+    var sortMode by remember { mutableStateOf(SortMode.BY_NAME) }
+
+    val listState = rememberLazyListState()
+    val gridState = rememberLazyGridState()
+
+    val firstItemFocusRequester = remember { FocusRequester() }
+    val targetItemFocusRequester = remember { FocusRequester() }
+    var lastExitTimestamp by remember { mutableLongStateOf(0L) }
+
+    fun loadFolder(controlUrl: String, folderId: String) {
+        isLoadingFolder = true
+        scope.launch {
+            currentItems = contentDirectory.browse(controlUrl, folderId)
+            isLoadingFolder = false
+        }
+    }
+
+    fun openFolder(controlUrl: String, folderId: String, title: String) {
+        onConsumeLastPlayedMediaId()
+        folderStack = folderStack + Pair(folderId, title)
+        loadFolder(controlUrl, folderId)
+    }
+
+    // Initialize or switch folder when connectedDevice or initialFolder changes
+    LaunchedEffect(connectedDevice, initialFolder) {
+        if (connectedDevice != null) {
+            val controlUrl = connectedDevice!!.contentDirectoryControlUrl ?: return@LaunchedEffect
+            if (initialFolder != null) {
+                if (folderStack.lastOrNull()?.first != initialFolder.first) {
+                    folderStack = listOf(Pair("0", connectedDevice!!.friendlyName), initialFolder)
+                    loadFolder(controlUrl, initialFolder.first)
+                    onFolderLoaded()
+                }
+            } else if (folderStack.isEmpty()) {
+                folderStack = listOf(Pair("0", connectedDevice!!.friendlyName))
+                loadFolder(controlUrl, "0")
+            }
+        }
+    }
+
+    fun navigateBack() {
+        onConsumeLastPlayedMediaId()
+        if (folderStack.size > 1) {
+            val parentIdx = folderStack.size - 2
+            val parentFolder = folderStack[parentIdx]
+            folderStack = folderStack.take(parentIdx + 1)
+            connectedDevice?.contentDirectoryControlUrl?.let { url ->
+                loadFolder(url, parentFolder.first)
+            }
+        } else {
+            onBackToHome()
+        }
+    }
+
+    BackHandler(enabled = !isPlayerActive) {
+        // Prevent accidental multiple back taps within 400ms after closing player from popping folders
+        if (System.currentTimeMillis() - lastExitTimestamp < 400) {
+            return@BackHandler
+        }
+        navigateBack()
+    }
+
+    // Sorting
+    val sortedItems = remember(currentItems, sortMode) {
+        when (sortMode) {
+            SortMode.BY_NAME -> {
+                currentItems.sortedWith(
+                    compareBy<MediaItem> { it.type != MediaType.DIRECTORY }
+                        .thenBy(String.CASE_INSENSITIVE_ORDER) { it.title }
+                )
+            }
+            SortMode.BY_DATE -> {
+                currentItems.sortedWith(
+                    compareBy<MediaItem> { it.type != MediaType.DIRECTORY }
+                        .thenByDescending { it.dateAdded ?: "" }
+                        .thenBy(String.CASE_INSENSITIVE_ORDER) { it.title }
+                )
+            }
+        }
+    }
+
+    if (connectedDevice == null) {
+        // Not connected state
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .padding(32.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(80.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(DarkCard),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Folder,
+                        contentDescription = null,
+                        tint = AccentCyan,
+                        modifier = Modifier.size(42.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.height(20.dp))
+                Text(
+                    text = "Подключите свой сервер DLNA/UPnP в настройках",
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
+                    color = TextPrimary
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Выберите DLNA сервер (например Keenetic Giga или медиасервер ПК) в меню настроек.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextSecondary
+                )
+                Spacer(modifier = Modifier.height(24.dp))
+                TvFocusCard(
+                    onClick = onNavigateToSettings,
+                    modifier = Modifier
+                        .width(220.dp)
+                        .height(48.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Settings, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(text = "Перейти в настройки", color = AccentCyan, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+        }
+        return
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 32.dp, vertical = 24.dp)
+    ) {
+        // Header with Breadcrumb and Controls
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = connectedDevice!!.friendlyName,
+                    style = MaterialTheme.typography.displayLarge
+                )
+                val breadcrumb = folderStack.joinToString(" / ") { it.second }
+                Text(
+                    text = breadcrumb.ifEmpty { connectedDevice!!.friendlyName },
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = AccentCyan,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // View Switcher (List / Grid)
+                TvFocusCard(
+                    onClick = {
+                        viewMode = if (viewMode == ViewMode.LIST) ViewMode.GRID else ViewMode.LIST
+                    },
+                    modifier = Modifier
+                        .width(160.dp)
+                        .height(48.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = if (viewMode == ViewMode.LIST) Icons.Default.ViewList else Icons.Default.GridView,
+                            contentDescription = null,
+                            tint = AccentCyan,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (viewMode == ViewMode.LIST) "Вид: Список" else "Вид: Плитка",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = TextPrimary
+                        )
+                    }
+                }
+
+                // Sort Switcher (Name / Date)
+                TvFocusCard(
+                    onClick = {
+                        sortMode = if (sortMode == SortMode.BY_NAME) SortMode.BY_DATE else SortMode.BY_NAME
+                    },
+                    modifier = Modifier
+                        .width(170.dp)
+                        .height(48.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Sort,
+                            contentDescription = null,
+                            tint = AccentCyan,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (sortMode == SortMode.BY_NAME) "Сорт: По имени" else "Сорт: По дате",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = TextPrimary
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        Box(modifier = Modifier.fillMaxSize()) {
+            if (sortedItems.isEmpty() && !isLoadingFolder) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Папка пуста",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = TextSecondary
+                    )
+                }
+            } else if (viewMode == ViewMode.LIST) {
+                // Detailed List View
+                LazyColumn(
+                    state = listState,
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    contentPadding = PaddingValues(vertical = 8.dp),
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                items(sortedItems.size, key = { sortedItems[it].id }) { index ->
+                    val item = sortedItems[index]
+                    val isFirst = index == 0
+                    val isTarget = item.id == lastPlayedMediaId
+                    val isFav = favorites.any { it.id == item.id }
+
+                    val itemFocusModifier = when {
+                        isTarget -> Modifier.focusRequester(targetItemFocusRequester)
+                        isFirst -> Modifier.focusRequester(firstItemFocusRequester)
+                        else -> Modifier
+                    }
+
+                    TvFocusCard(
+                        onClick = {
+                            if (item.type == MediaType.DIRECTORY) {
+                                connectedDevice?.contentDirectoryControlUrl?.let { url ->
+                                    openFolder(url, item.id, item.title)
+                                }
+                            } else {
+                                recentManager.addRecent(item.id, item.title, item.uri)
+                                onPlayMedia(item)
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(78.dp)
+                            .then(itemFocusModifier)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 20.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            val icon = when (item.type) {
+                                MediaType.DIRECTORY -> Icons.Default.Folder
+                                MediaType.VIDEO -> Icons.Default.VideoFile
+                                MediaType.AUDIO -> Icons.Default.AudioFile
+                                MediaType.IMAGE -> Icons.Default.Image
+                                MediaType.UNKNOWN -> Icons.Default.VideoFile
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(AccentCyan.copy(alpha = 0.12f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = icon,
+                                    contentDescription = null,
+                                    tint = AccentCyan,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(16.dp))
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = item.title,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    color = TextPrimary
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                val sizeStr = item.formattedSize()
+                                if (sizeStr.isNotEmpty()) {
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = sizeStr,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TextSecondary
+                                    )
+                                }
+                            }
+
+                            // Favorite Heart button for folders
+                            if (item.type == MediaType.DIRECTORY) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(if (isFav) Color(0xFFFF4081).copy(alpha = 0.15f) else Color.Transparent)
+                                        .clickable {
+                                            favoritesManager.toggleFavorite(
+                                                FavoriteFolder(
+                                                    id = item.id,
+                                                    title = item.title,
+                                                    sourceType = MediaSourceType.UPNP_DLNA,
+                                                    serverControlUrl = connectedDevice?.contentDirectoryControlUrl,
+                                                    parentId = item.parentId
+                                                )
+                                            )
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                        contentDescription = "Избранное",
+                                        tint = if (isFav) Color(0xFFFF4081) else TextSecondary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            // Grid View
+            LazyVerticalGrid(
+                state = gridState,
+                columns = GridCells.Adaptive(minSize = 220.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                contentPadding = PaddingValues(vertical = 8.dp)
+            ) {
+                items(sortedItems.size, key = { sortedItems[it].id }) { index ->
+                    val item = sortedItems[index]
+                    val isFirst = index == 0
+                    val isTarget = item.id == lastPlayedMediaId
+                    val isFav = favorites.any { it.id == item.id }
+
+                    val itemFocusModifier = when {
+                        isTarget -> Modifier.focusRequester(targetItemFocusRequester)
+                        isFirst -> Modifier.focusRequester(firstItemFocusRequester)
+                        else -> Modifier
+                    }
+
+                    TvFocusCard(
+                        onClick = {
+                            if (item.type == MediaType.DIRECTORY) {
+                                connectedDevice?.contentDirectoryControlUrl?.let { url ->
+                                    openFolder(url, item.id, item.title)
+                                }
+                            } else {
+                                recentManager.addRecent(item.id, item.title, item.uri)
+                                onPlayMedia(item)
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(130.dp)
+                            .then(itemFocusModifier)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(16.dp),
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            val icon = when (item.type) {
+                                MediaType.DIRECTORY -> Icons.Default.Folder
+                                MediaType.VIDEO -> Icons.Default.VideoFile
+                                MediaType.AUDIO -> Icons.Default.AudioFile
+                                MediaType.IMAGE -> Icons.Default.Image
+                                MediaType.UNKNOWN -> Icons.Default.VideoFile
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(icon, contentDescription = null, tint = AccentCyan)
+
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (item.type == MediaType.DIRECTORY) {
+                                        Icon(
+                                            imageVector = if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                            contentDescription = null,
+                                            tint = if (isFav) Color(0xFFFF4081) else TextSecondary,
+                                            modifier = Modifier
+                                                .size(20.dp)
+                                                .clickable {
+                                                    favoritesManager.toggleFavorite(
+                                                        FavoriteFolder(
+                                                            id = item.id,
+                                                            title = item.title,
+                                                            sourceType = MediaSourceType.UPNP_DLNA,
+                                                            serverControlUrl = connectedDevice?.contentDirectoryControlUrl,
+                                                            parentId = item.parentId
+                                                        )
+                                                    )
+                                                }
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = item.title,
+                                style = MaterialTheme.typography.titleMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            val sizeStr = item.formattedSize()
+                            if (sizeStr.isNotEmpty()) {
+                                Text(
+                                    text = sizeStr,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextSecondary
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (isLoadingFolder) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.45f)),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(color = AccentCyan)
+            }
+        }
+    }
+}
+}
+
+// 1. Returning from player: focus the played video item and keep focus on it!
+    LaunchedEffect(isPlayerActive) {
+        if (!isPlayerActive && lastPlayedMediaId != null) {
+            val targetIndex = sortedItems.indexOfFirst { it.id == lastPlayedMediaId }
+            if (targetIndex >= 0) {
+                delay(60)
+                try {
+                    if (viewMode == ViewMode.LIST) {
+                        listState.scrollToItem(maxOf(0, targetIndex))
+                    } else {
+                        gridState.scrollToItem(maxOf(0, targetIndex))
+                    }
+                } catch (_: Exception) {}
+                delay(80)
+                try {
+                    targetItemFocusRequester.requestFocus()
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
+    // 2. Folder navigation (entering folder or pressing Back): focus first item
+    LaunchedEffect(folderStack) {
+        if (folderStack.isNotEmpty() && !isPlayerActive) {
+            delay(60)
+            try {
+                if (viewMode == ViewMode.LIST) {
+                    listState.scrollToItem(0)
+                } else {
+                    gridState.scrollToItem(0)
+                }
+                firstItemFocusRequester.requestFocus()
+            } catch (_: Exception) {}
+        }
+    }
+
+    // 3. Initial folder items loaded
+    LaunchedEffect(currentItems) {
+        if (!isPlayerActive && lastPlayedMediaId == null && currentItems.isNotEmpty()) {
+            delay(50)
+            try {
+                firstItemFocusRequester.requestFocus()
+            } catch (_: Exception) {}
+        }
+    }
+}
+
+
+
+--------------------------------------------------------------------------------
+4. ВОПРОСЫ И КРИТЕРИИ ДЛЯ ОЦЕНКИ DEEPSEEK:
+--------------------------------------------------------------------------------
+1. Эффективность памяти и производительность:
+   - Насколько безопасен парсер XmlTvParser при загрузке огромных EPG (более 100 МБ) на ТВ-приставках с 1-2 ГБ ОЗУ?
+   - Оптимально ли организовано хранение и поиск программы передач в IptvManager?
+2. Android TV UX и навигация с пульта:
+   - Корректность поведения фокуса (D-pad) при переключении между горизонтальными полками HomeScreen и списком IPTV?
+   - Отсутствие потерь фокуса при перезагрузке списков каналов или категорий.
+3. Воспроизведение IPTV потоков:
+   - Корректность передачи HLS / MPEG-TS потоков в LibVLC через MediaItem.
+   - Рекомендации по оптимизации параметров сетевого кеширования LibVLC для нестабильных IPTV-потоков.
+4. Архитектурная чистота:
+   - Что стоит отрефакторить или разбить на более мелкие компоненты?
+   - Рекомендации по обработке краевых случаев (битые M3U ссылки, отсутствие интернета, редиректы).
+================================================================================

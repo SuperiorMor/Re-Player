@@ -35,6 +35,7 @@ import com.replayer.ui.theme.*
 import com.replayer.updater.ReleaseInfo
 import com.replayer.updater.UpdateCheckResult
 import com.replayer.updater.UpdateManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
@@ -74,7 +75,41 @@ fun SettingsScreen(
     var iptvPlaylistInput by remember { mutableStateOf(iptvManager.getSavedPlaylistUrl() ?: "") }
     var iptvEpgInput by remember { mutableStateOf(iptvManager.getSavedEpgUrl() ?: "") }
     val iptvIsLoading by iptvManager.isLoading.collectAsState()
+    val iptvPlaylistProgress by iptvManager.playlistProgress.collectAsState()
+    val iptvEpgProgress by iptvManager.epgProgress.collectAsState()
     val iptvStatusMessage by iptvManager.statusMessage.collectAsState()
+
+    var showLocalFileDialog by remember { mutableStateOf(false) }
+    var localFiles by remember { mutableStateOf<List<File>>(emptyList()) }
+    var isScanningLocalFiles by remember { mutableStateOf(false) }
+
+    fun scanLocalFiles() {
+        isScanningLocalFiles = true
+        scope.launch(Dispatchers.IO) {
+            val candidates = mutableListOf<File>()
+            val searchDirs = listOfNotNull(
+                File("/storage"),
+                File("/sdcard"),
+                File("/storage/emulated/0/Download"),
+                File("/storage/emulated/0"),
+                context.getExternalFilesDir(null)
+            )
+            for (dir in searchDirs) {
+                try {
+                    if (dir.exists() && dir.canRead()) {
+                        dir.walkTopDown().maxDepth(3).forEach { f ->
+                            if (f.isFile && (f.name.endsWith(".m3u", ignoreCase = true) || f.name.endsWith(".m3u8", ignoreCase = true))) {
+                                candidates.add(f)
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+            localFiles = candidates.distinctBy { it.absolutePath }
+            isScanningLocalFiles = false
+            showLocalFileDialog = true
+        }
+    }
 
     // App updates state
     var updateUiState by remember { mutableStateOf<UpdateUiState>(UpdateUiState.Idle) }
@@ -381,15 +416,29 @@ fun SettingsScreen(
                 .padding(20.dp)
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Text(
-                    text = "Добавьте ссылку на плейлист каналов (M3U / M3U8) и программу передач EPG (XMLTV).",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextSecondary
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Добавьте ссылку на плейлист каналов (M3U / M3U8) и программу передач EPG (XMLTV).",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary
+                    )
+                    Text(
+                        text = "✓ Сохраняется автоматически",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AccentCyan
+                    )
+                }
 
                 OutlinedTextField(
                     value = iptvPlaylistInput,
-                    onValueChange = { iptvPlaylistInput = it },
+                    onValueChange = {
+                        iptvPlaylistInput = it
+                        iptvManager.saveUrlsOnly(it, iptvEpgInput)
+                    },
                     label = { Text("URL плейлиста (.m3u / .m3u8)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
@@ -406,7 +455,10 @@ fun SettingsScreen(
 
                 OutlinedTextField(
                     value = iptvEpgInput,
-                    onValueChange = { iptvEpgInput = it },
+                    onValueChange = {
+                        iptvEpgInput = it
+                        iptvManager.saveUrlsOnly(iptvPlaylistInput, it)
+                    },
                     label = { Text("URL программы передач (.xml / .xml.gz, необязательно)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
@@ -421,9 +473,31 @@ fun SettingsScreen(
                     )
                 )
 
+                // Live download progress bar (Requirement 1)
+                if (iptvPlaylistProgress != null || iptvEpgProgress != null || iptvIsLoading) {
+                    val progVal = iptvEpgProgress ?: iptvPlaylistProgress ?: 0f
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        LinearProgressIndicator(
+                            progress = { progVal },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(8.dp)
+                                .clip(RoundedCornerShape(4.dp)),
+                            color = AccentCyan,
+                            trackColor = DarkSurface
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = iptvStatusMessage ?: "Загрузка...",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = AccentCyan
+                        )
+                    }
+                }
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     TvFocusCard(
@@ -431,7 +505,7 @@ fun SettingsScreen(
                             iptvManager.saveConfigAndLoad(iptvPlaylistInput, iptvEpgInput)
                         },
                         modifier = Modifier
-                            .width(240.dp)
+                            .width(220.dp)
                             .height(48.dp)
                     ) {
                         Row(
@@ -460,7 +534,7 @@ fun SettingsScreen(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "Сохранить и загрузить",
+                                    text = "Загрузить по ссылке",
                                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                                     color = AccentCyan
                                 )
@@ -468,7 +542,34 @@ fun SettingsScreen(
                         }
                     }
 
-                    if (!iptvStatusMessage.isNullOrBlank()) {
+                    // Local USB / storage file picker button (Requirement 2)
+                    TvFocusCard(
+                        onClick = { scanLocalFiles() },
+                        modifier = Modifier
+                            .width(240.dp)
+                            .height(48.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Folder,
+                                contentDescription = null,
+                                tint = AccentCyan,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = if (isScanningLocalFiles) "Поиск файлов..." else "Выбрать файл с флешки",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = TextPrimary
+                            )
+                        }
+                    }
+
+                    if (!iptvStatusMessage.isNullOrBlank() && iptvPlaylistProgress == null && iptvEpgProgress == null) {
                         Text(
                             text = iptvStatusMessage ?: "",
                             style = MaterialTheme.typography.bodySmall,
@@ -477,7 +578,7 @@ fun SettingsScreen(
                             } else {
                                 AccentCyan
                             },
-                            modifier = Modifier.padding(start = 16.dp)
+                            modifier = Modifier.padding(start = 12.dp)
                         )
                     }
                 }
@@ -802,9 +903,125 @@ fun SettingsScreen(
             }
         }
     }
+
+    // Local USB / Storage M3U File Picker Dialog (Requirement 2)
+    if (showLocalFileDialog) {
+        Dialog(onDismissRequest = { showLocalFileDialog = false }) {
+            Box(
+                modifier = Modifier
+                    .width(520.dp)
+                    .height(440.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(DarkCard)
+                    .border(1.dp, AccentCyan.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
+                    .padding(24.dp)
+            ) {
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "Файлы плейлистов (.m3u / .m3u8)",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                color = TextPrimary
+                            )
+                            Text(
+                                text = "Найдено на флешке и в памяти: ${localFiles.size}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary
+                            )
+                        }
+                        TvFocusCard(
+                            onClick = { showLocalFileDialog = false },
+                            modifier = Modifier.width(110.dp).height(40.dp)
+                        ) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text("Закрыть", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    if (localFiles.isEmpty()) {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text(
+                                text = "Файлы .m3u / .m3u8 не найдены на подключенных накопителях.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = TextSecondary
+                            )
+                        }
+                    } else {
+                        androidx.compose.foundation.lazy.LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            androidx.compose.foundation.lazy.items(localFiles) { file ->
+                                TvFocusCard(
+                                    onClick = {
+                                        showLocalFileDialog = false
+                                        scope.launch { iptvManager.loadFromLocalFile(file) }
+                                    },
+                                    modifier = Modifier.fillMaxWidth().height(64.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.weight(1f),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(Icons.Default.Folder, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(24.dp))
+                                            Spacer(Modifier.width(12.dp))
+                                            Column {
+                                                Text(
+                                                    text = file.name,
+                                                    style = MaterialTheme.typography.titleMedium,
+                                                    color = TextPrimary,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                Text(
+                                                    text = file.parent ?: "",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = TextSecondary,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+                                        Text(
+                                            text = "${file.length() / 1024} КБ",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = AccentCyan
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 private fun getFriendlyChangelog(version: String, rawChangelog: String): List<String> {
+    if (version.contains("0.8")) {
+        return listOf(
+            "Наглядный прогресс загрузки телепрограммы и плейлистов с процентами.",
+            "Раздел ТВ: категории представлены как папки с сортировкой по времени просмотра и названию.",
+            "Плеер ТВ: время начала и конца текущей передачи, live-таймбар и телепрограмма по отдельной кнопке.",
+            "Главный экран: добавлен раздел телепрограммы избранных каналов в стиле Google TV.",
+            "Поддержка подключения .m3u с флешек без ручного ввода ссылки."
+        )
+    }
+
     if (version.contains("0.7")) {
         return listOf(
             "Полноценный IPTV плеер: загрузка M3U / M3U8 плейлистов и программы передач EPG (XMLTV, включая .xml.gz архив).",
@@ -860,9 +1077,9 @@ private fun getFriendlyChangelog(version: String, rawChangelog: String): List<St
 private fun getCurrentAppVersion(context: Context): String {
     return try {
         val pInfo = context.packageManager.getPackageInfo(context.packageName, 0)
-        pInfo.versionName ?: "0.7.0"
+        pInfo.versionName ?: "0.8.0"
     } catch (e: Exception) {
-        "0.7.0"
+        "0.8.0"
     }
 }
 
