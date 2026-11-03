@@ -70,6 +70,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -80,12 +81,7 @@ import com.replayer.model.MediaItem
 import com.replayer.model.SubtitleTrackInfo
 import com.replayer.player.RePlayerEngine
 import com.replayer.ui.components.TvFocusCard
-import com.replayer.ui.theme.AccentCyan
-import com.replayer.ui.theme.DarkCard
-import com.replayer.ui.theme.FocusBorder
-import com.replayer.ui.theme.SurfaceDark
-import com.replayer.ui.theme.TextPrimary
-import com.replayer.ui.theme.TextSecondary
+import com.replayer.ui.theme.*
 import kotlinx.coroutines.delay
 
 @Composable
