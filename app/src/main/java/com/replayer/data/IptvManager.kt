@@ -28,7 +28,18 @@ enum class ChannelSortMode(val label: String) {
     BY_WATCH_TIME("По времени просмотра")
 }
 
-class IptvManager(private val context: Context) {
+class IptvManager private constructor(private val context: Context) {
+
+    companion object {
+        @Volatile
+        private var INSTANCE: IptvManager? = null
+
+        fun getInstance(context: Context): IptvManager {
+            return INSTANCE ?: synchronized(this) {
+                INSTANCE ?: IptvManager(context.applicationContext).also { INSTANCE = it }
+            }
+        }
+    }
 
     private val prefs: SharedPreferences =
         context.getSharedPreferences("replayer_iptv", Context.MODE_PRIVATE)
@@ -99,10 +110,17 @@ class IptvManager(private val context: Context) {
     private val _watchTimes = MutableStateFlow<Map<String, Long>>(loadWatchTimes())
     val watchTimes: StateFlow<Map<String, Long>> = _watchTimes.asStateFlow()
 
+    private var isFetchingEpg = false
+
     init {
-        // If we have saved URLs, refresh EPG if cache is empty
+        val savedPlaylist = getSavedPlaylistUrl()
         val savedEpg = getSavedEpgUrl()
-        if (!savedEpg.isNullOrBlank() && _epgMap.value.isEmpty()) {
+
+        if (_channels.value.isEmpty() && !savedPlaylist.isNullOrBlank()) {
+            scope.launch {
+                loadPlaylist(savedPlaylist, savedEpg)
+            }
+        } else if (!savedEpg.isNullOrBlank() && _epgMap.value.isEmpty()) {
             scope.launch { fetchEpg(savedEpg) }
         }
     }
@@ -378,7 +396,8 @@ class IptvManager(private val context: Context) {
     }
 
     suspend fun fetchEpg(epgUrl: String) = withContext(Dispatchers.IO) {
-        if (epgUrl.isBlank()) return@withContext
+        if (epgUrl.isBlank() || isFetchingEpg) return@withContext
+        isFetchingEpg = true
         val targetUrl = normalizeEpgUrl(epgUrl)
         _epgProgress.value = 0f
         _statusMessage.value = "Загрузка телепрограммы (EPG)..."
@@ -410,7 +429,7 @@ class IptvManager(private val context: Context) {
                         if (totalBytes > 0) {
                             val p = (downloaded.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f)
                             _epgProgress.value = p
-                            _statusMessage.value = "Загрузка телепрограммы: ${(p * 100).toInt()}%"
+                            _statusMessage.value = "Загрузка архива телепрограммы: ${(p * 100).toInt()}%"
                         }
                     }
                     output.flush()
@@ -420,8 +439,23 @@ class IptvManager(private val context: Context) {
             _epgProgress.value = 1f
             _statusMessage.value = "Распаковка и индексация телепрограммы..."
 
+            val currentChannels = _channels.value
+            val targetSet = if (currentChannels.isNotEmpty()) {
+                val set = mutableSetOf<String>()
+                for (ch in currentChannels) {
+                    set.add(ch.id)
+                    set.add(ch.id.lowercase())
+                    set.add(ch.name.lowercase())
+                    val clean = XmlTvParser.normalizeChannelName(ch.name)
+                    if (clean.isNotEmpty()) set.add(clean)
+                }
+                set
+            } else null
+
             val parsed = tempFile.inputStream().use { stream ->
-                XmlTvParser.parse(stream)
+                XmlTvParser.parse(stream, targetChannels = targetSet) { status ->
+                    _statusMessage.value = status
+                }
             }
             try { tempFile.delete() } catch (_: Exception) {}
             _epgMap.value = parsed
@@ -431,6 +465,7 @@ class IptvManager(private val context: Context) {
             _statusMessage.value = "Сбой EPG: ${e.localizedMessage ?: "Сбой соединения"}"
         } finally {
             _epgProgress.value = null
+            isFetchingEpg = false
         }
     }
 
@@ -455,10 +490,17 @@ class IptvManager(private val context: Context) {
 
     private fun loadCachedChannels(): List<IptvChannel> {
         return try {
-            val file = File(context.cacheDir, "iptv_channels.json")
+            val file = File(context.filesDir, "iptv_channels.json")
             if (file.exists()) {
                 json.decodeFromString<List<IptvChannel>>(file.readText())
-            } else emptyList()
+            } else {
+                val oldFile = File(context.cacheDir, "iptv_channels.json")
+                if (oldFile.exists()) {
+                    val list = json.decodeFromString<List<IptvChannel>>(oldFile.readText())
+                    saveCachedChannels(list)
+                    list
+                } else emptyList()
+            }
         } catch (_: Exception) {
             emptyList()
         }
@@ -466,17 +508,24 @@ class IptvManager(private val context: Context) {
 
     private fun saveCachedChannels(channels: List<IptvChannel>) {
         try {
-            val file = File(context.cacheDir, "iptv_channels.json")
+            val file = File(context.filesDir, "iptv_channels.json")
             file.writeText(json.encodeToString(channels))
         } catch (_: Exception) {}
     }
 
     private fun loadCachedEpg(): Map<String, List<EpgProgram>> {
         return try {
-            val file = File(context.cacheDir, "iptv_epg.json")
+            val file = File(context.filesDir, "iptv_epg.json")
             if (file.exists()) {
                 json.decodeFromString<Map<String, List<EpgProgram>>>(file.readText())
-            } else emptyMap()
+            } else {
+                val oldFile = File(context.cacheDir, "iptv_epg.json")
+                if (oldFile.exists()) {
+                    val map = json.decodeFromString<Map<String, List<EpgProgram>>>(oldFile.readText())
+                    saveCachedEpg(map)
+                    map
+                } else emptyMap()
+            }
         } catch (_: Exception) {
             emptyMap()
         }
@@ -484,10 +533,11 @@ class IptvManager(private val context: Context) {
 
     private fun saveCachedEpg(map: Map<String, List<EpgProgram>>) {
         try {
-            // Keep top 300 active channels to prevent giant file
             val trimmed = map.entries.take(400).associate { it.key to it.value.take(40) }
-            val file = File(context.cacheDir, "iptv_epg.json")
+            val file = File(context.filesDir, "iptv_epg.json")
             file.writeText(json.encodeToString(trimmed))
+        } catch (_: Exception) {}
+    }
         } catch (_: Exception) {}
     }
 }

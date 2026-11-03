@@ -51,7 +51,7 @@ fun IptvScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val iptvManager = remember { IptvManager(context) }
+    val iptvManager = remember { IptvManager.getInstance(context) }
 
     val channels by iptvManager.channels.collectAsState()
     val favoriteIds by iptvManager.favoriteChannelIds.collectAsState()
@@ -68,7 +68,7 @@ fun IptvScreen(
 
     // Remote back button handling: inside folder -> back to folders; on folders -> back to Home
     BackHandler(enabled = true) {
-        if (selectedFolder != null) {
+        if (selectedFolder != null && folders.size > 1) {
             selectedFolder = null
         } else {
             onBackToHome()
@@ -81,38 +81,42 @@ fun IptvScreen(
             .padding(horizontal = 32.dp, vertical = 24.dp)
     ) {
         // TOP BAR
+        val isInsideFolder = selectedFolder != null || (folders.size <= 1 && channels.isNotEmpty())
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (selectedFolder != null) {
+            if (isInsideFolder) {
+                val currentFolder = selectedFolder ?: folders.firstOrNull() ?: "Все каналы"
                 // Inside Folder Header
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    TvFocusCard(
-                        onClick = { selectedFolder = null },
-                        modifier = Modifier
-                            .width(130.dp)
-                            .height(44.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxSize(),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
+                    if (folders.size > 1 && selectedFolder != null) {
+                        TvFocusCard(
+                            onClick = { selectedFolder = null },
+                            modifier = Modifier
+                                .width(130.dp)
+                                .height(44.dp)
                         ) {
-                            Icon(Icons.Default.ArrowBack, contentDescription = "Назад", tint = AccentCyan, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("Папки", style = MaterialTheme.typography.bodyMedium, color = AccentCyan)
+                            Row(
+                                modifier = Modifier.fillMaxSize(),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.ArrowBack, contentDescription = "Назад", tint = AccentCyan, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Папки", style = MaterialTheme.typography.bodyMedium, color = AccentCyan)
+                            }
                         }
+                        Spacer(Modifier.width(16.dp))
                     }
-                    Spacer(Modifier.width(16.dp))
                     Column {
                         Text(
-                            text = selectedFolder!!,
+                            text = if (folders.size <= 1) "ТВ каналы" else currentFolder,
                             style = MaterialTheme.typography.displayLarge
                         )
-                        val folderChannels = remember(channels, selectedFolder) {
-                            iptvManager.getChannelsInFolder(selectedFolder!!)
+                        val folderChannels = remember(channels, currentFolder) {
+                            iptvManager.getChannelsInFolder(currentFolder)
                         }
                         Text(
                             text = "Каналов: ${folderChannels.size} • Сортировка: ${sortMode.label}",
@@ -225,58 +229,73 @@ fun IptvScreen(
         Spacer(modifier = Modifier.height(20.dp))
 
         // MAIN CONTENT
-        if (channels.isEmpty() && !isLoading) {
-            // Empty State: Playlist Not Configured
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(bottom = 60.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
+        if (channels.isEmpty()) {
+            if (isLoading) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(72.dp)
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(DarkCard),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Tv,
-                            contentDescription = null,
-                            tint = AccentCyan.copy(alpha = 0.7f),
-                            modifier = Modifier.size(38.dp)
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = statusMsg ?: "Загрузка каналов...",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = AccentCyan
                         )
                     }
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = "Плейлист IPTV не загружен",
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
-                        color = TextPrimary
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Добавьте ссылку на .m3u плейлист или выберите файл в Настройках",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = TextSecondary
-                    )
-                    Spacer(modifier = Modifier.height(24.dp))
-                    TvFocusCard(
-                        onClick = onNavigateToSettings,
-                        modifier = Modifier
-                            .width(220.dp)
-                            .height(48.dp)
+                }
+            } else {
+                // Empty State: Playlist Not Configured
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(bottom = 60.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
                     ) {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text("Перейти в настройки", color = AccentCyan, style = MaterialTheme.typography.bodyMedium)
+                        Box(
+                            modifier = Modifier
+                                .size(72.dp)
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(DarkCard),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Tv,
+                                contentDescription = null,
+                                tint = AccentCyan.copy(alpha = 0.7f),
+                                modifier = Modifier.size(38.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "Плейлист IPTV не загружен",
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
+                            color = TextPrimary
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Добавьте ссылку на .m3u плейлист или выберите файл в Настройках",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = TextSecondary
+                        )
+                        Spacer(modifier = Modifier.height(24.dp))
+                        TvFocusCard(
+                            onClick = onNavigateToSettings,
+                            modifier = Modifier
+                                .width(220.dp)
+                                .height(48.dp)
+                        ) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text("Перейти в настройки", color = AccentCyan, style = MaterialTheme.typography.bodyMedium)
+                            }
                         }
                     }
                 }
             }
-        } else if (selectedFolder == null) {
+        } else if (selectedFolder == null && folders.size > 1) {
             // LEVEL 1: Category Folders Grid (Requirement 5 & 8)
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(minSize = 240.dp),
@@ -339,9 +358,10 @@ fun IptvScreen(
                 }
             }
         } else {
-            // LEVEL 2: Channels inside the selected folder
-            val folderChannels = remember(channels, selectedFolder) {
-                iptvManager.getChannelsInFolder(selectedFolder!!)
+            // LEVEL 2: Channels inside the selected folder (or all channels if single folder)
+            val currentFolder = selectedFolder ?: folders.firstOrNull() ?: "Все каналы"
+            val folderChannels = remember(channels, currentFolder) {
+                iptvManager.getChannelsInFolder(currentFolder)
             }
             val sortedList = remember(folderChannels, sortMode) {
                 iptvManager.getSortedChannels(folderChannels, sortMode)

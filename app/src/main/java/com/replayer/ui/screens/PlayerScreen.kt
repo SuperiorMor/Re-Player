@@ -101,7 +101,7 @@ fun PlayerScreen(
     var lastInteractionTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
     val isIptv = mediaItem.sourceType == MediaSourceType.IPTV
-    val iptvManager = remember { IptvManager(context) }
+    val iptvManager = remember { IptvManager.getInstance(context) }
     var currentProgram by remember(mediaItem) {
         mutableStateOf(if (isIptv) iptvManager.getCurrentProgram(IptvChannel(id = mediaItem.id, name = mediaItem.title, streamUrl = mediaItem.uri)) else null)
     }

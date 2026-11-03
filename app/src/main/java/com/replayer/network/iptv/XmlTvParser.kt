@@ -11,15 +11,19 @@ import java.util.zip.GZIPInputStream
 
 object XmlTvParser {
 
-    fun parse(rawInputStream: InputStream, isGzipHint: Boolean = false): Map<String, List<EpgProgram>> {
-        // Detect GZIP by magic bytes (0x1f, 0x8b) or hint
+    fun parse(
+        rawInputStream: InputStream,
+        targetChannels: Set<String>? = null,
+        onProgress: ((String) -> Unit)? = null
+    ): Map<String, List<EpgProgram>> {
+        // Detect GZIP by magic bytes (0x1f, 0x8b)
         val buffered = BufferedInputStream(rawInputStream, 65536)
         buffered.mark(4)
         val b1 = buffered.read()
         val b2 = buffered.read()
         buffered.reset()
 
-        val isGzip = (b1 == 0x1f && b2 == 0x8b) || isGzipHint
+        val isGzip = (b1 == 0x1f && b2 == 0x8b)
         val stream: InputStream = if (isGzip) GZIPInputStream(buffered) else buffered
 
         val parser = Xml.newPullParser()
@@ -35,6 +39,7 @@ object XmlTvParser {
         val maxTime = now + 48 * 3600 * 1000L // next 48h
 
         var currentChannelId: String? = null
+        var totalProgrammesCount = 0
         var eventType = parser.eventType
 
         while (eventType != XmlPullParser.END_DOCUMENT) {
@@ -49,7 +54,6 @@ object XmlTvParser {
                                 val name = parser.nextText().trim()
                                 if (name.isNotEmpty()) {
                                     aliasToChannelId[name.lowercase()] = currentChannelId
-                                    // Also normalize (remove HD, 4K, spaces)
                                     val clean = normalizeChannelName(name)
                                     if (clean.isNotEmpty()) {
                                         aliasToChannelId[clean] = currentChannelId
@@ -62,7 +66,16 @@ object XmlTvParser {
                             val startStr = parser.getAttributeValue(null, "start")?.trim()
                             val stopStr = parser.getAttributeValue(null, "stop")?.trim()
 
-                            if (!channel.isNullOrBlank() && !startStr.isNullOrBlank() && !stopStr.isNullOrBlank()) {
+                            // If user has specific channels loaded, check if this channel is in their list
+                            val isRelevantChannel = if (targetChannels != null && !channel.isNullOrBlank()) {
+                                targetChannels.contains(channel) ||
+                                targetChannels.contains(channel.lowercase()) ||
+                                targetChannels.contains(normalizeChannelName(channel))
+                            } else true
+
+                            if (!isRelevantChannel || channel.isNullOrBlank() || startStr.isNullOrBlank() || stopStr.isNullOrBlank()) {
+                                skipTag(parser)
+                            } else {
                                 val start = parseXmlDate(startStr)
                                 val stop = parseXmlDate(stopStr)
 
@@ -76,6 +89,7 @@ object XmlTvParser {
                                             when (parser.name) {
                                                 "title" -> title = parser.nextText().trim()
                                                 "desc" -> desc = parser.nextText().trim()
+                                                else -> skipTag(parser)
                                             }
                                         } else if (innerEvent == XmlPullParser.END_TAG && parser.name == "programme") {
                                             break
@@ -95,7 +109,13 @@ object XmlTvParser {
                                                 endTime = stop
                                             )
                                         )
+                                        totalProgrammesCount++
+                                        if (totalProgrammesCount % 1000 == 0) {
+                                            onProgress?.invoke("Индексация: $totalProgrammesCount передач...")
+                                        }
                                     }
+                                } else {
+                                    skipTag(parser)
                                 }
                             }
                         }
@@ -139,7 +159,18 @@ object XmlTvParser {
         return finalMap
     }
 
-    private fun normalizeChannelName(raw: String): String {
+    private fun skipTag(parser: XmlPullParser) {
+        if (parser.eventType != XmlPullParser.START_TAG) return
+        var depth = 1
+        while (depth != 0) {
+            when (parser.next()) {
+                XmlPullParser.END_TAG -> depth--
+                XmlPullParser.START_TAG -> depth++
+            }
+        }
+    }
+
+    fun normalizeChannelName(raw: String): String {
         return raw.lowercase()
             .replace(Regex("\\[.*?\\]|\\(.*?\\)"), "")
             .replace(Regex("\\b(hd|fhd|4k|uhd|sd|50fps|orig|hevc)\\b"), "")
@@ -148,44 +179,38 @@ object XmlTvParser {
     }
 
     /**
-     * Thread-safe, flexible XMLTV date parser supporting:
+     * Blazing fast, thread-safe XMLTV date parser without SimpleDateFormat allocations:
      * - "20261103120000 +0300"
      * - "20261103120000 +03:00"
      * - "20261103120000"
-     * - "2026-11-03 12:00:00 +0300"
-     * - "2026-11-03 12:00:00"
      */
     fun parseXmlDate(dateStr: String): Long? {
-        val trimmed = dateStr.trim()
-        if (trimmed.length < 14) return null
-
+        val s = dateStr.trim()
+        if (s.length < 14) return null
         return try {
-            // Check for timezone offset (+0300, -0500, +03:00)
-            val plusIdx = trimmed.indexOf('+')
-            val minusIdx = if (plusIdx == -1) trimmed.indexOf('-', 8) else -1
-            val tzIdx = if (plusIdx != -1) plusIdx else minusIdx
+            val y = s.substring(0, 4).toInt()
+            val m = s.substring(4, 6).toInt()
+            val d = s.substring(6, 8).toInt()
+            val h = s.substring(8, 10).toInt()
+            val min = s.substring(10, 12).toInt()
+            val sec = s.substring(12, 14).toInt()
 
-            if (tzIdx != -1) {
-                val datePartRaw = trimmed.substring(0, tzIdx).trim()
-                var tzPart = trimmed.substring(tzIdx).trim()
-                // Convert +03:00 -> +0300
-                if (tzPart.length == 6 && tzPart[3] == ':') {
-                    tzPart = tzPart.substring(0, 3) + tzPart.substring(4)
+            var offsetMinutes = 0
+            val rest = s.substring(14).trim()
+            if (rest.isNotEmpty() && (rest.startsWith("+") || rest.startsWith("-"))) {
+                val sign = if (rest[0] == '+') 1 else -1
+                val cleanTz = rest.substring(1).replace(":", "")
+                if (cleanTz.length >= 4) {
+                    val tzH = cleanTz.substring(0, 2).toInt()
+                    val tzM = cleanTz.substring(2, 4).toInt()
+                    offsetMinutes = sign * (tzH * 60 + tzM)
                 }
-
-                val cleanDate = datePartRaw.replace("-", "").replace(":", "").replace(" ", "")
-                val candidate = if (cleanDate.length >= 14) cleanDate.take(14) + " " + tzPart else null
-                if (candidate != null) {
-                    val sdf = SimpleDateFormat("yyyyMMddHHmmss Z", Locale.US)
-                    sdf.parse(candidate)?.time
-                } else null
-            } else {
-                val cleanDate = trimmed.replace("-", "").replace(":", "").replace(" ", "").take(14)
-                if (cleanDate.length == 14) {
-                    val sdf = SimpleDateFormat("yyyyMMddHHmmss", Locale.US)
-                    sdf.parse(cleanDate)?.time
-                } else null
             }
+
+            val cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
+            cal.set(y, m - 1, d, h, min, sec)
+            cal.set(java.util.Calendar.MILLISECOND, 0)
+            cal.timeInMillis - (offsetMinutes * 60 * 1000L)
         } catch (_: Exception) {
             null
         }

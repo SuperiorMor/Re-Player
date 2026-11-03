@@ -79,7 +79,7 @@ fun SettingsScreen(
     var showAvailableServers by remember { mutableStateOf(false) }
 
     // IPTV state
-    val iptvManager = remember { IptvManager(context) }
+    val iptvManager = remember { IptvManager.getInstance(context) }
     var iptvPlaylistInput by remember { mutableStateOf(iptvManager.getSavedPlaylistUrl() ?: "") }
     var iptvEpgInput by remember { mutableStateOf(iptvManager.getSavedEpgUrl() ?: "") }
     var editingUrlTarget by remember { mutableStateOf<UrlEditTarget?>(null) }
@@ -129,8 +129,8 @@ fun SettingsScreen(
     val updateActionFocusRequester = remember { FocusRequester() }
 
     LaunchedEffect(updateUiState) {
-        if (updateUiState is UpdateUiState.Downloading || updateUiState is UpdateUiState.ReadyToInstall) {
-            for (d in listOf(50L, 120L, 250L, 500L)) {
+        if (updateUiState !is UpdateUiState.Idle) {
+            for (d in listOf(30L, 80L, 160L, 300L, 500L)) {
                 delay(d)
                 try {
                     updateActionFocusRequester.requestFocus()
@@ -567,24 +567,38 @@ fun SettingsScreen(
                             .width(220.dp)
                             .height(48.dp)
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxSize(),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            if (iptvIsLoading) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(18.dp),
-                                    color = AccentCyan,
-                                    strokeWidth = 2.dp
+                        if (iptvIsLoading) {
+                            val p = (iptvPlaylistProgress ?: 0.5f).coerceIn(0f, 1f)
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(DarkSurface),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxHeight()
+                                        .fillMaxWidth(fraction = p)
+                                        .background(AccentCyan)
                                 )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "Загрузка...",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = AccentCyan
-                                )
-                            } else {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "${(p * 100).toInt()}%",
+                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = if (p > 0.5f) DarkBackground else TextPrimary
+                                    )
+                                }
+                            }
+                        } else {
+                            Row(
+                                modifier = Modifier.fillMaxSize(),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 Icon(
                                     imageVector = Icons.Default.CloudDownload,
                                     contentDescription = null,
@@ -611,24 +625,38 @@ fun SettingsScreen(
                                 .width(190.dp)
                                 .height(48.dp)
                         ) {
-                            Row(
-                                modifier = Modifier.fillMaxSize(),
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                if (iptvEpgProgress != null) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(18.dp),
-                                        color = AccentCyan,
-                                        strokeWidth = 2.dp
+                            if (iptvEpgProgress != null) {
+                                val p = (iptvEpgProgress ?: 0f).coerceIn(0f, 1f)
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(DarkSurface),
+                                    contentAlignment = Alignment.CenterStart
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxHeight()
+                                            .fillMaxWidth(fraction = p)
+                                            .background(AccentCyan)
                                     )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = "${((iptvEpgProgress ?: 0f) * 100).toInt()}%",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = AccentCyan
-                                    )
-                                } else {
+                                    Box(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = if (p >= 1f) "Индексация..." else "${(p * 100).toInt()}%",
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                            color = if (p > 0.5f) DarkBackground else TextPrimary
+                                        )
+                                    }
+                                }
+                            } else {
+                                Row(
+                                    modifier = Modifier.fillMaxSize(),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
                                     Icon(
                                         imageVector = Icons.Default.Tv,
                                         contentDescription = null,
@@ -749,7 +777,7 @@ fun SettingsScreen(
                                 is UpdateUiState.UpToDate -> "У вас установлена актуальная версия"
                                 is UpdateUiState.NoReleases -> "Релизы на GitHub не найдены"
                                 is UpdateUiState.Available -> "Доступна новая версия: ${state.release.tagName}"
-                                is UpdateUiState.Downloading -> "Загрузка обновления: ${(state.progress * 100).toInt()}%"
+                                is UpdateUiState.Downloading -> "Идёт скачивание файла обновления..."
                                 is UpdateUiState.ReadyToInstall -> "Загрузка завершена! Нажмите «Установить»."
                                 is UpdateUiState.Error -> state.message
                                 else -> "Проверка новых версий на GitHub и установка в один клик"
@@ -773,12 +801,13 @@ fun SettingsScreen(
                             modifier = Modifier
                                 .width(170.dp)
                                 .height(44.dp)
+                                .focusRequester(updateActionFocusRequester)
                         ) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(20.dp),
-                                    color = AccentCyan,
-                                    strokeWidth = 2.dp
+                                Text(
+                                    text = "Проверка...",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = AccentCyan
                                 )
                             }
                         }
@@ -834,27 +863,28 @@ fun SettingsScreen(
                                 .height(44.dp)
                                 .focusRequester(updateActionFocusRequester)
                         ) {
+                            val p = downloadProgress.coerceIn(0f, 1f)
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .padding(horizontal = 12.dp),
-                                contentAlignment = Alignment.Center
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(DarkSurface),
+                                contentAlignment = Alignment.CenterStart
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxHeight()
+                                        .fillMaxWidth(fraction = p)
+                                        .background(AccentCyan)
+                                )
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    CircularProgressIndicator(
-                                        progress = { downloadProgress },
-                                        modifier = Modifier.size(16.dp),
-                                        color = AccentCyan,
-                                        strokeWidth = 2.dp
-                                    )
                                     Text(
-                                        text = "${(downloadProgress * 100).toInt()}%",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = AccentCyan,
-                                        fontWeight = FontWeight.Bold
+                                        text = "${(p * 100).toInt()}%",
+                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = if (p > 0.5f) DarkBackground else TextPrimary
                                     )
                                 }
                             }
@@ -897,6 +927,7 @@ fun SettingsScreen(
                             modifier = Modifier
                                 .width(170.dp)
                                 .height(44.dp)
+                                .focusRequester(updateActionFocusRequester)
                         ) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Text(

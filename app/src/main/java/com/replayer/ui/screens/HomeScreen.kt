@@ -49,7 +49,7 @@ fun HomeScreen(
     val context = LocalContext.current
     val favoritesManager = remember { FavoritesManager(context) }
     val recentManager = remember { RecentMediaManager(context) }
-    val iptvManager = remember { IptvManager(context) }
+    val iptvManager = remember { IptvManager.getInstance(context) }
 
     val favorites by favoritesManager.favorites.collectAsState()
     val recentList by recentManager.recentList.collectAsState()
