@@ -34,11 +34,42 @@ class IptvManager(private val context: Context) {
         context.getSharedPreferences("replayer_iptv", Context.MODE_PRIVATE)
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(20, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(180, TimeUnit.SECONDS)
+        .writeTimeout(180, TimeUnit.SECONDS)
         .followRedirects(true)
         .followSslRedirects(true)
+        .addInterceptor { chain ->
+            var req = chain.request()
+            val host = req.url.host
+            // epg.it999.ru and epg.one redirect to a dead origin server; the working Cloudflare CDN endpoint is cdn.epg.one
+            if (host.equals("epg.it999.ru", ignoreCase = true) || host.equals("epg.one", ignoreCase = true)) {
+                val fixedUrl = req.url.newBuilder().host("cdn.epg.one").build()
+                req = req.newBuilder().url(fixedUrl).build()
+            }
+            val resp = chain.proceed(req)
+            if (resp.isRedirect) {
+                val loc = resp.header("Location")
+                if (!loc.isNullOrBlank() && (loc.contains("epg.it999.ru", ignoreCase = true) || loc.contains("://epg.one", ignoreCase = true))) {
+                    val fixedLoc = loc
+                        .replace("epg.it999.ru", "cdn.epg.one", ignoreCase = true)
+                        .replace("://epg.one", "://cdn.epg.one", ignoreCase = true)
+                    resp.close()
+                    return@addInterceptor chain.proceed(req.newBuilder().url(fixedLoc).build())
+                }
+            }
+            resp
+        }
         .build()
+
+    fun normalizeEpgUrl(url: String): String {
+        var u = url.trim()
+        if (u.contains("epg.it999.ru", ignoreCase = true) || u.contains("://epg.one", ignoreCase = true)) {
+            u = u.replace("epg.it999.ru", "cdn.epg.one", ignoreCase = true)
+                 .replace("://epg.one", "://cdn.epg.one", ignoreCase = true)
+        }
+        return u
+    }
 
     private val json = Json { ignoreUnknownKeys = true }
     private val scope = CoroutineScope(Dispatchers.IO)
@@ -234,7 +265,19 @@ class IptvManager(private val context: Context) {
         saveUrlsOnly(cleanPlaylist, cleanEpg)
 
         scope.launch {
-            loadPlaylist(cleanPlaylist, cleanEpg)
+            if (cleanPlaylist.isNotBlank()) {
+                loadPlaylist(cleanPlaylist, cleanEpg)
+            } else if (!cleanEpg.isNullOrBlank()) {
+                fetchEpg(cleanEpg)
+            }
+        }
+    }
+
+    fun loadEpgOnly(epgUrl: String) {
+        val cleanEpg = epgUrl.trim().ifBlank { return }
+        prefs.edit().putString("iptv_epg_url", cleanEpg).apply()
+        scope.launch {
+            fetchEpg(cleanEpg)
         }
     }
 
@@ -311,6 +354,7 @@ class IptvManager(private val context: Context) {
             _statusMessage.value = "Обработка каналов плейлиста..."
 
             val parseResult = tempFile.inputStream().use { M3uParser.parse(it) }
+            try { tempFile.delete() } catch (_: Exception) {}
             _channels.value = parseResult.channels
             saveCachedChannels(parseResult.channels)
 
@@ -324,6 +368,9 @@ class IptvManager(private val context: Context) {
             }
         } catch (e: Exception) {
             _statusMessage.value = "Ошибка: ${e.localizedMessage ?: "Сбой соединения"}"
+            if (!manualEpgUrl.isNullOrBlank()) {
+                try { fetchEpg(manualEpgUrl) } catch (_: Exception) {}
+            }
         } finally {
             _isLoading.value = false
             _playlistProgress.value = null
@@ -332,13 +379,14 @@ class IptvManager(private val context: Context) {
 
     suspend fun fetchEpg(epgUrl: String) = withContext(Dispatchers.IO) {
         if (epgUrl.isBlank()) return@withContext
+        val targetUrl = normalizeEpgUrl(epgUrl)
         _epgProgress.value = 0f
         _statusMessage.value = "Загрузка телепрограммы (EPG)..."
 
         try {
             val req = Request.Builder()
-                .url(epgUrl)
-                .header("User-Agent", "RePlayer-TV")
+                .url(targetUrl)
+                .header("User-Agent", "Mozilla/5.0 (Linux; Android 11; TV) RePlayer-TV")
                 .build()
 
             val resp = client.newCall(req).execute()
@@ -365,6 +413,7 @@ class IptvManager(private val context: Context) {
                             _statusMessage.value = "Загрузка телепрограммы: ${(p * 100).toInt()}%"
                         }
                     }
+                    output.flush()
                 }
             }
 
@@ -374,11 +423,12 @@ class IptvManager(private val context: Context) {
             val parsed = tempFile.inputStream().use { stream ->
                 XmlTvParser.parse(stream)
             }
+            try { tempFile.delete() } catch (_: Exception) {}
             _epgMap.value = parsed
             saveCachedEpg(parsed)
-            _statusMessage.value = "Каналов: ${_channels.value.size}. Телепрограмма обновлена (${parsed.size} источников)."
+            _statusMessage.value = "Телепрограмма обновлена (${parsed.size} источников). Каналов: ${_channels.value.size}"
         } catch (e: Exception) {
-            _statusMessage.value = "Сбой EPG: ${e.localizedMessage ?: "Ошибка"}"
+            _statusMessage.value = "Сбой EPG: ${e.localizedMessage ?: "Сбой соединения"}"
         } finally {
             _epgProgress.value = null
         }

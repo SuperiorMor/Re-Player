@@ -601,6 +601,51 @@ fun SettingsScreen(
                         }
                     }
 
+                    // Dedicated EPG Refresh Button
+                    if (iptvEpgInput.isNotBlank()) {
+                        TvFocusCard(
+                            onClick = {
+                                iptvManager.loadEpgOnly(iptvEpgInput)
+                            },
+                            modifier = Modifier
+                                .width(190.dp)
+                                .height(48.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxSize(),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                if (iptvEpgProgress != null) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        color = AccentCyan,
+                                        strokeWidth = 2.dp
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "${((iptvEpgProgress ?: 0f) * 100).toInt()}%",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = AccentCyan
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.Tv,
+                                        contentDescription = null,
+                                        tint = AccentCyan,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Обновить EPG",
+                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = AccentCyan
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     // Local USB / storage file picker button (Requirement 2)
                     TvFocusCard(
                         onClick = { scanLocalFiles() },
@@ -1234,12 +1279,12 @@ fun SettingsScreen(
 private fun getFriendlyChangelog(version: String, rawChangelog: String): List<String> {
     if (version.contains("0.8")) {
         return listOf(
+            "Стабильная загрузка телепрограммы: авто-маршрутизация CDN для epg.it999.ru и epg.one (исправлен сбой соединения).",
+            "Отдельная кнопка «Обновить EPG» для быстрой загрузки программы передач в один клик.",
             "Плавный фокус пульта: кнопка обновления удерживает фокус при скачивании и сразу открывает установку.",
             "Настройки ТВ: ссылки открывают экранную клавиатуру только при нажатии ОК, без ложных открытий при навигации.",
             "Наглядный прогресс загрузки телепрограммы и плейлистов с процентами.",
-            "Раздел ТВ: категории представлены как папки с сортировкой по времени просмотра и названию.",
-            "Плеер ТВ: время начала и конца текущей передачи, live-таймбар и телепрограмма по отдельной кнопке.",
-            "Главный экран: добавлен раздел телепрограммы избранных каналов в стиле Google TV."
+            "Раздел ТВ: категории представлены как папки с сортировкой по времени просмотра и названию."
         )
     }
 
