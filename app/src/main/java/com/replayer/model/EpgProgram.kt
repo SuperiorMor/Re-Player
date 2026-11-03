@@ -14,6 +14,19 @@ data class EpgProgram(
         return now in startTime..endTime
     }
 
+    fun isPast(now: Long = System.currentTimeMillis()): Boolean {
+        return endTime < now
+    }
+
+    fun isFuture(now: Long = System.currentTimeMillis()): Boolean {
+        return startTime > now
+    }
+
+    fun durationMinutes(): Int {
+        if (endTime <= startTime) return 0
+        return ((endTime - startTime) / (60 * 1000L)).toInt()
+    }
+
     fun progress(now: Long = System.currentTimeMillis()): Float {
         if (endTime <= startTime) return 0f
         return ((now - startTime).toFloat() / (endTime - startTime).toFloat()).coerceIn(0f, 1f)

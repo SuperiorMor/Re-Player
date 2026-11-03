@@ -37,7 +37,7 @@ object XmlTvParser {
         val channelPrograms = mutableMapOf<String, MutableList<EpgProgram>>()
 
         val now = System.currentTimeMillis()
-        val minTime = now - 24 * 3600 * 1000L // last 24h
+        val minTime = now - 7 * 24 * 3600 * 1000L // last 7 days for archive catchup
         val maxTime = now + 48 * 3600 * 1000L // next 48h
 
         var currentChannelId: String? = null

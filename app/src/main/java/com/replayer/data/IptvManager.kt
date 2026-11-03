@@ -110,19 +110,46 @@ class IptvManager private constructor(private val context: Context) {
     private val _watchTimes = MutableStateFlow<Map<String, Long>>(loadWatchTimes())
     val watchTimes: StateFlow<Map<String, Long>> = _watchTimes.asStateFlow()
 
+    private val _lastEpgUpdateText = MutableStateFlow(getEpgLastUpdatedText())
+    val lastEpgUpdateText: StateFlow<String> = _lastEpgUpdateText.asStateFlow()
+
     private var isFetchingEpg = false
 
     init {
         val savedPlaylist = getSavedPlaylistUrl()
         val savedEpg = getSavedEpgUrl()
+        val lastUpdate = getLastEpgUpdateTime()
+        val now = System.currentTimeMillis()
+        val isEpgStale = (now - lastUpdate) > 24 * 3600 * 1000L
 
         if (_channels.value.isEmpty() && !savedPlaylist.isNullOrBlank()) {
             scope.launch {
                 loadPlaylist(savedPlaylist, savedEpg)
             }
-        } else if (!savedEpg.isNullOrBlank() && _epgMap.value.isEmpty()) {
+        } else if (!savedEpg.isNullOrBlank() && (_epgMap.value.isEmpty() || isEpgStale)) {
             scope.launch { fetchEpg(savedEpg) }
         }
+    }
+
+    fun getLastEpgUpdateTime(): Long = prefs.getLong("iptv_epg_last_updated", 0L)
+
+    fun saveLastEpgUpdateTime(time: Long) {
+        prefs.edit().putLong("iptv_epg_last_updated", time).apply()
+        _lastEpgUpdateText.value = getEpgLastUpdatedText()
+    }
+
+    fun getEpgLastUpdatedText(): String {
+        val last = prefs.getLong("iptv_epg_last_updated", 0L)
+        if (last <= 0L) return "Обновить EPG"
+        val diffMs = System.currentTimeMillis() - last
+        if (diffMs < 0) return "Обновлено: только что"
+        val mins = diffMs / (60 * 1000L)
+        if (mins < 1) return "Обновлено: только что"
+        if (mins < 60) return "Обновлено: $mins мин. назад"
+        val hours = mins / 60
+        if (hours < 24) return "Обновлено: $hours ч. назад"
+        val days = hours / 24
+        return "Обновлено: $days дн. назад"
     }
 
     fun getSavedPlaylistUrl(): String? = prefs.getString("iptv_playlist_url", null)
@@ -541,6 +568,7 @@ class IptvManager private constructor(private val context: Context) {
             try { tempFile.delete() } catch (_: Exception) {}
             _epgMap.value = parsed
             saveCachedEpg(parsed)
+            saveLastEpgUpdateTime(System.currentTimeMillis())
             val totalProgs = parsed.values.sumOf { it.size }
             _statusMessage.value = "Телепрограмма обновлена: $totalProgs передач для ${_channels.value.size} каналов"
         } catch (e: Exception) {

@@ -77,7 +77,7 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun UpnpBrowseScreen(
-    onPlayMedia: (MediaItem) -> Unit,
+    onPlayMedia: (MediaItem, List<MediaItem>) -> Unit,
     onNavigateToSettings: () -> Unit,
     onBackToHome: () -> Unit,
     modifier: Modifier = Modifier,
@@ -376,7 +376,8 @@ fun UpnpBrowseScreen(
                                 }
                             } else {
                                 recentManager.addRecent(item.id, item.title, item.uri)
-                                onPlayMedia(item)
+                                val playables = currentItems.filter { it.type != MediaType.DIRECTORY }
+                                onPlayMedia(item, playables)
                             }
                         },
                         modifier = Modifier
@@ -495,7 +496,8 @@ fun UpnpBrowseScreen(
                                 }
                             } else {
                                 recentManager.addRecent(item.id, item.title, item.uri)
-                                onPlayMedia(item)
+                                val playables = currentItems.filter { it.type != MediaType.DIRECTORY }
+                                onPlayMedia(item, playables)
                             }
                         },
                         modifier = Modifier

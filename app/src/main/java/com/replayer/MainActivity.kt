@@ -61,6 +61,7 @@ class MainActivity : ComponentActivity() {
             RePlayerTheme {
                 var selectedNav by remember { mutableStateOf(NavItem.HOME) }
                 var activeMediaItem by remember { mutableStateOf<MediaItem?>(null) }
+                var activePlaylist by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
                 var showExitDialog by remember { mutableStateOf(false) }
                 var initialUpnpFolder by remember { mutableStateOf<Pair<String, String>?>(null) }
                 var lastPlayedMediaId by remember { mutableStateOf<String?>(null) }
@@ -105,9 +106,10 @@ class MainActivity : ComponentActivity() {
                                     }
                                 )
                                 NavItem.UPNP -> UpnpBrowseScreen(
-                                    onPlayMedia = {
-                                        lastPlayedMediaId = it.id
-                                        activeMediaItem = it
+                                    onPlayMedia = { item, playlist ->
+                                        lastPlayedMediaId = item.id
+                                        activeMediaItem = item
+                                        activePlaylist = playlist
                                     },
                                     onNavigateToSettings = { selectedNav = NavItem.SETTINGS },
                                     onBackToHome = { selectedNav = NavItem.HOME },
@@ -135,6 +137,8 @@ class MainActivity : ComponentActivity() {
                     if (activeMediaItem != null) {
                         PlayerScreen(
                             mediaItem = activeMediaItem!!,
+                            playlist = activePlaylist,
+                            onPlayMediaItem = { activeMediaItem = it },
                             onBack = { activeMediaItem = null }
                         )
                     }

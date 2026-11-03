@@ -4,6 +4,7 @@ import android.app.Activity
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -13,81 +14,65 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Audiotrack
 import androidx.compose.material.icons.filled.ClosedCaption
 import androidx.compose.material.icons.filled.Forward10
+import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Replay10
-import androidx.compose.material.icons.filled.MenuBook
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.LinearProgressIndicator
-import com.replayer.data.IptvManager
-import com.replayer.model.IptvChannel
-import com.replayer.model.MediaSourceType
-import kotlinx.coroutines.isActive
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onKeyEvent
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.*
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.viewinterop.AndroidView
-import org.videolan.libvlc.util.VLCVideoLayout
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import com.replayer.data.IptvManager
 import com.replayer.model.AudioTrackInfo
+import com.replayer.model.EpgProgram
+import com.replayer.model.IptvChannel
 import com.replayer.model.MediaItem
+import com.replayer.model.MediaSourceType
 import com.replayer.model.SubtitleTrackInfo
 import com.replayer.player.RePlayerEngine
 import com.replayer.ui.components.TvFocusCard
 import com.replayer.ui.theme.*
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 
 @Composable
 fun PlayerScreen(
     mediaItem: MediaItem,
     onBack: () -> Unit,
+    playlist: List<MediaItem> = emptyList(),
+    onPlayMediaItem: ((MediaItem) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -98,6 +83,7 @@ fun PlayerScreen(
     var showAudioDialog by remember { mutableStateOf(false) }
     var showSubtitleDialog by remember { mutableStateOf(false) }
     var showEpgDialog by remember { mutableStateOf(false) }
+    var osdFeedback by remember { mutableStateOf<String?>(null) }
     var lastInteractionTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
     val isIptv = mediaItem.sourceType == MediaSourceType.IPTV
@@ -138,20 +124,29 @@ fun PlayerScreen(
         }
     }
 
-    // Auto-hide TV controls after 5 seconds of inactivity
-    LaunchedEffect(showControls, lastInteractionTime) {
-        if (showControls) {
+    // Auto-hide TV controls after 5 seconds of inactivity (PAUSED if any dialog is open!)
+    LaunchedEffect(showControls, lastInteractionTime, showAudioDialog, showSubtitleDialog, showEpgDialog) {
+        if (showControls && !showAudioDialog && !showSubtitleDialog && !showEpgDialog) {
             delay(5000)
             showControls = false
         }
     }
 
     // Focus management: when controls are shown, focus play button; when hidden, focus root box
-    LaunchedEffect(showControls) {
+    LaunchedEffect(showControls, showAudioDialog, showSubtitleDialog, showEpgDialog) {
         delay(100)
         try {
-            if (showControls) playButtonFocusRequester.requestFocus() else rootFocusRequester.requestFocus()
+            if (!showAudioDialog && !showSubtitleDialog && !showEpgDialog) {
+                if (showControls) playButtonFocusRequester.requestFocus() else rootFocusRequester.requestFocus()
+            }
         } catch (_: Exception) {}
+    }
+
+    LaunchedEffect(osdFeedback) {
+        if (osdFeedback != null) {
+            delay(3000)
+            osdFeedback = null
+        }
     }
 
     BackHandler(enabled = true) {
@@ -177,10 +172,14 @@ fun PlayerScreen(
             .fillMaxSize()
             .background(Color.Black)
             .focusRequester(rootFocusRequester)
-            .focusable()
+            .focusable(enabled = !showControls && !showAudioDialog && !showSubtitleDialog && !showEpgDialog)
             .onPreviewKeyEvent { keyEvent ->
                 if (keyEvent.type == KeyEventType.KeyDown && (keyEvent.key == Key.Back || keyEvent.key == Key.Escape)) {
-                    if (showAudioDialog || showSubtitleDialog) {
+                    if (showEpgDialog) {
+                        showEpgDialog = false
+                        lastInteractionTime = System.currentTimeMillis()
+                        return@onPreviewKeyEvent true
+                    } else if (showAudioDialog || showSubtitleDialog) {
                         showAudioDialog = false
                         showSubtitleDialog = false
                         lastInteractionTime = System.currentTimeMillis()
@@ -250,9 +249,33 @@ fun PlayerScreen(
                 }
         )
 
+        // OSD Toast / Feedback overlay
+        AnimatedVisibility(
+            visible = osdFeedback != null,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 80.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xEE1A1A24))
+                    .border(1.dp, AccentCyan.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+                    .padding(horizontal = 24.dp, vertical = 12.dp)
+            ) {
+                Text(
+                    text = osdFeedback ?: "",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = AccentCyan
+                )
+            }
+        }
+
         // TV On-Screen Display (OSD) Overlay
         AnimatedVisibility(
-            visible = showControls && !showAudioDialog && !showSubtitleDialog,
+            visible = showControls && !showAudioDialog && !showSubtitleDialog && !showEpgDialog,
             enter = fadeIn(),
             exit = fadeOut()
         ) {
@@ -366,7 +389,14 @@ fun PlayerScreen(
 
                     // Buttons Row for TV Remote
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .focusProperties {
+                                if (isIptv) {
+                                    up = FocusRequester.Cancel
+                                    down = FocusRequester.Cancel
+                                }
+                            },
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -376,6 +406,31 @@ fun PlayerScreen(
                                 contentDescription = "Назад на 10 сек",
                                 onClick = {
                                     engine.seekRelative(-10000)
+                                    lastInteractionTime = System.currentTimeMillis()
+                                }
+                            )
+
+                            Spacer(modifier = Modifier.width(20.dp))
+                        } else {
+                            // IPTV: Previous Program / Rewind to program start
+                            TvPlayerIconButton(
+                                icon = Icons.Default.SkipPrevious,
+                                contentDescription = "Предыдущая передача",
+                                onClick = {
+                                    val now = System.currentTimeMillis()
+                                    val currentIdx = channelSchedule.indexOfFirst { it.isCurrent(now) }
+                                    val prevProg = if (currentIdx > 0) channelSchedule[currentIdx - 1] else null
+                                    if (prevProg != null) {
+                                        val seekDelta = -(now - prevProg.startTime).coerceAtLeast(10000L)
+                                        engine.seekRelative(seekDelta)
+                                        osdFeedback = "Предыдущая: ${prevProg.title} (${prevProg.formattedStartTime()})"
+                                    } else if (currentProgram != null && (now - currentProgram!!.startTime) > 15000L) {
+                                        val seekDelta = -(now - currentProgram!!.startTime)
+                                        engine.seekRelative(seekDelta)
+                                        osdFeedback = "К началу: ${currentProgram!!.title}"
+                                    } else {
+                                        osdFeedback = "Предыдущая передача не найдена"
+                                    }
                                     lastInteractionTime = System.currentTimeMillis()
                                 }
                             )
@@ -401,6 +456,25 @@ fun PlayerScreen(
                                 contentDescription = "Вперед на 10 сек",
                                 onClick = {
                                     engine.seekRelative(10000)
+                                    lastInteractionTime = System.currentTimeMillis()
+                                }
+                            )
+
+                            Spacer(modifier = Modifier.width(20.dp))
+
+                            // Next Episode / File in folder
+                            val currentFileIdx = playlist.indexOfFirst { it.id == mediaItem.id }
+                            val nextFile = if (currentFileIdx in 0 until playlist.size - 1) playlist[currentFileIdx + 1] else null
+                            TvPlayerIconButton(
+                                icon = Icons.Default.SkipNext,
+                                contentDescription = "Следующая серия",
+                                onClick = {
+                                    if (nextFile != null) {
+                                        osdFeedback = "Следующая серия: ${nextFile.title}"
+                                        onPlayMediaItem?.invoke(nextFile)
+                                    } else {
+                                        osdFeedback = "Следующая серия отсутствует"
+                                    }
                                     lastInteractionTime = System.currentTimeMillis()
                                 }
                             )
@@ -433,10 +507,10 @@ fun PlayerScreen(
                         if (isIptv) {
                             Spacer(modifier = Modifier.width(16.dp))
 
-                            // EPG Schedule Button (Requirement 11)
+                            // EPG Schedule Button (Accordion & Archives)
                             TvPlayerIconButton(
                                 icon = Icons.Default.MenuBook,
-                                contentDescription = "Телепрограмма",
+                                contentDescription = "Телепрограмма и архив",
                                 onClick = {
                                     showEpgDialog = true
                                     lastInteractionTime = System.currentTimeMillis()
@@ -476,124 +550,32 @@ fun PlayerScreen(
             )
         }
 
-        // IPTV EPG Schedule Dialog (Requirement 11)
+        // IPTV EPG Schedule Dialog (Accordion & Archives)
         if (showEpgDialog) {
-            androidx.compose.ui.window.Dialog(onDismissRequest = { showEpgDialog = false }) {
-                Box(
-                    modifier = Modifier
-                        .width(540.dp)
-                        .height(480.dp)
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(DarkCard)
-                        .border(1.dp, AccentCyan.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
-                        .padding(24.dp)
-                ) {
-                    Column {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = mediaItem.title,
-                                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                                    color = TextPrimary,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = "Телепрограмма",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = TextSecondary
-                                )
-                            }
-                            TvFocusCard(
-                                onClick = { showEpgDialog = false },
-                                modifier = Modifier
-                                    .width(110.dp)
-                                    .height(40.dp)
-                            ) {
-                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    Text("Закрыть", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
-                                }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        if (channelSchedule.isEmpty()) {
-                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text(
-                                    text = "Для этого канала нет данных программы передач",
-                                    color = TextSecondary,
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
-                            }
-                        } else {
-                            LazyColumn(
-                                modifier = Modifier.fillMaxSize(),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                items(channelSchedule) { prog ->
-                                    val isCurrent = prog.isCurrent()
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clip(RoundedCornerShape(10.dp))
-                                            .background(if (isCurrent) AccentCyan.copy(alpha = 0.15f) else DarkSurface)
-                                            .border(
-                                                width = if (isCurrent) 1.dp else 0.dp,
-                                                color = if (isCurrent) AccentCyan else Color.Transparent,
-                                                shape = RoundedCornerShape(10.dp)
-                                            )
-                                            .padding(12.dp)
-                                    ) {
-                                        Column {
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Text(
-                                                    text = prog.formattedTimeRange(),
-                                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                                    color = if (isCurrent) AccentCyan else TextSecondary
-                                                )
-                                                if (isCurrent) {
-                                                    Text(
-                                                        text = "СЕЙЧАС В ЭФИРЕ",
-                                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                                        color = AccentCyan
-                                                    )
-                                                }
-                                            }
-                                            Spacer(modifier = Modifier.height(4.dp))
-                                            Text(
-                                                text = prog.title,
-                                                style = MaterialTheme.typography.bodyMedium.copy(
-                                                    fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal
-                                                ),
-                                                color = TextPrimary
-                                            )
-                                            if (!prog.description.isNullOrBlank()) {
-                                                Spacer(modifier = Modifier.height(2.dp))
-                                                Text(
-                                                    text = prog.description,
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = TextSecondary,
-                                                    maxLines = 2,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+            EpgAccordionDialog(
+                channelTitle = mediaItem.title,
+                programs = channelSchedule,
+                onSelectProgram = { prog ->
+                    val now = System.currentTimeMillis()
+                    if (prog.isCurrent(now)) {
+                        val seekDelta = -(now - prog.startTime)
+                        engine.seekRelative(seekDelta)
+                        osdFeedback = "К началу эфира: ${prog.title}"
+                    } else if (prog.isPast(now)) {
+                        val seekDelta = -(now - prog.startTime)
+                        engine.seekRelative(seekDelta)
+                        osdFeedback = "Архив: ${prog.title} (${prog.formattedStartTime()})"
+                    } else {
+                        osdFeedback = "Передача еще не началась"
                     }
+                    showEpgDialog = false
+                    lastInteractionTime = System.currentTimeMillis()
+                },
+                onDismiss = {
+                    showEpgDialog = false
+                    lastInteractionTime = System.currentTimeMillis()
                 }
-            }
+            )
         }
     }
 }
@@ -721,15 +703,23 @@ fun AudioTrackDialog(
     onDismiss: () -> Unit
 ) {
     val firstFocusRequester = remember { FocusRequester() }
+    val closeFocusRequester = remember { FocusRequester() }
 
     LaunchedEffect(Unit) {
-        delay(100)
+        delay(120)
         try {
-            firstFocusRequester.requestFocus()
+            if (tracks.isNotEmpty()) {
+                firstFocusRequester.requestFocus()
+            } else {
+                closeFocusRequester.requestFocus()
+            }
         } catch (_: Exception) {}
     }
 
-    Dialog(onDismissRequest = onDismiss) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
         Box(
             modifier = Modifier
                 .width(480.dp)
@@ -739,12 +729,30 @@ fun AudioTrackDialog(
                 .padding(24.dp)
         ) {
             Column {
-                Text(
-                    text = "Выбор аудиодорожки",
-                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                    color = TextPrimary,
-                    modifier = Modifier.padding(bottom = 16.dp)
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Выбор аудиодорожки",
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                        color = TextPrimary
+                    )
+                    TvFocusCard(
+                        onClick = onDismiss,
+                        modifier = Modifier
+                            .width(100.dp)
+                            .height(36.dp)
+                            .then(if (tracks.isEmpty()) Modifier.focusRequester(closeFocusRequester) else Modifier)
+                    ) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text("Закрыть", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
 
                 if (tracks.isEmpty()) {
                     Text(
@@ -755,31 +763,37 @@ fun AudioTrackDialog(
                     )
                 }
 
-                tracks.forEachIndexed { index, track ->
-                    val isFirst = index == 0
-                    val isSelected = track.id == selectedId
-                    TvFocusCard(
-                        onClick = { onSelect(track) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(56.dp)
-                            .padding(vertical = 4.dp)
-                            .then(if (isFirst) Modifier.focusRequester(firstFocusRequester) else Modifier)
-                    ) {
-                        Row(
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 300.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    itemsIndexed(tracks) { index, track ->
+                        val isFirst = index == 0
+                        val isSelected = track.id == selectedId
+                        TvFocusCard(
+                            onClick = { onSelect(track) },
                             modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 16.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                                .fillMaxWidth()
+                                .height(52.dp)
+                                .then(if (isFirst) Modifier.focusRequester(firstFocusRequester) else Modifier)
                         ) {
-                            Text(
-                                text = track.label,
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = if (isSelected) AccentCyan else TextPrimary,
-                                modifier = Modifier.weight(1f)
-                            )
-                            if (isSelected) {
-                                Text(text = "✓", color = AccentCyan, fontWeight = FontWeight.Bold)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 16.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = track.label,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = if (isSelected) AccentCyan else TextPrimary,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (isSelected) {
+                                    Text(text = "✓", color = AccentCyan, fontWeight = FontWeight.Bold)
+                                }
                             }
                         }
                     }
@@ -799,13 +813,16 @@ fun SubtitleTrackDialog(
     val firstFocusRequester = remember { FocusRequester() }
 
     LaunchedEffect(Unit) {
-        delay(100)
+        delay(120)
         try {
             firstFocusRequester.requestFocus()
         } catch (_: Exception) {}
     }
 
-    Dialog(onDismissRequest = onDismiss) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
         Box(
             modifier = Modifier
                 .width(480.dp)
@@ -815,62 +832,322 @@ fun SubtitleTrackDialog(
                 .padding(24.dp)
         ) {
             Column {
-                Text(
-                    text = "Выбор субтитров",
-                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                    color = TextPrimary,
-                    modifier = Modifier.padding(bottom = 16.dp)
-                )
-
-                TvFocusCard(
-                    onClick = { onSelect(null) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp)
-                        .padding(vertical = 4.dp)
-                        .focusRequester(firstFocusRequester)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
+                    Text(
+                        text = "Выбор субтитров",
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                        color = TextPrimary
+                    )
+                    TvFocusCard(
+                        onClick = onDismiss,
                         modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 16.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                            .width(100.dp)
+                            .height(36.dp)
                     ) {
-                        Text(
-                            text = "Отключить субтитры",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = if (selectedId == null) AccentCyan else TextPrimary,
-                            modifier = Modifier.weight(1f)
-                        )
-                        if (selectedId == null) {
-                            Text(text = "✓", color = AccentCyan, fontWeight = FontWeight.Bold)
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text("Закрыть", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
                         }
                     }
                 }
 
-                tracks.forEach { track ->
-                    val isSelected = track.id == selectedId
-                    TvFocusCard(
-                        onClick = { onSelect(track) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(56.dp)
-                            .padding(vertical = 4.dp)
-                    ) {
-                        Row(
+                Spacer(modifier = Modifier.height(16.dp))
+
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 300.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    item {
+                        TvFocusCard(
+                            onClick = { onSelect(null) },
                             modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 16.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                                .fillMaxWidth()
+                                .height(52.dp)
+                                .focusRequester(firstFocusRequester)
                         ) {
-                            Text(
-                                text = track.label,
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = if (isSelected) AccentCyan else TextPrimary,
-                                modifier = Modifier.weight(1f)
-                            )
-                            if (isSelected) {
-                                Text(text = "✓", color = AccentCyan, fontWeight = FontWeight.Bold)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 16.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Отключить субтитры",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = if (selectedId == null) AccentCyan else TextPrimary,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (selectedId == null) {
+                                    Text(text = "✓", color = AccentCyan, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+
+                    items(tracks) { track ->
+                        val isSelected = track.id == selectedId
+                        TvFocusCard(
+                            onClick = { onSelect(track) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(52.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 16.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = track.label,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = if (isSelected) AccentCyan else TextPrimary,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (isSelected) {
+                                    Text(text = "✓", color = AccentCyan, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun EpgAccordionDialog(
+    channelTitle: String,
+    programs: List<EpgProgram>,
+    onSelectProgram: (EpgProgram) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val now = remember { System.currentTimeMillis() }
+    val currentProgIndex = remember(programs) {
+        val idx = programs.indexOfFirst { it.isCurrent(now) }
+        if (idx >= 0) idx else programs.indexOfFirst { it.startTime > now }.let { if (it > 0) it - 1 else 0 }
+    }
+    var focusedIndex by remember { mutableIntStateOf(currentProgIndex.coerceAtLeast(0)) }
+    val initialFocusRequester = remember { FocusRequester() }
+    val closeFocusRequester = remember { FocusRequester() }
+    val listState = rememberLazyListState()
+
+    LaunchedEffect(Unit) {
+        delay(120)
+        try {
+            if (programs.isNotEmpty()) {
+                val scrollTarget = (currentProgIndex - 1).coerceAtLeast(0)
+                listState.scrollToItem(scrollTarget)
+                initialFocusRequester.requestFocus()
+            } else {
+                closeFocusRequester.requestFocus()
+            }
+        } catch (_: Exception) {}
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .width(620.dp)
+                .height(560.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(DarkCard)
+                .border(1.dp, AccentCyan.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
+                .padding(24.dp)
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = channelTitle,
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                            color = TextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "Телепрограмма и архив (↑ назад / ↓ вперед)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary
+                        )
+                    }
+                    TvFocusCard(
+                        onClick = onDismiss,
+                        modifier = Modifier
+                            .width(100.dp)
+                            .height(36.dp)
+                            .then(if (programs.isEmpty()) Modifier.focusRequester(closeFocusRequester) else Modifier)
+                    ) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text("Закрыть", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                if (programs.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            text = "Для этого канала нет данных программы передач",
+                            color = TextSecondary,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        itemsIndexed(programs) { index, prog ->
+                            val isItemCurrent = prog.isCurrent(now)
+                            val isItemPast = prog.isPast(now)
+                            val isExpanded = (index == focusedIndex)
+                            val isInitialTarget = (index == currentProgIndex)
+
+                            TvFocusCard(
+                                onClick = { onSelectProgram(prog) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .animateContentSize()
+                                    .onFocusChanged { focusState ->
+                                        if (focusState.isFocused) {
+                                            focusedIndex = index
+                                        }
+                                    }
+                                    .then(if (isInitialTarget) Modifier.focusRequester(initialFocusRequester) else Modifier)
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = if (isExpanded) 14.dp else 10.dp)
+                                ) {
+                                    if (isExpanded) {
+                                        // Expanded Accordion Program View
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "${prog.formattedTimeRange()} (${prog.durationMinutes()} мин.)",
+                                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                                                color = AccentCyan
+                                            )
+
+                                            val badgeText = when {
+                                                isItemCurrent -> "В ЭФИРЕ"
+                                                isItemPast -> "АРХИВ"
+                                                else -> "СКОРО"
+                                            }
+                                            val badgeColor = when {
+                                                isItemCurrent -> AccentCyan
+                                                isItemPast -> Color(0xFF81C784)
+                                                else -> TextSecondary
+                                            }
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .background(badgeColor.copy(alpha = 0.2f))
+                                                    .border(1.dp, badgeColor, RoundedCornerShape(6.dp))
+                                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                                            ) {
+                                                Text(
+                                                    text = badgeText,
+                                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                                    color = badgeColor
+                                                )
+                                            }
+                                        }
+
+                                        if (isItemCurrent) {
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            LinearProgressIndicator(
+                                                progress = { prog.progress(now) },
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(6.dp)
+                                                    .clip(RoundedCornerShape(3.dp)),
+                                                color = AccentCyan,
+                                                trackColor = DarkSurface
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Text(
+                                            text = prog.title,
+                                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                            color = TextPrimary
+                                        )
+
+                                        if (!prog.description.isNullOrBlank()) {
+                                            Spacer(modifier = Modifier.height(6.dp))
+                                            Text(
+                                                text = prog.description,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = TextSecondary
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Text(
+                                            text = if (isItemPast) "▶ Нажмите OK для просмотра записи из архива" else if (isItemCurrent) "▶ В эфире сейчас (OK - к началу)" else "⏰ Запланировано в эфире",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = if (isItemPast || isItemCurrent) AccentCyan else TextSecondary
+                                        )
+                                    } else {
+                                        // Collapsed Compact View
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = prog.formattedStartTime(),
+                                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                                color = if (isItemCurrent) AccentCyan else TextSecondary,
+                                                modifier = Modifier.width(55.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text(
+                                                text = prog.title,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = if (isItemCurrent) AccentCyan else TextPrimary,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            if (isItemCurrent) {
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Text(
+                                                    text = "В ЭФИРЕ",
+                                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                                    color = AccentCyan
+                                                )
+                                            } else if (isItemPast) {
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Text(
+                                                    text = "Архив",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = Color(0xFF81C784)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

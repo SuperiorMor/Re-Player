@@ -88,6 +88,7 @@ fun SettingsScreen(
     val iptvPlaylistProgress by iptvManager.playlistProgress.collectAsState()
     val iptvEpgProgress by iptvManager.epgProgress.collectAsState()
     val iptvStatusMessage by iptvManager.statusMessage.collectAsState()
+    val lastEpgUpdateText by iptvManager.lastEpgUpdateText.collectAsState()
 
     var showLocalFileDialog by remember { mutableStateOf(false) }
     var localFiles by remember { mutableStateOf<List<File>>(emptyList()) }
@@ -448,112 +449,7 @@ fun SettingsScreen(
                     )
                 }
 
-                // Playlist URL Card (Replaces raw TextField so D-pad navigation never opens keyboard accidentally)
-                TvFocusCard(
-                    onClick = {
-                        editingUrlValue = iptvPlaylistInput
-                        editingUrlTarget = UrlEditTarget.PLAYLIST
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(60.dp)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "URL плейлиста (.m3u / .m3u8)",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = AccentCyan
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = if (iptvPlaylistInput.isNotBlank()) iptvPlaylistInput else "Нажмите для ввода или изменения ссылки",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = if (iptvPlaylistInput.isNotBlank()) TextPrimary else TextSecondary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Icon(
-                            imageVector = Icons.Default.Edit,
-                            contentDescription = "Редактировать",
-                            tint = AccentCyan,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                }
-
-                // EPG URL Card (Replaces raw TextField so D-pad navigation never opens keyboard accidentally)
-                TvFocusCard(
-                    onClick = {
-                        editingUrlValue = iptvEpgInput
-                        editingUrlTarget = UrlEditTarget.EPG
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(60.dp)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "URL программы передач (.xml / .xml.gz, необязательно)",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = AccentCyan
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = if (iptvEpgInput.isNotBlank()) iptvEpgInput else "Нажмите для ввода или изменения ссылки (необязательно)",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = if (iptvEpgInput.isNotBlank()) TextPrimary else TextSecondary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Icon(
-                            imageVector = Icons.Default.Edit,
-                            contentDescription = "Редактировать",
-                            tint = AccentCyan,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                }
-
-                // Live download progress bar (Requirement 1)
-                if (iptvPlaylistProgress != null || iptvEpgProgress != null || iptvIsLoading) {
-                    val progVal = iptvEpgProgress ?: iptvPlaylistProgress ?: 0f
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        LinearProgressIndicator(
-                            progress = { progVal },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(8.dp)
-                                .clip(RoundedCornerShape(4.dp)),
-                            color = AccentCyan,
-                            trackColor = DarkSurface
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = iptvStatusMessage ?: "Загрузка...",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = AccentCyan
-                        )
-                    }
-                }
-
+                // Row 1: Playlist URL + "Выбрать файл с флешки"
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -561,18 +457,58 @@ fun SettingsScreen(
                 ) {
                     TvFocusCard(
                         onClick = {
-                            iptvManager.saveConfigAndLoad(iptvPlaylistInput, iptvEpgInput)
+                            editingUrlValue = iptvPlaylistInput
+                            editingUrlTarget = UrlEditTarget.PLAYLIST
                         },
                         modifier = Modifier
-                            .width(220.dp)
-                            .height(48.dp)
+                            .weight(1f)
+                            .height(60.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "URL плейлиста (.m3u / .m3u8)",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = AccentCyan
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = if (iptvPlaylistInput.isNotBlank()) iptvPlaylistInput else "Нажмите для ввода ссылки",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = if (iptvPlaylistInput.isNotBlank()) TextPrimary else TextSecondary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Icon(
+                                imageVector = Icons.Default.Edit,
+                                contentDescription = "Редактировать",
+                                tint = AccentCyan,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+
+                    // Button: "Выбрать с флешки" (shows loading status if downloading playlist)
+                    TvFocusCard(
+                        onClick = { scanLocalFiles() },
+                        modifier = Modifier
+                            .width(260.dp)
+                            .height(60.dp)
                     ) {
                         if (iptvIsLoading) {
                             val p = (iptvPlaylistProgress ?: 0.5f).coerceIn(0f, 1f)
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .clip(RoundedCornerShape(8.dp))
+                                    .clip(RoundedCornerShape(10.dp))
                                     .background(DarkSurface),
                                 contentAlignment = Alignment.CenterStart
                             ) {
@@ -587,7 +523,7 @@ fun SettingsScreen(
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
-                                        text = "${(p * 100).toInt()}%",
+                                        text = if (p >= 1f) "Загрузка каналов..." else "Загрузка: ${(p * 100).toInt()}%",
                                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                                         color = if (p > 0.5f) DarkBackground else TextPrimary
                                     )
@@ -595,124 +531,167 @@ fun SettingsScreen(
                             }
                         } else {
                             Row(
-                                modifier = Modifier.fillMaxSize(),
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 16.dp),
                                 horizontalArrangement = Arrangement.Center,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.CloudDownload,
+                                    imageVector = Icons.Default.Folder,
                                     contentDescription = null,
                                     tint = AccentCyan,
-                                    modifier = Modifier.size(20.dp)
+                                    modifier = Modifier.size(22.dp)
                                 )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "Загрузить по ссылке",
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = AccentCyan
-                                )
-                            }
-                        }
-                    }
-
-                    // Dedicated EPG Refresh Button
-                    if (iptvEpgInput.isNotBlank()) {
-                        TvFocusCard(
-                            onClick = {
-                                iptvManager.loadEpgOnly(iptvEpgInput)
-                            },
-                            modifier = Modifier
-                                .width(190.dp)
-                                .height(48.dp)
-                        ) {
-                            if (iptvEpgProgress != null) {
-                                val p = (iptvEpgProgress ?: 0f).coerceIn(0f, 1f)
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(DarkSurface),
-                                    contentAlignment = Alignment.CenterStart
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxHeight()
-                                            .fillMaxWidth(fraction = p)
-                                            .background(AccentCyan)
-                                    )
-                                    Box(
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = if (p >= 1f) "Индексация..." else "${(p * 100).toInt()}%",
-                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                            color = if (p > 0.5f) DarkBackground else TextPrimary
-                                        )
-                                    }
-                                }
-                            } else {
-                                Row(
-                                    modifier = Modifier.fillMaxSize(),
-                                    horizontalArrangement = Arrangement.Center,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Tv,
-                                        contentDescription = null,
-                                        tint = AccentCyan,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
                                     Text(
-                                        text = "Обновить EPG",
+                                        text = if (isScanningLocalFiles) "Поиск файлов..." else "Выбрать с флешки",
                                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = AccentCyan
+                                        color = TextPrimary
+                                    )
+                                    Text(
+                                        text = "Файл .m3u / .m3u8",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = TextSecondary
                                     )
                                 }
                             }
                         }
                     }
+                }
 
-                    // Local USB / storage file picker button (Requirement 2)
+                // Row 2: EPG URL + "Обновлено: X ч. назад" (Click = force refresh, progress like "Проверить обновления")
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     TvFocusCard(
-                        onClick = { scanLocalFiles() },
+                        onClick = {
+                            editingUrlValue = iptvEpgInput
+                            editingUrlTarget = UrlEditTarget.EPG
+                        },
                         modifier = Modifier
-                            .width(240.dp)
-                            .height(48.dp)
+                            .weight(1f)
+                            .height(60.dp)
                     ) {
                         Row(
-                            modifier = Modifier.fillMaxSize(),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "URL программы передач (.xml / .xml.gz)",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = AccentCyan
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = if (iptvEpgInput.isNotBlank()) iptvEpgInput else "Нажмите для ввода ссылки",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = if (iptvEpgInput.isNotBlank()) TextPrimary else TextSecondary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
                             Icon(
-                                imageVector = Icons.Default.Folder,
-                                contentDescription = null,
+                                imageVector = Icons.Default.Edit,
+                                contentDescription = "Редактировать",
                                 tint = AccentCyan,
                                 modifier = Modifier.size(20.dp)
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = if (isScanningLocalFiles) "Поиск файлов..." else "Выбрать файл с флешки",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = TextPrimary
-                            )
                         }
                     }
 
-                    if (!iptvStatusMessage.isNullOrBlank() && iptvPlaylistProgress == null && iptvEpgProgress == null) {
-                        Text(
-                            text = iptvStatusMessage ?: "",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (iptvStatusMessage?.contains("Ошибка", ignoreCase = true) == true) {
-                                Color(0xFFFF5252)
-                            } else {
-                                AccentCyan
-                            },
-                            modifier = Modifier.padding(start = 12.dp)
-                        )
+                    // Button: "Обновлено: X ч. назад"
+                    TvFocusCard(
+                        onClick = {
+                            if (iptvEpgInput.isNotBlank()) {
+                                iptvManager.loadEpgOnly(iptvEpgInput)
+                            } else if (iptvPlaylistInput.isNotBlank()) {
+                                iptvManager.refreshPlaylist()
+                            }
+                        },
+                        modifier = Modifier
+                            .width(260.dp)
+                            .height(60.dp)
+                    ) {
+                        if (iptvEpgProgress != null) {
+                            val p = (iptvEpgProgress ?: 0f).coerceIn(0f, 1f)
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(DarkSurface),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxHeight()
+                                        .fillMaxWidth(fraction = p)
+                                        .background(AccentCyan)
+                                )
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = if (p >= 1f) "Индексация..." else "EPG: ${(p * 100).toInt()}%",
+                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = if (p > 0.5f) DarkBackground else TextPrimary
+                                    )
+                                }
+                            }
+                        } else {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 16.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = null,
+                                    tint = AccentCyan,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                    Text(
+                                        text = lastEpgUpdateText,
+                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = AccentCyan,
+                                        maxLines = 1
+                                    )
+                                    Text(
+                                        text = "Нажмите для обновления",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = TextSecondary
+                                    )
+                                }
+                            }
+                        }
                     }
+                }
+
+                // Status message under the IPTV rows
+                if (!iptvStatusMessage.isNullOrBlank()) {
+                    Text(
+                        text = iptvStatusMessage ?: "",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (iptvStatusMessage?.contains("Ошибка", ignoreCase = true) == true || iptvStatusMessage?.contains("Сбой", ignoreCase = true) == true) {
+                            Color(0xFFFF5252)
+                        } else {
+                            AccentCyan
+                        },
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
                 }
             }
         }
@@ -1269,10 +1248,10 @@ fun SettingsScreen(
                                 val clean = editingUrlValue.trim()
                                 if (target == UrlEditTarget.PLAYLIST) {
                                     iptvPlaylistInput = clean
-                                    iptvManager.saveUrlsOnly(clean, iptvEpgInput)
+                                    iptvManager.saveConfigAndLoad(clean, iptvEpgInput)
                                 } else {
                                     iptvEpgInput = clean
-                                    iptvManager.saveUrlsOnly(iptvPlaylistInput, clean)
+                                    iptvManager.saveConfigAndLoad(iptvPlaylistInput, clean)
                                 }
                                 editingUrlTarget = null
                             },
