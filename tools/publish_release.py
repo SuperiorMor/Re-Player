@@ -52,26 +52,24 @@ def main():
     repo = "SuperiorMor/Re-Player"
     api_url = f"https://api.github.com/repos/{repo}/actions/runs?per_page=10"
 
+    # Give GitHub 10 seconds to register the new push
+    time.sleep(10)
+
     run_id = None
-    for attempt in range(20):
+    for attempt in range(25):
         try:
             req = urllib.request.Request(api_url, headers={"User-Agent": "ReleaseBot"})
             with urllib.request.urlopen(req) as resp:
                 data = json.loads(resp.read().decode())
-                matching_runs = []
                 for r in data.get("workflow_runs", []):
                     if r.get("head_branch") == tag or (r.get("event") == "push" and r.get("head_branch") == tag):
-                        matching_runs.append(r)
-                
-                # Prefer active runs (in_progress or queued)
-                for r in matching_runs:
-                    if r.get("status") in ["queued", "in_progress"]:
-                        run_id = r.get("id")
-                        break
-                
-                if not run_id and matching_runs:
-                    # Otherwise pick the newest one
-                    run_id = matching_runs[0].get("id")
+                        # Only pick if queued or in_progress, or if attempt > 5
+                        if r.get("status") in ["queued", "in_progress"]:
+                            run_id = r.get("id")
+                            break
+                        elif attempt > 5 and r.get("conclusion") != "failure":
+                            run_id = r.get("id")
+                            break
             if run_id:
                 break
         except Exception:
