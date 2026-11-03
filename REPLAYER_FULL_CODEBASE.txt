@@ -1,10 +1,10 @@
 ================================================================================
-PROJECT: Re:Player (Android TV Media Player v0.6.0)
+PROJECT: Re:Player (Android TV Media Player v0.7.0)
 COMPLETE SINGLE-FILE CODEBASE ARCHIVE
-Package: com.replayer | Target SDK: 35 | Compose Android TV + LibVLC (DLNA ONLY)
+Package: com.replayer | Target SDK: 35 | Compose Android TV + LibVLC (DLNA + IPTV)
 ================================================================================
 
-### TABLE OF CONTENTS (ALL FILES INCLUDED IN THIS ARCHIVE):
+СПИСОК ФАЙЛОВ:
  1. gradle/libs.versions.toml
  2. settings.gradle.kts
  3. build.gradle.kts
@@ -23,33 +23,37 @@ Package: com.replayer | Target SDK: 35 | Compose Android TV + LibVLC (DLNA ONLY)
 16. app/src/main/java/com/replayer/model/TrackInfo.kt
 17. app/src/main/java/com/replayer/model/ViewMode.kt
 18. app/src/main/java/com/replayer/model/FavoriteFolder.kt
-19. app/src/main/java/com/replayer/data/ServerConfigManager.kt
-20. app/src/main/java/com/replayer/data/FavoritesManager.kt
-21. app/src/main/java/com/replayer/network/upnp/SsdpDiscovery.kt
-22. app/src/main/java/com/replayer/network/upnp/UpnpDeviceParser.kt
-23. app/src/main/java/com/replayer/network/upnp/ContentDirectoryService.kt
-24. app/src/main/java/com/replayer/player/RePlayerEngine.kt
-25. app/src/main/java/com/replayer/player/RePlayerState.kt
-26. app/src/main/java/com/replayer/ui/components/TvFocusCard.kt
-27. app/src/main/java/com/replayer/ui/components/TvNavigationRail.kt
-28. app/src/main/java/com/replayer/ui/screens/HomeScreen.kt
-29. app/src/main/java/com/replayer/ui/screens/UpnpBrowseScreen.kt
-30. app/src/main/java/com/replayer/ui/screens/PlayerScreen.kt
-31. app/src/main/java/com/replayer/ui/screens/SettingsScreen.kt
-32. app/src/main/java/com/replayer/ui/theme/Color.kt
-33. app/src/main/java/com/replayer/ui/theme/Theme.kt
-34. app/src/main/java/com/replayer/ui/theme/Type.kt
-35. app/src/main/java/com/replayer/updater/UpdateManager.kt
-36. .github/workflows/build.yml
-================================================================================
-START OF SOURCE FILES
+19. app/src/main/java/com/replayer/model/RecentMedia.kt
+20. app/src/main/java/com/replayer/model/IptvChannel.kt
+21. app/src/main/java/com/replayer/model/EpgProgram.kt
+22. app/src/main/java/com/replayer/data/ServerConfigManager.kt
+23. app/src/main/java/com/replayer/data/FavoritesManager.kt
+24. app/src/main/java/com/replayer/data/RecentMediaManager.kt
+25. app/src/main/java/com/replayer/data/IptvManager.kt
+26. app/src/main/java/com/replayer/network/upnp/SsdpDiscovery.kt
+27. app/src/main/java/com/replayer/network/upnp/UpnpDeviceParser.kt
+28. app/src/main/java/com/replayer/network/upnp/ContentDirectoryService.kt
+29. app/src/main/java/com/replayer/network/iptv/M3uParser.kt
+30. app/src/main/java/com/replayer/network/iptv/XmlTvParser.kt
+31. app/src/main/java/com/replayer/player/RePlayerEngine.kt
+32. app/src/main/java/com/replayer/player/RePlayerState.kt
+33. app/src/main/java/com/replayer/ui/components/TvFocusCard.kt
+34. app/src/main/java/com/replayer/ui/components/TvNavigationRail.kt
+35. app/src/main/java/com/replayer/ui/screens/HomeScreen.kt
+36. app/src/main/java/com/replayer/ui/screens/UpnpBrowseScreen.kt
+37. app/src/main/java/com/replayer/ui/screens/IptvScreen.kt
+38. app/src/main/java/com/replayer/ui/screens/PlayerScreen.kt
+39. app/src/main/java/com/replayer/ui/screens/SettingsScreen.kt
+40. app/src/main/java/com/replayer/ui/theme/Color.kt
+41. app/src/main/java/com/replayer/ui/theme/Theme.kt
+42. app/src/main/java/com/replayer/ui/theme/Type.kt
+43. app/src/main/java/com/replayer/updater/UpdateManager.kt
+44. .github/workflows/build.yml
+45. tools/publish_release.py
 ================================================================================
 
 
-================================================================================
-FILE: gradle/libs.versions.toml
-================================================================================
-
+[ФАЙЛ 1: gradle/libs.versions.toml]
 [versions]
 agp = "8.7.1"
 kotlin = "2.0.21"
@@ -107,10 +111,7 @@ kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "ko
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 
 
-================================================================================
-FILE: settings.gradle.kts
-================================================================================
-
+[ФАЙЛ 2: settings.gradle.kts]
 pluginManagement {
     repositories {
         google {
@@ -138,10 +139,7 @@ rootProject.name = "RePlayer"
 include(":app")
 
 
-================================================================================
-FILE: build.gradle.kts
-================================================================================
-
+[ФАЙЛ 3: build.gradle.kts]
 plugins {
     alias(libs.plugins.android.application) apply false
     alias(libs.plugins.kotlin.android) apply false
@@ -150,10 +148,7 @@ plugins {
 }
 
 
-================================================================================
-FILE: app/build.gradle.kts
-================================================================================
-
+[ФАЙЛ 4: app/build.gradle.kts]
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -169,8 +164,8 @@ android {
         applicationId = "com.replayer"
         minSdk = 24
         targetSdk = 35
-        versionCode = 25
-        versionName = "0.6.0"
+        versionCode = 26
+        versionName = "0.7.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -255,18 +250,12 @@ dependencies {
 
 
 
-================================================================================
-FILE: app/proguard-rules.pro
-================================================================================
-
+[ФАЙЛ 5: app/proguard-rules.pro]
 -keep class org.videolan.libvlc.** { *; }
 -dontwarn org.videolan.libvlc.**
 
 
-================================================================================
-FILE: app/src/main/AndroidManifest.xml
-================================================================================
-
+[ФАЙЛ 6: app/src/main/AndroidManifest.xml]
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
@@ -332,19 +321,13 @@ FILE: app/src/main/AndroidManifest.xml
 </manifest>
 
 
-================================================================================
-FILE: app/src/main/res/values/strings.xml
-================================================================================
-
+[ФАЙЛ 7: app/src/main/res/values/strings.xml]
 <resources>
     <string name="app_name">Re:Player</string>
 </resources>
 
 
-================================================================================
-FILE: app/src/main/res/values/colors.xml
-================================================================================
-
+[ФАЙЛ 8: app/src/main/res/values/colors.xml]
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="black">#FF0A0B0E</color>
@@ -358,10 +341,7 @@ FILE: app/src/main/res/values/colors.xml
 </resources>
 
 
-================================================================================
-FILE: app/src/main/res/values/themes.xml
-================================================================================
-
+[ФАЙЛ 9: app/src/main/res/values/themes.xml]
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="Theme.RePlayer" parent="android:Theme.Material.NoActionBar">
@@ -374,10 +354,7 @@ FILE: app/src/main/res/values/themes.xml
 </resources>
 
 
-================================================================================
-FILE: app/src/main/java/com/replayer/RePlayerApp.kt
-================================================================================
-
+[ФАЙЛ 10: app/src/main/java/com/replayer/RePlayerApp.kt]
 package com.replayer
 
 import android.app.Application
@@ -389,10 +366,7 @@ class RePlayerApp : Application() {
 }
 
 
-================================================================================
-FILE: app/src/main/java/com/replayer/MainActivity.kt
-================================================================================
-
+[ФАЙЛ 11: app/src/main/java/com/replayer/MainActivity.kt]
 package com.replayer
 
 import android.os.Bundle
@@ -438,6 +412,7 @@ import com.replayer.ui.components.NavItem
 import com.replayer.ui.components.TvFocusCard
 import com.replayer.ui.components.TvNavigationRail
 import com.replayer.ui.screens.HomeScreen
+import com.replayer.ui.screens.IptvScreen
 import com.replayer.ui.screens.PlayerScreen
 import com.replayer.ui.screens.SettingsScreen
 import com.replayer.ui.screens.UpnpBrowseScreen
@@ -489,6 +464,13 @@ class MainActivity : ComponentActivity() {
                                             initialUpnpFolder = Pair(fav.id, fav.title)
                                             selectedNav = NavItem.UPNP
                                         }
+                                    },
+                                    onPlayMedia = { mediaItem ->
+                                        lastPlayedMediaId = mediaItem.id
+                                        activeMediaItem = mediaItem
+                                    },
+                                    onPlayChannel = { channel ->
+                                        activeMediaItem = channel.toMediaItem()
                                     }
                                 )
                                 NavItem.UPNP -> UpnpBrowseScreen(
@@ -503,6 +485,13 @@ class MainActivity : ComponentActivity() {
                                     isPlayerActive = (activeMediaItem != null),
                                     onFolderLoaded = { initialUpnpFolder = null },
                                     onConsumeLastPlayedMediaId = { lastPlayedMediaId = null }
+                                )
+                                NavItem.IPTV -> IptvScreen(
+                                    onPlayChannel = { channel ->
+                                        activeMediaItem = channel.toMediaItem()
+                                    },
+                                    onNavigateToSettings = { selectedNav = NavItem.SETTINGS },
+                                    onBackToHome = { selectedNav = NavItem.HOME }
                                 )
                                 NavItem.SETTINGS -> SettingsScreen(
                                     onBack = { selectedNav = NavItem.HOME }
@@ -612,10 +601,7 @@ class MainActivity : ComponentActivity() {
 }
 
 
-================================================================================
-FILE: app/src/main/java/com/replayer/model/MediaType.kt
-================================================================================
-
+[ФАЙЛ 12: app/src/main/java/com/replayer/model/MediaType.kt]
 package com.replayer.model
 
 enum class MediaType {
@@ -627,22 +613,18 @@ enum class MediaType {
 }
 
 
-================================================================================
-FILE: app/src/main/java/com/replayer/model/MediaSourceType.kt
-================================================================================
-
+[ФАЙЛ 13: app/src/main/java/com/replayer/model/MediaSourceType.kt]
 package com.replayer.model
 
 enum class MediaSourceType {
     UPNP_DLNA,
-    LOCAL_STORAGE
+    LOCAL_STORAGE,
+    IPTV
 }
 
 
-================================================================================
-FILE: app/src/main/java/com/replayer/model/MediaItem.kt
-================================================================================
 
+[ФАЙЛ 14: app/src/main/java/com/replayer/model/MediaItem.kt]
 package com.replayer.model
 
 import kotlinx.serialization.Serializable
@@ -695,10 +677,7 @@ data class MediaItem(
 }
 
 
-================================================================================
-FILE: app/src/main/java/com/replayer/model/UpnpDevice.kt
-================================================================================
-
+[ФАЙЛ 15: app/src/main/java/com/replayer/model/UpnpDevice.kt]
 package com.replayer.model
 
 import kotlinx.serialization.Serializable
@@ -714,10 +693,7 @@ data class UpnpDevice(
 )
 
 
-================================================================================
-FILE: app/src/main/java/com/replayer/model/TrackInfo.kt
-================================================================================
-
+[ФАЙЛ 16: app/src/main/java/com/replayer/model/TrackInfo.kt]
 package com.replayer.model
 
 data class AudioTrackInfo(
@@ -743,10 +719,7 @@ data class SubtitleTrackInfo(
 )
 
 
-================================================================================
-FILE: app/src/main/java/com/replayer/model/ViewMode.kt
-================================================================================
-
+[ФАЙЛ 17: app/src/main/java/com/replayer/model/ViewMode.kt]
 package com.replayer.model
 
 enum class ViewMode {
@@ -760,10 +733,7 @@ enum class SortMode {
 }
 
 
-================================================================================
-FILE: app/src/main/java/com/replayer/model/FavoriteFolder.kt
-================================================================================
-
+[ФАЙЛ 18: app/src/main/java/com/replayer/model/FavoriteFolder.kt]
 package com.replayer.model
 
 import kotlinx.serialization.Serializable
@@ -778,10 +748,86 @@ data class FavoriteFolder(
 )
 
 
-================================================================================
-FILE: app/src/main/java/com/replayer/data/ServerConfigManager.kt
-================================================================================
+[ФАЙЛ 19: app/src/main/java/com/replayer/model/RecentMedia.kt]
+package com.replayer.model
 
+import kotlinx.serialization.Serializable
+
+@Serializable
+data class RecentMedia(
+    val id: String,
+    val title: String,
+    val uri: String,
+    val timestamp: Long = System.currentTimeMillis()
+) {
+    fun toMediaItem(): MediaItem = MediaItem(
+        id = id,
+        title = title,
+        uri = uri,
+        type = MediaType.VIDEO,
+        sourceType = MediaSourceType.UPNP_DLNA
+    )
+}
+
+
+
+[ФАЙЛ 20: app/src/main/java/com/replayer/model/IptvChannel.kt]
+package com.replayer.model
+
+import kotlinx.serialization.Serializable
+
+@Serializable
+data class IptvChannel(
+    val id: String,
+    val name: String,
+    val streamUrl: String,
+    val logoUrl: String? = null,
+    val group: String = "Все",
+    val tvgId: String? = null,
+    val tvgName: String? = null
+) {
+    fun toMediaItem(): MediaItem = MediaItem(
+        id = id,
+        title = name,
+        uri = streamUrl,
+        type = MediaType.VIDEO,
+        sourceType = MediaSourceType.IPTV,
+        thumbnailUrl = logoUrl
+    )
+}
+
+
+
+[ФАЙЛ 21: app/src/main/java/com/replayer/model/EpgProgram.kt]
+package com.replayer.model
+
+import kotlinx.serialization.Serializable
+
+@Serializable
+data class EpgProgram(
+    val channelId: String,
+    val title: String,
+    val description: String? = null,
+    val startTime: Long,
+    val endTime: Long
+) {
+    fun isCurrent(now: Long = System.currentTimeMillis()): Boolean {
+        return now in startTime..endTime
+    }
+
+    fun progress(now: Long = System.currentTimeMillis()): Float {
+        if (endTime <= startTime) return 0f
+        return ((now - startTime).toFloat() / (endTime - startTime).toFloat()).coerceIn(0f, 1f)
+    }
+
+    fun formattedTimeRange(): String {
+        val s = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+        return "${s.format(java.util.Date(startTime))} - ${s.format(java.util.Date(endTime))}"
+    }
+}
+
+
+[ФАЙЛ 22: app/src/main/java/com/replayer/data/ServerConfigManager.kt]
 package com.replayer.data
 
 import android.content.Context
@@ -827,10 +873,7 @@ class ServerConfigManager(context: Context) {
 }
 
 
-================================================================================
-FILE: app/src/main/java/com/replayer/data/FavoritesManager.kt
-================================================================================
-
+[ФАЙЛ 23: app/src/main/java/com/replayer/data/FavoritesManager.kt]
 package com.replayer.data
 
 import android.content.Context
@@ -891,10 +934,259 @@ class FavoritesManager(context: Context) {
 }
 
 
-================================================================================
-FILE: app/src/main/java/com/replayer/network/upnp/SsdpDiscovery.kt
-================================================================================
+[ФАЙЛ 24: app/src/main/java/com/replayer/data/RecentMediaManager.kt]
+package com.replayer.data
 
+import android.content.Context
+import android.content.SharedPreferences
+import com.replayer.model.RecentMedia
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+
+class RecentMediaManager(context: Context) {
+    private val prefs: SharedPreferences =
+        context.getSharedPreferences("replayer_recent_media", Context.MODE_PRIVATE)
+
+    private val json = Json { ignoreUnknownKeys = true }
+
+    private val _recentList = MutableStateFlow<List<RecentMedia>>(loadRecent())
+    val recentList: StateFlow<List<RecentMedia>> = _recentList.asStateFlow()
+
+    private fun loadRecent(): List<RecentMedia> {
+        val raw = prefs.getString("recent_media_json", null) ?: return emptyList()
+        return try {
+            json.decodeFromString<List<RecentMedia>>(raw)
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun saveRecent(list: List<RecentMedia>) {
+        _recentList.value = list
+        try {
+            val encoded = json.encodeToString(list)
+            prefs.edit().putString("recent_media_json", encoded).apply()
+        } catch (_: Exception) {}
+    }
+
+    fun addRecent(id: String, title: String, uri: String) {
+        val current = _recentList.value.toMutableList()
+        current.removeAll { it.id == id || it.uri == uri }
+        current.add(0, RecentMedia(id = id, title = title, uri = uri, timestamp = System.currentTimeMillis()))
+        // Keep last 15 items
+        val trimmed = current.take(15)
+        saveRecent(trimmed)
+    }
+
+    fun removeRecent(id: String) {
+        val current = _recentList.value.filterNot { it.id == id }
+        saveRecent(current)
+    }
+}
+
+
+[ФАЙЛ 25: app/src/main/java/com/replayer/data/IptvManager.kt]
+package com.replayer.data
+
+import android.content.Context
+import android.content.SharedPreferences
+import com.replayer.model.EpgProgram
+import com.replayer.model.IptvChannel
+import com.replayer.network.iptv.M3uParser
+import com.replayer.network.iptv.XmlTvParser
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.io.File
+import java.util.concurrent.TimeUnit
+
+class IptvManager(private val context: Context) {
+
+    private val prefs: SharedPreferences =
+        context.getSharedPreferences("replayer_iptv", Context.MODE_PRIVATE)
+
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .build()
+
+    private val json = Json { ignoreUnknownKeys = true }
+    private val scope = CoroutineScope(Dispatchers.IO)
+
+    private val _channels = MutableStateFlow<List<IptvChannel>>(loadCachedChannels())
+    val channels: StateFlow<List<IptvChannel>> = _channels.asStateFlow()
+
+    private val _favoriteChannelIds = MutableStateFlow<Set<String>>(loadFavoriteChannelIds())
+    val favoriteChannelIds: StateFlow<Set<String>> = _favoriteChannelIds.asStateFlow()
+
+    private val _epgMap = MutableStateFlow<Map<String, List<EpgProgram>>>(emptyMap())
+    val epgMap: StateFlow<Map<String, List<EpgProgram>>> = _epgMap.asStateFlow()
+
+    private val _isLoading = MutableStateFlow(false)
+    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+
+    private val _statusMessage = MutableStateFlow<String?>(null)
+    val statusMessage: StateFlow<String?> = _statusMessage.asStateFlow()
+
+    init {
+        // Load EPG if cached or available
+        val savedEpg = getSavedEpgUrl()
+        if (!savedEpg.isNullOrBlank()) {
+            scope.launch { fetchEpg(savedEpg) }
+        }
+    }
+
+    fun getSavedPlaylistUrl(): String? = prefs.getString("iptv_playlist_url", null)
+
+    fun getSavedEpgUrl(): String? = prefs.getString("iptv_epg_url", null)
+
+    fun getGroups(): List<String> {
+        val groups = _channels.value.map { it.group }.distinct().sorted()
+        return listOf("Все", "Избранное") + groups
+    }
+
+    fun isFavorite(channelId: String): Boolean = _favoriteChannelIds.value.contains(channelId)
+
+    fun toggleFavorite(channelId: String) {
+        val current = _favoriteChannelIds.value.toMutableSet()
+        if (current.contains(channelId)) {
+            current.remove(channelId)
+        } else {
+            current.add(channelId)
+        }
+        _favoriteChannelIds.value = current
+        prefs.edit().putStringSet("iptv_favorites", current).apply()
+    }
+
+    fun getFavoriteChannels(): List<IptvChannel> {
+        val favIds = _favoriteChannelIds.value
+        return _channels.value.filter { favIds.contains(it.id) }
+    }
+
+    fun getCurrentProgram(channel: IptvChannel): EpgProgram? {
+        val map = _epgMap.value
+        val list = (channel.tvgId?.let { map[it] }) ?: map[channel.name] ?: return null
+        val now = System.currentTimeMillis()
+        return list.firstOrNull { it.isCurrent(now) }
+    }
+
+    fun saveConfigAndLoad(playlistUrl: String, epgUrl: String?) {
+        val cleanPlaylist = playlistUrl.trim()
+        val cleanEpg = epgUrl?.trim()?.ifBlank { null }
+        prefs.edit()
+            .putString("iptv_playlist_url", cleanPlaylist)
+            .putString("iptv_epg_url", cleanEpg)
+            .apply()
+
+        scope.launch {
+            loadPlaylist(cleanPlaylist, cleanEpg)
+        }
+    }
+
+    suspend fun refreshPlaylist() {
+        val url = getSavedPlaylistUrl() ?: return
+        val epg = getSavedEpgUrl()
+        loadPlaylist(url, epg)
+    }
+
+    private suspend fun loadPlaylist(url: String, manualEpgUrl: String?) = withContext(Dispatchers.IO) {
+        if (url.isBlank()) return@withContext
+        _isLoading.value = true
+        _statusMessage.value = "Загрузка плейлиста..."
+
+        try {
+            val req = Request.Builder()
+                .url(url)
+                .header("User-Agent", "RePlayer-TV")
+                .build()
+
+            val resp = client.newCall(req).execute()
+            if (!resp.isSuccessful) {
+                _statusMessage.value = "Ошибка загрузки: HTTP ${resp.code}"
+                _isLoading.value = false
+                return@withContext
+            }
+
+            val bodyStream = resp.body?.byteStream()
+            if (bodyStream == null) {
+                _statusMessage.value = "Пустой ответ сервера"
+                _isLoading.value = false
+                return@withContext
+            }
+
+            val parseResult = M3uParser.parse(bodyStream)
+            _channels.value = parseResult.channels
+            saveCachedChannels(parseResult.channels)
+
+            val detectedOrManualEpg = manualEpgUrl ?: parseResult.epgUrl
+            if (!detectedOrManualEpg.isNullOrBlank()) {
+                prefs.edit().putString("iptv_epg_url", detectedOrManualEpg).apply()
+                _statusMessage.value = "Каналов: ${parseResult.channels.size}. Загрузка программы передач..."
+                fetchEpg(detectedOrManualEpg)
+            } else {
+                _statusMessage.value = "Каналов загружено: ${parseResult.channels.size}"
+            }
+        } catch (e: Exception) {
+            _statusMessage.value = "Ошибка: ${e.localizedMessage ?: "Сбой соединения"}"
+        } finally {
+            _isLoading.value = false
+        }
+    }
+
+    private suspend fun fetchEpg(epgUrl: String) = withContext(Dispatchers.IO) {
+        try {
+            val req = Request.Builder()
+                .url(epgUrl)
+                .header("User-Agent", "RePlayer-TV")
+                .build()
+
+            val resp = client.newCall(req).execute()
+            if (!resp.isSuccessful) return@withContext
+
+            val stream = resp.body?.byteStream() ?: return@withContext
+            val isGzip = epgUrl.endsWith(".gz", ignoreCase = true)
+            val parsed = XmlTvParser.parse(stream, isGzip = isGzip)
+            _epgMap.value = parsed
+            _statusMessage.value = "Каналов: ${_channels.value.size}. Программа передач обновлена."
+        } catch (_: Exception) {}
+    }
+
+    private fun loadFavoriteChannelIds(): Set<String> {
+        return prefs.getStringSet("iptv_favorites", emptySet()) ?: emptySet()
+    }
+
+    private fun loadCachedChannels(): List<IptvChannel> {
+        return try {
+            val file = File(context.cacheDir, "iptv_channels.json")
+            if (file.exists()) {
+                json.decodeFromString<List<IptvChannel>>(file.readText())
+            } else emptyList()
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun saveCachedChannels(channels: List<IptvChannel>) {
+        try {
+            val file = File(context.cacheDir, "iptv_channels.json")
+            file.writeText(json.encodeToString(channels))
+        } catch (_: Exception) {}
+    }
+}
+
+
+[ФАЙЛ 26: app/src/main/java/com/replayer/network/upnp/SsdpDiscovery.kt]
 package com.replayer.network.upnp
 
 import android.content.Context
@@ -994,10 +1286,7 @@ class SsdpDiscovery(private val context: Context) {
 }
 
 
-================================================================================
-FILE: app/src/main/java/com/replayer/network/upnp/UpnpDeviceParser.kt
-================================================================================
-
+[ФАЙЛ 27: app/src/main/java/com/replayer/network/upnp/UpnpDeviceParser.kt]
 package com.replayer.network.upnp
 
 import android.util.Log
@@ -1098,10 +1387,7 @@ object UpnpDeviceParser {
 }
 
 
-================================================================================
-FILE: app/src/main/java/com/replayer/network/upnp/ContentDirectoryService.kt
-================================================================================
-
+[ФАЙЛ 28: app/src/main/java/com/replayer/network/upnp/ContentDirectoryService.kt]
 package com.replayer.network.upnp
 
 import android.util.Log
@@ -1274,10 +1560,186 @@ class ContentDirectoryService {
 }
 
 
-================================================================================
-FILE: app/src/main/java/com/replayer/player/RePlayerEngine.kt
-================================================================================
+[ФАЙЛ 29: app/src/main/java/com/replayer/network/iptv/M3uParser.kt]
+package com.replayer.network.iptv
 
+import com.replayer.model.IptvChannel
+import java.io.BufferedReader
+import java.io.InputStream
+import java.io.InputStreamReader
+
+data class M3uParseResult(
+    val channels: List<IptvChannel>,
+    val epgUrl: String?
+)
+
+object M3uParser {
+
+    private val TVG_ID_REGEX = Regex("""tvg-id="([^"]*)"""", RegexOption.IGNORE_CASE)
+    private val TVG_NAME_REGEX = Regex("""tvg-name="([^"]*)"""", RegexOption.IGNORE_CASE)
+    private val TVG_LOGO_REGEX = Regex("""tvg-logo="([^"]*)"""", RegexOption.IGNORE_CASE)
+    private val GROUP_TITLE_REGEX = Regex("""group-title="([^"]*)"""", RegexOption.IGNORE_CASE)
+    private val URL_TVG_REGEX = Regex("""(?:url-tvg|x-tvg-url)="([^"]*)"""", RegexOption.IGNORE_CASE)
+
+    fun parse(inputStream: InputStream): M3uParseResult {
+        val reader = BufferedReader(InputStreamReader(inputStream, Charsets.UTF_8))
+        val channels = mutableListOf<IptvChannel>()
+        var detectedEpgUrl: String? = null
+
+        var currentExtInf: String? = null
+        var index = 0
+
+        reader.forEachLine { rawLine ->
+            val line = rawLine.trim()
+            if (line.isEmpty()) return@forEachLine
+
+            if (line.startsWith("#EXTM3U", ignoreCase = true)) {
+                URL_TVG_REGEX.find(line)?.groupValues?.getOrNull(1)?.let {
+                    val firstUrl = it.split(",", ";").firstOrNull()?.trim()
+                    if (!firstUrl.isNullOrBlank()) {
+                        detectedEpgUrl = firstUrl
+                    }
+                }
+            } else if (line.startsWith("#EXTINF:", ignoreCase = true)) {
+                currentExtInf = line
+            } else if (!line.startsWith("#")) {
+                // This is the stream URL
+                val extInf = currentExtInf
+                val streamUrl = line
+
+                val tvgId = extInf?.let { TVG_ID_REGEX.find(it)?.groupValues?.getOrNull(1)?.trim() }
+                val tvgName = extInf?.let { TVG_NAME_REGEX.find(it)?.groupValues?.getOrNull(1)?.trim() }
+                val logoUrl = extInf?.let { TVG_LOGO_REGEX.find(it)?.groupValues?.getOrNull(1)?.trim() }
+                val groupTitle = extInf?.let { GROUP_TITLE_REGEX.find(it)?.groupValues?.getOrNull(1)?.trim() }
+                    ?.ifBlank { null } ?: "Общие"
+
+                // Extract title after last comma
+                val commaIdx = extInf?.lastIndexOf(',') ?: -1
+                val title = if (commaIdx != -1 && extInf != null && commaIdx + 1 < extInf.length) {
+                    extInf.substring(commaIdx + 1).trim()
+                } else {
+                    tvgName ?: "Канал ${index + 1}"
+                }
+
+                if (title.isNotBlank() && streamUrl.isNotBlank()) {
+                    index++
+                    val channelId = tvgId?.ifBlank { null } ?: "ch_${index}_${title.hashCode()}"
+                    channels.add(
+                        IptvChannel(
+                            id = channelId,
+                            name = title,
+                            streamUrl = streamUrl,
+                            logoUrl = logoUrl?.ifBlank { null },
+                            group = groupTitle,
+                            tvgId = tvgId?.ifBlank { null },
+                            tvgName = tvgName?.ifBlank { null }
+                        )
+                    )
+                }
+                currentExtInf = null
+            }
+        }
+
+        return M3uParseResult(channels = channels, epgUrl = detectedEpgUrl)
+    }
+}
+
+
+[ФАЙЛ 30: app/src/main/java/com/replayer/network/iptv/XmlTvParser.kt]
+package com.replayer.network.iptv
+
+import android.util.Xml
+import com.replayer.model.EpgProgram
+import org.xmlpull.v1.XmlPullParser
+import java.io.InputStream
+import java.text.SimpleDateFormat
+import java.util.Locale
+import java.util.zip.GZIPInputStream
+
+object XmlTvParser {
+
+    private val DATE_FORMAT_TZ = SimpleDateFormat("yyyyMMddHHmmss Z", Locale.US)
+    private val DATE_FORMAT_NO_TZ = SimpleDateFormat("yyyyMMddHHmmss", Locale.US)
+
+    fun parse(inputStream: InputStream, isGzip: Boolean = false): Map<String, List<EpgProgram>> {
+        val stream = if (isGzip) GZIPInputStream(inputStream) else inputStream
+        val parser = Xml.newPullParser()
+        parser.setInput(stream, "UTF-8")
+
+        val result = mutableMapOf<String, MutableList<EpgProgram>>()
+        val now = System.currentTimeMillis()
+        val minTime = now - 12 * 3600 * 1000L // last 12h
+        val maxTime = now + 36 * 3600 * 1000L // next 36h
+
+        var eventType = parser.eventType
+        while (eventType != XmlPullParser.END_DOCUMENT) {
+            if (eventType == XmlPullParser.START_TAG && parser.name == "programme") {
+                val channel = parser.getAttributeValue(null, "channel")
+                val startStr = parser.getAttributeValue(null, "start")
+                val stopStr = parser.getAttributeValue(null, "stop")
+
+                if (!channel.isNullOrBlank() && !startStr.isNullOrBlank() && !stopStr.isNullOrBlank()) {
+                    val start = parseXmlDate(startStr)
+                    val stop = parseXmlDate(stopStr)
+
+                    if (start != null && stop != null && stop >= minTime && start <= maxTime) {
+                        var title: String? = null
+                        var desc: String? = null
+
+                        // Inner tags
+                        while (true) {
+                            val innerEvent = parser.next()
+                            if (innerEvent == XmlPullParser.START_TAG) {
+                                when (parser.name) {
+                                    "title" -> title = parser.nextText()
+                                    "desc" -> desc = parser.nextText()
+                                }
+                            } else if (innerEvent == XmlPullParser.END_TAG && parser.name == "programme") {
+                                break
+                            } else if (innerEvent == XmlPullParser.END_DOCUMENT) {
+                                break
+                            }
+                        }
+
+                        if (!title.isNullOrBlank()) {
+                            val list = result.getOrPut(channel) { mutableListOf() }
+                            list.add(
+                                EpgProgram(
+                                    channelId = channel,
+                                    title = title,
+                                    description = desc,
+                                    startTime = start,
+                                    endTime = stop
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+            eventType = parser.next()
+        }
+
+        // Sort each channel's programs by startTime
+        return result.mapValues { (_, progs) -> progs.sortedBy { it.startTime } }
+    }
+
+    private fun parseXmlDate(dateStr: String): Long? {
+        val trimmed = dateStr.trim()
+        return try {
+            if (trimmed.length >= 15 && (trimmed.contains("+") || trimmed.contains("-"))) {
+                DATE_FORMAT_TZ.parse(trimmed)?.time
+            } else {
+                val clean = trimmed.take(14)
+                DATE_FORMAT_NO_TZ.parse(clean)?.time
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+}
+
+
+[ФАЙЛ 31: app/src/main/java/com/replayer/player/RePlayerEngine.kt]
 package com.replayer.player
 
 import android.content.Context
@@ -1503,10 +1965,7 @@ class RePlayerEngine(private val context: Context) {
 }
 
 
-================================================================================
-FILE: app/src/main/java/com/replayer/player/RePlayerState.kt
-================================================================================
-
+[ФАЙЛ 32: app/src/main/java/com/replayer/player/RePlayerState.kt]
 package com.replayer.player
 
 import com.replayer.model.AudioTrackInfo
@@ -1526,10 +1985,7 @@ data class RePlayerState(
 )
 
 
-================================================================================
-FILE: app/src/main/java/com/replayer/ui/components/TvFocusCard.kt
-================================================================================
-
+[ФАЙЛ 33: app/src/main/java/com/replayer/ui/components/TvFocusCard.kt]
 package com.replayer.ui.components
 
 import androidx.compose.animation.core.animateFloatAsState
@@ -1592,10 +2048,7 @@ fun TvFocusCard(
 }
 
 
-================================================================================
-FILE: app/src/main/java/com/replayer/ui/components/TvNavigationRail.kt
-================================================================================
-
+[ФАЙЛ 34: app/src/main/java/com/replayer/ui/components/TvNavigationRail.kt]
 package com.replayer.ui.components
 
 import androidx.compose.foundation.background
@@ -1611,6 +2064,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -1629,6 +2083,7 @@ import com.replayer.ui.theme.TextSecondary
 enum class NavItem(val label: String, val icon: ImageVector) {
     HOME("Главная", Icons.Default.Home),
     UPNP("UPnP / DLNA", Icons.Default.Folder),
+    IPTV("ТВ каналы", Icons.Default.Tv),
     SETTINGS("Настройки", Icons.Default.Settings)
 }
 
@@ -1681,141 +2136,160 @@ fun TvNavigationRail(
 }
 
 
-================================================================================
-FILE: app/src/main/java/com/replayer/ui/screens/HomeScreen.kt
-================================================================================
-
+[ФАЙЛ 35: app/src/main/java/com/replayer/ui/screens/HomeScreen.kt]
 package com.replayer.ui.screens
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Tv
+import androidx.compose.material.icons.filled.VideoFile
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import com.replayer.data.FavoritesManager
+import com.replayer.data.IptvManager
+import com.replayer.data.RecentMediaManager
 import com.replayer.model.FavoriteFolder
-import com.replayer.model.MediaSourceType
+import com.replayer.model.IptvChannel
+import com.replayer.model.MediaItem
 import com.replayer.ui.components.TvFocusCard
-import com.replayer.ui.theme.AccentCyan
-import com.replayer.ui.theme.DarkCard
-import com.replayer.ui.theme.TextPrimary
-import com.replayer.ui.theme.TextSecondary
+import com.replayer.ui.theme.*
 
 @Composable
 fun HomeScreen(
     onOpenFavorite: (FavoriteFolder) -> Unit,
+    onPlayMedia: (MediaItem) -> Unit,
+    onPlayChannel: (IptvChannel) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val favoritesManager = remember { FavoritesManager(context) }
+    val recentManager = remember { RecentMediaManager(context) }
+    val iptvManager = remember { IptvManager(context) }
+
     val favorites by favoritesManager.favorites.collectAsState()
+    val recentList by recentManager.recentList.collectAsState()
+    val channels by iptvManager.channels.collectAsState()
+    val favoriteChannelIds by iptvManager.favoriteChannelIds.collectAsState()
+    val epgMap by iptvManager.epgMap.collectAsState()
+
+    val favoriteChannels = remember(channels, favoriteChannelIds) {
+        iptvManager.getFavoriteChannels()
+    }
 
     Column(
         modifier = modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 32.dp, vertical = 24.dp)
     ) {
+        // App / Screen Header
         Text(
-            text = "Избранное",
+            text = "Главная",
             style = MaterialTheme.typography.displayLarge
         )
         Text(
-            text = "Быстрый доступ к папкам из DLNA и Google Drive",
+            text = "Недавнее воспроизведение, избранные телеканалы и папки",
             style = MaterialTheme.typography.bodyLarge,
             color = TextSecondary,
-            modifier = Modifier.padding(top = 4.dp, bottom = 24.dp)
+            modifier = Modifier.padding(top = 4.dp, bottom = 28.dp)
         )
 
-        if (favorites.isEmpty()) {
+        // -------------------------------------------------------------
+        // СТРОКА 1: ОСНОВНАЯ ЛЕНТА (Android TV Shelf)
+        // Недавние файлы DLNA + Избранные ТВ каналы
+        // -------------------------------------------------------------
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Недавнее и ТВ каналы",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                color = TextPrimary
+            )
+            if (recentList.isNotEmpty() || favoriteChannels.isNotEmpty()) {
+                Text(
+                    text = "${recentList.size + favoriteChannels.size} элементов",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        if (recentList.isEmpty() && favoriteChannels.isEmpty()) {
             Box(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(bottom = 60.dp),
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(DarkCard)
+                    .padding(horizontal = 24.dp, vertical = 32.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(72.dp)
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(DarkCard),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.FavoriteBorder,
-                            contentDescription = null,
-                            tint = AccentCyan.copy(alpha = 0.7f),
-                            modifier = Modifier.size(38.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(16.dp))
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = null,
+                        tint = AccentCyan.copy(alpha = 0.6f),
+                        modifier = Modifier.size(40.dp)
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        text = "Здесь будут ваши избранные папки",
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
+                        text = "Здесь появятся ваши фильмы и избранные телеканалы",
+                        style = MaterialTheme.typography.titleMedium,
                         color = TextPrimary
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Отмечайте папки сердечком в DLNA или Google Drive для быстрого перехода",
-                        style = MaterialTheme.typography.bodyMedium,
+                        text = "Запустите видео из папки DLNA или отметьте канал сердечком в разделе ТВ",
+                        style = MaterialTheme.typography.bodySmall,
                         color = TextSecondary
                     )
                 }
             }
         } else {
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 260.dp),
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                contentPadding = PaddingValues(vertical = 8.dp)
+                contentPadding = PaddingValues(vertical = 4.dp)
             ) {
-                items(favorites, key = { it.id }) { fav ->
+                // 1. Recent DLNA media cards
+                items(recentList, key = { "recent_${it.id}" }) { recent ->
                     TvFocusCard(
-                        onClick = { onOpenFavorite(fav) },
+                        onClick = { onPlayMedia(recent.toMediaItem()) },
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .height(130.dp)
+                            .width(240.dp)
+                            .height(138.dp)
                     ) {
                         Column(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .padding(16.dp),
+                                .padding(14.dp),
                             verticalArrangement = Arrangement.SpaceBetween
                         ) {
                             Row(
@@ -1823,48 +2297,249 @@ fun HomeScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                Box(
+                                    modifier = Modifier
+                                        .size(34.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(AccentCyan.copy(alpha = 0.15f)),
+                                    contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Default.Folder,
+                                        imageVector = Icons.Default.VideoFile,
                                         contentDescription = null,
                                         tint = AccentCyan,
-                                        modifier = Modifier.size(28.dp)
+                                        modifier = Modifier.size(20.dp)
                                     )
-                                    // Source badge: DLNA
-                                    val badgeText = "DLNA"
-                                    val badgeColor = AccentCyan
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(AccentCyan.copy(alpha = 0.18f))
+                                        .padding(horizontal = 7.dp, vertical = 3.dp)
+                                ) {
+                                    Text(
+                                        text = "DLNA",
+                                        color = AccentCyan,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+
+                            Column {
+                                Text(
+                                    text = recent.title,
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    color = TextPrimary,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    lineHeight = 18.sp
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Продолжить просмотр",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextSecondary,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // 2. Favorite IPTV channel cards
+                items(favoriteChannels, key = { "iptv_${it.id}" }) { channel ->
+                    val currentProg = remember(channel, epgMap) {
+                        iptvManager.getCurrentProgram(channel)
+                    }
+
+                    TvFocusCard(
+                        onClick = { onPlayChannel(channel) },
+                        modifier = Modifier
+                            .width(240.dp)
+                            .height(138.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(14.dp),
+                            verticalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                if (!channel.logoUrl.isNullOrBlank()) {
+                                    AsyncImage(
+                                        model = channel.logoUrl,
+                                        contentDescription = null,
+                                        modifier = Modifier
+                                            .size(34.dp)
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(Color.White.copy(alpha = 0.08f)),
+                                        contentScale = ContentScale.Fit
+                                    )
+                                } else {
                                     Box(
                                         modifier = Modifier
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(badgeColor.copy(alpha = 0.18f))
-                                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                                            .size(34.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(Color(0xFFFF4081).copy(alpha = 0.15f)),
+                                        contentAlignment = Alignment.Center
                                     ) {
-                                        Text(
-                                            text = badgeText,
-                                            color = badgeColor,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold
+                                        Icon(
+                                            imageVector = Icons.Default.Tv,
+                                            contentDescription = null,
+                                            tint = Color(0xFFFF4081),
+                                            modifier = Modifier.size(20.dp)
                                         )
                                     }
                                 }
 
-                                Icon(
-                                    imageVector = Icons.Default.Favorite,
-                                    contentDescription = "В избранном",
-                                    tint = Color(0xFFFF4081),
-                                    modifier = Modifier.size(22.dp)
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(Color(0xFFFF4081).copy(alpha = 0.18f))
+                                            .padding(horizontal = 7.dp, vertical = 3.dp)
+                                    ) {
+                                        Text(
+                                            text = "ТВ КАНАЛ",
+                                            color = Color(0xFFFF4081),
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    Icon(
+                                        imageVector = Icons.Default.Favorite,
+                                        contentDescription = null,
+                                        tint = Color(0xFFFF4081),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
                             }
 
-                            Text(
-                                text = fav.title,
-                                style = MaterialTheme.typography.titleMedium,
-                                color = TextPrimary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                            Column {
+                                Text(
+                                    text = channel.name,
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = TextPrimary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                if (currentProg != null) {
+                                    Text(
+                                        text = currentProg.title,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TextSecondary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        fontSize = 11.sp
+                                    )
+                                } else {
+                                    Text(
+                                        text = channel.group,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TextSecondary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(34.dp))
+
+        // -------------------------------------------------------------
+        // СТРОКА 2: ИЗБРАННЫЕ ПАПКИ DLNA (Потоньше)
+        // -------------------------------------------------------------
+        Text(
+            text = "Избранные папки DLNA",
+            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+            color = TextPrimary
+        )
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        if (favorites.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(DarkCard)
+                    .padding(horizontal = 20.dp, vertical = 20.dp),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Folder,
+                        contentDescription = null,
+                        tint = TextSecondary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = "Нет избранных папок. Нажимайте сердечко рядом с папкой в UPnP / DLNA для быстрого доступа.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextSecondary
+                    )
+                }
+            }
+        } else {
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                contentPadding = PaddingValues(vertical = 4.dp)
+            ) {
+                items(favorites, key = { it.id }) { fav ->
+                    TvFocusCard(
+                        onClick = { onOpenFavorite(fav) },
+                        modifier = Modifier
+                            .width(220.dp)
+                            .height(68.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Folder,
+                                    contentDescription = null,
+                                    tint = AccentCyan,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(
+                                    text = fav.title,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = TextPrimary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Icon(
+                                imageVector = Icons.Default.Favorite,
+                                contentDescription = "В избранном",
+                                tint = Color(0xFFFF4081),
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }
@@ -1875,10 +2550,7 @@ fun HomeScreen(
 }
 
 
-================================================================================
-FILE: app/src/main/java/com/replayer/ui/screens/UpnpBrowseScreen.kt
-================================================================================
-
+[ФАЙЛ 36: app/src/main/java/com/replayer/ui/screens/UpnpBrowseScreen.kt]
 package com.replayer.ui.screens
 
 import androidx.activity.compose.BackHandler
@@ -1938,6 +2610,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.replayer.data.FavoritesManager
+import com.replayer.data.RecentMediaManager
 import com.replayer.data.ServerConfigManager
 import com.replayer.model.FavoriteFolder
 import com.replayer.model.MediaItem
@@ -1971,6 +2644,7 @@ fun UpnpBrowseScreen(
     val scope = rememberCoroutineScope()
     val serverConfigManager = remember { ServerConfigManager(context) }
     val favoritesManager = remember { FavoritesManager(context) }
+    val recentManager = remember { RecentMediaManager(context) }
     val contentDirectory = remember { ContentDirectoryService() }
 
     val connectedDevice by serverConfigManager.connectedUpnpDevice.collectAsState()
@@ -2254,6 +2928,7 @@ fun UpnpBrowseScreen(
                                     openFolder(url, item.id, item.title)
                                 }
                             } else {
+                                recentManager.addRecent(item.id, item.title, item.uri)
                                 onPlayMedia(item)
                             }
                         },
@@ -2301,41 +2976,14 @@ fun UpnpBrowseScreen(
                                     color = TextPrimary
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    // Format Badge
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(AccentCyan.copy(alpha = 0.2f))
-                                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                                    ) {
-                                        Text(
-                                            text = item.fileFormat(),
-                                            color = AccentCyan,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-
-                                    val sizeStr = item.formattedSize()
-                                    if (sizeStr.isNotEmpty()) {
-                                        Spacer(modifier = Modifier.width(12.dp))
-                                        Text(
-                                            text = sizeStr,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = TextSecondary
-                                        )
-                                    }
-
-                                    val dateStr = item.formattedDate()
-                                    if (dateStr.isNotEmpty()) {
-                                        Spacer(modifier = Modifier.width(12.dp))
-                                        Text(
-                                            text = dateStr,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = TextSecondary
-                                        )
-                                    }
+                                val sizeStr = item.formattedSize()
+                                if (sizeStr.isNotEmpty()) {
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = sizeStr,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TextSecondary
+                                    )
                                 }
                             }
 
@@ -2399,6 +3047,7 @@ fun UpnpBrowseScreen(
                                     openFolder(url, item.id, item.title)
                                 }
                             } else {
+                                recentManager.addRecent(item.id, item.title, item.uri)
                                 onPlayMedia(item)
                             }
                         },
@@ -2448,21 +3097,6 @@ fun UpnpBrowseScreen(
                                                 }
                                         )
                                         Spacer(modifier = Modifier.width(8.dp))
-                                    }
-
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(AccentCyan.copy(alpha = 0.2f))
-                                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                                    ) {
-                                        Text(
-                                            text = item.fileFormat(),
-                                            color = AccentCyan,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
                                 }
                             }
                             Spacer(modifier = Modifier.height(12.dp))
@@ -2547,10 +3181,372 @@ fun UpnpBrowseScreen(
 }
 
 
-================================================================================
-FILE: app/src/main/java/com/replayer/ui/screens/PlayerScreen.kt
-================================================================================
+[ФАЙЛ 37: app/src/main/java/com/replayer/ui/screens/IptvScreen.kt]
+package com.replayer.ui.screens
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Tv
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import com.replayer.data.IptvManager
+import com.replayer.model.IptvChannel
+import com.replayer.ui.components.TvFocusCard
+import com.replayer.ui.theme.*
+import kotlinx.coroutines.launch
+
+@Composable
+fun IptvScreen(
+    onPlayChannel: (IptvChannel) -> Unit,
+    onNavigateToSettings: () -> Unit,
+    onBackToHome: () -> Unit = {},
+    modifier: Modifier = Modifier
+) {
+    BackHandler(enabled = true) {
+        onBackToHome()
+    }
+
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val iptvManager = remember { IptvManager(context) }
+
+    val channels by iptvManager.channels.collectAsState()
+    val favoriteIds by iptvManager.favoriteChannelIds.collectAsState()
+    val epgMap by iptvManager.epgMap.collectAsState()
+    val isLoading by iptvManager.isLoading.collectAsState()
+    val statusMsg by iptvManager.statusMessage.collectAsState()
+
+    val groups = remember(channels) { iptvManager.getGroups() }
+    var selectedGroup by remember { mutableStateOf("Все") }
+
+    val filteredChannels = remember(channels, selectedGroup, favoriteIds) {
+        when (selectedGroup) {
+            "Все" -> channels
+            "Избранное" -> channels.filter { favoriteIds.contains(it.id) }
+            else -> channels.filter { it.group == selectedGroup }
+        }
+    }
+
+    val firstItemFocusRequester = remember { FocusRequester() }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 32.dp, vertical = 24.dp)
+    ) {
+        // Top Header
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text(
+                    text = "ТВ каналы",
+                    style = MaterialTheme.typography.displayLarge
+                )
+                Text(
+                    text = if (channels.isEmpty()) "Плейлист не настроен" else "Каналов: ${channels.size} • $selectedGroup",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextSecondary,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (channels.isNotEmpty()) {
+                    TvFocusCard(
+                        onClick = { scope.launch { iptvManager.refreshPlaylist() } },
+                        modifier = Modifier
+                            .width(150.dp)
+                            .height(44.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (isLoading) {
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp), color = AccentCyan, strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Default.Refresh, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(text = "Обновить", style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+
+                TvFocusCard(
+                    onClick = onNavigateToSettings,
+                    modifier = Modifier
+                        .width(160.dp)
+                        .height(44.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Settings, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(text = "Настройки ТВ", style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Empty Playlist State
+        if (channels.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(bottom = 60.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(72.dp)
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(DarkCard),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Tv,
+                            contentDescription = null,
+                            tint = AccentCyan.copy(alpha = 0.7f),
+                            modifier = Modifier.size(38.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "Плейлист IPTV не добавлен",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = TextPrimary
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Добавьте ссылку на плейлист M3U / M3U8 в настройках приложения",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextSecondary
+                    )
+                    Spacer(modifier = Modifier.height(20.dp))
+                    TvFocusCard(
+                        onClick = onNavigateToSettings,
+                        modifier = Modifier
+                            .width(220.dp)
+                            .height(48.dp)
+                    ) {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text(
+                                text = "Настроить IPTV",
+                                color = AccentCyan,
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                        }
+                    }
+                }
+            }
+        } else {
+            // Categories Row (Horizontal Pills)
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(groups) { group ->
+                    val isSelected = group == selectedGroup
+                    TvFocusCard(
+                        onClick = { selectedGroup = group },
+                        modifier = Modifier.height(40.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .background(if (isSelected) AccentCyan.copy(alpha = 0.25f) else Color.Transparent)
+                                .padding(horizontal = 16.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = group,
+                                color = if (isSelected) AccentCyan else TextPrimary,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Channel List with Televizo-style EPG
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(bottom = 32.dp)
+            ) {
+                itemsIndexed(filteredChannels, key = { _, ch -> ch.id }) { index, channel ->
+                    val isFav = favoriteIds.contains(channel.id)
+                    val prog = remember(channel, epgMap) { iptvManager.getCurrentProgram(channel) }
+                    val isFirst = index == 0
+
+                    TvFocusCard(
+                        onClick = { onPlayChannel(channel) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(76.dp)
+                            .then(if (isFirst) Modifier.focusRequester(firstItemFocusRequester) else Modifier)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Channel Logo or Placeholder
+                            Box(
+                                modifier = Modifier
+                                    .size(52.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(DarkSurface),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (!channel.logoUrl.isNullOrBlank()) {
+                                    AsyncImage(
+                                        model = channel.logoUrl,
+                                        contentDescription = channel.name,
+                                        modifier = Modifier.size(44.dp)
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.Tv,
+                                        contentDescription = null,
+                                        tint = AccentCyan,
+                                        modifier = Modifier.size(26.dp)
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.width(16.dp))
+
+                            // Channel Title & EPG Program
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = channel.name,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = TextPrimary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(AccentCyan.copy(alpha = 0.15f))
+                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = "LIVE",
+                                            color = AccentCyan,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(4.dp))
+
+                                if (prog != null) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = "${prog.formattedTimeRange()}  ${prog.title}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = TextSecondary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    LinearProgressIndicator(
+                                        progress = { prog.progress() },
+                                        modifier = Modifier
+                                            .width(180.dp)
+                                            .height(3.dp)
+                                            .clip(RoundedCornerShape(2.dp)),
+                                        color = AccentCyan,
+                                        trackColor = DarkSurface
+                                    )
+                                } else {
+                                    Text(
+                                        text = channel.group,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TextSecondary
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.width(16.dp))
+
+                            // Favorite Toggle Button
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .background(if (isFav) Color(0xFFFF4081).copy(alpha = 0.2f) else DarkSurface)
+                                    .clickable { iptvManager.toggleFavorite(channel.id) },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                    contentDescription = "Избранное",
+                                    tint = if (isFav) Color(0xFFFF4081) else TextSecondary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+[ФАЙЛ 38: app/src/main/java/com/replayer/ui/screens/PlayerScreen.kt]
 package com.replayer.ui.screens
 
 import android.app.Activity
@@ -3234,10 +4230,7 @@ private fun formatTime(ms: Long): String {
 }
 
 
-================================================================================
-FILE: app/src/main/java/com/replayer/ui/screens/SettingsScreen.kt
-================================================================================
-
+[ФАЙЛ 39: app/src/main/java/com/replayer/ui/screens/SettingsScreen.kt]
 package com.replayer.ui.screens
 
 import android.app.Activity
@@ -3266,6 +4259,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
+import com.replayer.data.IptvManager
 import com.replayer.data.ServerConfigManager
 import com.replayer.model.UpnpDevice
 import com.replayer.network.upnp.SsdpDiscovery
@@ -3306,6 +4300,14 @@ fun SettingsScreen(
     // UPnP scanning state
     var discoveredDevices by remember { mutableStateOf<List<UpnpDevice>>(emptyList()) }
     var isScanningUpnp by remember { mutableStateOf(false) }
+    var showAvailableServers by remember { mutableStateOf(false) }
+
+    // IPTV state
+    val iptvManager = remember { IptvManager(context) }
+    var iptvPlaylistInput by remember { mutableStateOf(iptvManager.getSavedPlaylistUrl() ?: "") }
+    var iptvEpgInput by remember { mutableStateOf(iptvManager.getSavedEpgUrl() ?: "") }
+    val iptvIsLoading by iptvManager.isLoading.collectAsState()
+    val iptvStatusMessage by iptvManager.statusMessage.collectAsState()
 
     // App updates state
     var updateUiState by remember { mutableStateOf<UpdateUiState>(UpdateUiState.Idle) }
@@ -3459,106 +4461,134 @@ fun SettingsScreen(
                 }
 
                 if (connectedUpnpDevice != null) {
-                    TvFocusCard(
-                        onClick = { serverConfigManager.disconnectUpnpDevice() },
-                        modifier = Modifier
-                            .width(140.dp)
-                            .height(44.dp)
-                    ) {
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text(text = "Отключить", color = Color(0xFFFF5252), style = MaterialTheme.typography.bodyMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        TvFocusCard(
+                            onClick = {
+                                showAvailableServers = !showAvailableServers
+                                if (showAvailableServers) rescanUpnp()
+                            },
+                            modifier = Modifier
+                                .width(150.dp)
+                                .height(44.dp)
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = if (showAvailableServers) "Скрыть серверы" else "Сменить сервер",
+                                    color = AccentCyan,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        }
+
+                        TvFocusCard(
+                            onClick = {
+                                serverConfigManager.disconnectUpnpDevice()
+                                showAvailableServers = true
+                            },
+                            modifier = Modifier
+                                .width(120.dp)
+                                .height(44.dp)
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text(text = "Отключить", color = Color(0xFFFF5252), style = MaterialTheme.typography.bodyMedium)
+                            }
                         }
                     }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        // Discovered Devices Section (shown when none connected or when toggled via "Сменить сервер")
+        if (connectedUpnpDevice == null || showAvailableServers) {
+            Spacer(modifier = Modifier.height(16.dp))
 
-        // Discovered Devices Section
-        Text(
-            text = "Доступные медиасерверы в сети",
-            style = MaterialTheme.typography.titleMedium,
-            color = TextSecondary,
-            modifier = Modifier.padding(bottom = 8.dp)
-        )
+            Text(
+                text = "Доступные медиасерверы в сети",
+                style = MaterialTheme.typography.titleMedium,
+                color = TextSecondary,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
 
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(DarkCard)
-                .padding(16.dp)
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (discoveredDevices.isEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 24.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = if (isScanningUpnp) "Поиск серверов в локальной сети..." else "Серверы не найдены. Убедитесь, что ПК или NAS включены и находятся в одной сети Wi-Fi.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = TextSecondary
-                        )
-                    }
-                } else {
-                    discoveredDevices.forEach { device ->
-                        TvFocusCard(
-                            onClick = { serverConfigManager.connectUpnpDevice(device) },
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(DarkCard)
+                    .padding(16.dp)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (discoveredDevices.isEmpty()) {
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(72.dp)
+                                .padding(vertical = 24.dp),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Row(
+                            Text(
+                                text = if (isScanningUpnp) "Поиск серверов в локальной сети..." else "Серверы не найдены. Убедитесь, что ПК или NAS включены и находятся в одной сети Wi-Fi.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = TextSecondary
+                            )
+                        }
+                    } else {
+                        discoveredDevices.forEach { device ->
+                            TvFocusCard(
+                                onClick = {
+                                    serverConfigManager.connectUpnpDevice(device)
+                                    showAvailableServers = false
+                                },
                                 modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(horizontal = 20.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                                    .fillMaxWidth()
+                                    .height(72.dp)
                             ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Folder, contentDescription = null, tint = AccentCyan)
-                                    Spacer(modifier = Modifier.width(16.dp))
-                                    Column {
-                                        Text(text = device.friendlyName, style = MaterialTheme.typography.titleMedium, color = TextPrimary)
-                                        Text(text = device.manufacturer.ifEmpty { device.location }, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
-                                    }
-                                }
-                                Box(
+                                Row(
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(AccentCyan.copy(alpha = 0.15f))
-                                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                                        .fillMaxSize()
+                                        .padding(horizontal = 20.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text(text = "Подключить", color = AccentCyan, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Folder, contentDescription = null, tint = AccentCyan)
+                                        Spacer(modifier = Modifier.width(16.dp))
+                                        Column {
+                                            Text(text = device.friendlyName, style = MaterialTheme.typography.titleMedium, color = TextPrimary)
+                                            Text(text = device.manufacturer.ifEmpty { device.location }, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                                        }
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(AccentCyan.copy(alpha = 0.15f))
+                                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                                    ) {
+                                        Text(text = "Подключить", color = AccentCyan, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    }
                                 }
                             }
                         }
                     }
-                }
 
-                // Rescan button
-                TvFocusCard(
-                    onClick = { rescanUpnp() },
-                    modifier = Modifier
-                        .width(220.dp)
-                        .height(48.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxSize(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
+                    // Rescan button
+                    TvFocusCard(
+                        onClick = { rescanUpnp() },
+                        modifier = Modifier
+                            .width(220.dp)
+                            .height(48.dp)
                     ) {
-                        if (isScanningUpnp) {
-                            CircularProgressIndicator(modifier = Modifier.size(18.dp), color = AccentCyan, strokeWidth = 2.dp)
-                        } else {
-                            Icon(Icons.Default.Refresh, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
+                        Row(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (isScanningUpnp) {
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp), color = AccentCyan, strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Default.Refresh, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(text = if (isScanningUpnp) "Поиск..." else "Обновить список", style = MaterialTheme.typography.bodyMedium)
                         }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(text = if (isScanningUpnp) "Поиск..." else "Обновить список", style = MaterialTheme.typography.bodyMedium)
                     }
                 }
             }
@@ -3567,7 +4597,130 @@ fun SettingsScreen(
         Spacer(modifier = Modifier.height(28.dp))
 
         // ---------------------------------------------------------
-        // 2. Обновление приложения
+        // 2. IPTV / Онлайн ТВ
+        // ---------------------------------------------------------
+        Text(
+            text = "IPTV / Онлайн ТВ",
+            style = MaterialTheme.typography.titleLarge,
+            color = TextPrimary,
+            modifier = Modifier.padding(bottom = 12.dp)
+        )
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(DarkCard)
+                .padding(20.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Text(
+                    text = "Добавьте ссылку на плейлист каналов (M3U / M3U8) и программу передач EPG (XMLTV).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary
+                )
+
+                OutlinedTextField(
+                    value = iptvPlaylistInput,
+                    onValueChange = { iptvPlaylistInput = it },
+                    label = { Text("URL плейлиста (.m3u / .m3u8)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        focusedBorderColor = AccentCyan,
+                        unfocusedBorderColor = DarkSurface,
+                        focusedLabelColor = AccentCyan,
+                        unfocusedLabelColor = TextSecondary,
+                        cursorColor = AccentCyan
+                    )
+                )
+
+                OutlinedTextField(
+                    value = iptvEpgInput,
+                    onValueChange = { iptvEpgInput = it },
+                    label = { Text("URL программы передач (.xml / .xml.gz, необязательно)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        focusedBorderColor = AccentCyan,
+                        unfocusedBorderColor = DarkSurface,
+                        focusedLabelColor = AccentCyan,
+                        unfocusedLabelColor = TextSecondary,
+                        cursorColor = AccentCyan
+                    )
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TvFocusCard(
+                        onClick = {
+                            iptvManager.saveConfigAndLoad(iptvPlaylistInput, iptvEpgInput)
+                        },
+                        modifier = Modifier
+                            .width(240.dp)
+                            .height(48.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (iptvIsLoading) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    color = AccentCyan,
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Загрузка...",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = AccentCyan
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.CloudDownload,
+                                    contentDescription = null,
+                                    tint = AccentCyan,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Сохранить и загрузить",
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = AccentCyan
+                                )
+                            }
+                        }
+                    }
+
+                    if (!iptvStatusMessage.isNullOrBlank()) {
+                        Text(
+                            text = iptvStatusMessage ?: "",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (iptvStatusMessage?.contains("Ошибка", ignoreCase = true) == true) {
+                                Color(0xFFFF5252)
+                            } else {
+                                AccentCyan
+                            },
+                            modifier = Modifier.padding(start = 16.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(28.dp))
+
+        // ---------------------------------------------------------
+        // 3. Обновление приложения
         // ---------------------------------------------------------
         Text(
             text = "Обновление приложения",
@@ -3885,6 +5038,15 @@ fun SettingsScreen(
 }
 
 private fun getFriendlyChangelog(version: String, rawChangelog: String): List<String> {
+    if (version.contains("0.7")) {
+        return listOf(
+            "Полноценный IPTV плеер: загрузка M3U / M3U8 плейлистов и программы передач EPG (XMLTV, включая .xml.gz архив).",
+            "Главный экран в стиле Android TV: верхняя лента недавнего видео и избранных ТВ-каналов, а также компактные папки DLNA.",
+            "Компактные настройки серверов: аккуратная карточка подключенного DLNA с кнопкой смены сервера.",
+            "Чистый проводник файлов: скрыты лишние технические плашки форматов для быстрого и наглядного выбора видео."
+        )
+    }
+
     if (version.contains("0.6")) {
         return listOf(
             "Глобальная оптимизация и стабильность: проект полностью сфокусирован на молниеносной работе с домашними серверами DLNA / UPnP.",
@@ -3931,9 +5093,9 @@ private fun getFriendlyChangelog(version: String, rawChangelog: String): List<St
 private fun getCurrentAppVersion(context: Context): String {
     return try {
         val pInfo = context.packageManager.getPackageInfo(context.packageName, 0)
-        pInfo.versionName ?: "0.6.0"
+        pInfo.versionName ?: "0.7.0"
     } catch (e: Exception) {
-        "0.6.0"
+        "0.7.0"
     }
 }
 
@@ -3947,10 +5109,7 @@ private fun Context.findActivity(): Activity? {
 }
 
 
-================================================================================
-FILE: app/src/main/java/com/replayer/ui/theme/Color.kt
-================================================================================
-
+[ФАЙЛ 40: app/src/main/java/com/replayer/ui/theme/Color.kt]
 package com.replayer.ui.theme
 
 import androidx.compose.ui.graphics.Color
@@ -3967,10 +5126,7 @@ val TextSecondary = Color(0xFF94A3B8)
 val RedAccent = Color(0xFFEF4444)
 
 
-================================================================================
-FILE: app/src/main/java/com/replayer/ui/theme/Theme.kt
-================================================================================
-
+[ФАЙЛ 41: app/src/main/java/com/replayer/ui/theme/Theme.kt]
 package com.replayer.ui.theme
 
 import androidx.compose.material3.MaterialTheme
@@ -3995,10 +5151,7 @@ fun RePlayerTheme(content: @Composable () -> Unit) {
 }
 
 
-================================================================================
-FILE: app/src/main/java/com/replayer/ui/theme/Type.kt
-================================================================================
-
+[ФАЙЛ 42: app/src/main/java/com/replayer/ui/theme/Type.kt]
 package com.replayer.ui.theme
 
 import androidx.compose.material3.Typography
@@ -4041,10 +5194,7 @@ val TvTypography = Typography(
 )
 
 
-================================================================================
-FILE: app/src/main/java/com/replayer/updater/UpdateManager.kt
-================================================================================
-
+[ФАЙЛ 43: app/src/main/java/com/replayer/updater/UpdateManager.kt]
 package com.replayer.updater
 
 import android.content.Context
@@ -4305,10 +5455,7 @@ class UpdateManager(private val context: Context) {
 }
 
 
-================================================================================
-FILE: .github/workflows/build.yml
-================================================================================
-
+[ФАЙЛ 44: .github/workflows/build.yml]
 name: Build Re:Player Android APK
 
 on:
@@ -4397,3 +5544,115 @@ jobs:
         generate_release_notes: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+
+[ФАЙЛ 45: tools/publish_release.py]
+#!/usr/bin/env python3
+import sys
+import subprocess
+import time
+import json
+import urllib.request
+import os
+
+def run_cmd(cmd, check=True):
+    print(f"--> {cmd}")
+    res = subprocess.run(cmd, shell=True, text=True, capture_output=True)
+    if res.stdout:
+        print(res.stdout.strip())
+    if res.stderr:
+        print(res.stderr.strip(), file=sys.stderr)
+    if check and res.returncode != 0:
+        sys.exit(res.returncode)
+    return res
+
+def main():
+    if len(sys.argv) < 3:
+        print("Usage: python3 tools/publish_release.py <version> <commit_message>")
+        sys.exit(1)
+
+    version = sys.argv[1].lstrip("v")
+    commit_msg = sys.argv[2]
+    tag = f"v{version}"
+
+    # 1. Stage changes
+    run_cmd("git add -A")
+
+    # 2. Commit if there are changes
+    status_res = subprocess.run("git status --porcelain", shell=True, text=True, capture_output=True)
+    if status_res.stdout.strip():
+        run_cmd(f'git commit -m "{commit_msg}"')
+    else:
+        print("No changes to commit, continuing...")
+
+    # 3. Create tag if not exists
+    tag_check = subprocess.run(f"git rev-parse {tag}", shell=True, capture_output=True)
+    if tag_check.returncode == 0:
+        print(f"Tag {tag} already exists locally, replacing...")
+        run_cmd(f"git tag -d {tag}")
+    run_cmd(f'git tag -a {tag} -m "Release {tag}: {commit_msg}"')
+
+    # 4. Push branch and tag
+    run_cmd("git push origin main")
+    run_cmd(f"git push origin {tag} --force")
+
+    # 5. Monitor GitHub Actions
+    print(f"\n[CI] Monitoring GitHub Actions build for {tag}...")
+    repo = "SuperiorMor/Re-Player"
+    api_url = f"https://api.github.com/repos/{repo}/actions/runs?per_page=5"
+
+    run_id = None
+    for attempt in range(12):
+        try:
+            req = urllib.request.Request(api_url, headers={"User-Agent": "ReleaseBot"})
+            with urllib.request.urlopen(req) as resp:
+                data = json.loads(resp.read().decode())
+                for r in data.get("workflow_runs", []):
+                    if r.get("head_branch") == tag or (r.get("event") == "push" and r.get("head_branch") == tag):
+                        run_id = r.get("id")
+                        break
+            if run_id:
+                break
+        except Exception as e:
+            pass
+        time.sleep(5)
+
+    if not run_id:
+        print("[CI] Could not locate workflow run ID via API, waiting 90s for build to complete...")
+        time.sleep(90)
+    else:
+        print(f"[CI] Found workflow run ID: {run_id}. Polling status...")
+        run_url = f"https://api.github.com/repos/{repo}/actions/runs/{run_id}"
+        for attempt in range(30):
+            try:
+                req = urllib.request.Request(run_url, headers={"User-Agent": "ReleaseBot"})
+                with urllib.request.urlopen(req) as resp:
+                    r_data = json.loads(resp.read().decode())
+                    status = r_data.get("status")
+                    conclusion = r_data.get("conclusion")
+                    print(f"[CI] Status: {status}, Conclusion: {conclusion}")
+                    if status == "completed":
+                        if conclusion == "success":
+                            print("[CI] Build succeeded!")
+                        else:
+                            print(f"[CI] Build finished with status: {conclusion}", file=sys.stderr)
+                            sys.exit(1)
+                        break
+            except Exception as e:
+                print(f"[CI] Polling error: {e}")
+            time.sleep(10)
+
+    # 6. Verify and output download link
+    apk_name = f"RePlayer-{tag}.apk"
+    dl_url = f"https://github.com/{repo}/releases/download/{tag}/{apk_name}"
+    rel_url = f"https://github.com/{repo}/releases/tag/{tag}"
+
+    print("\n" + "=" * 60)
+    print(f"RELEASE {tag} PUBLISHED SUCCESSFULLY!")
+    print(f"GitHub Release: {rel_url}")
+    print(f"Direct APK Download: {dl_url}")
+    print("=" * 60)
+
+if __name__ == "__main__":
+    main()
+

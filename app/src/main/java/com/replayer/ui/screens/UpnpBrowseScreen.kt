@@ -57,6 +57,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.replayer.data.FavoritesManager
+import com.replayer.data.RecentMediaManager
 import com.replayer.data.ServerConfigManager
 import com.replayer.model.FavoriteFolder
 import com.replayer.model.MediaItem
@@ -90,6 +91,7 @@ fun UpnpBrowseScreen(
     val scope = rememberCoroutineScope()
     val serverConfigManager = remember { ServerConfigManager(context) }
     val favoritesManager = remember { FavoritesManager(context) }
+    val recentManager = remember { RecentMediaManager(context) }
     val contentDirectory = remember { ContentDirectoryService() }
 
     val connectedDevice by serverConfigManager.connectedUpnpDevice.collectAsState()
@@ -373,6 +375,7 @@ fun UpnpBrowseScreen(
                                     openFolder(url, item.id, item.title)
                                 }
                             } else {
+                                recentManager.addRecent(item.id, item.title, item.uri)
                                 onPlayMedia(item)
                             }
                         },
@@ -420,41 +423,14 @@ fun UpnpBrowseScreen(
                                     color = TextPrimary
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    // Format Badge
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(AccentCyan.copy(alpha = 0.2f))
-                                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                                    ) {
-                                        Text(
-                                            text = item.fileFormat(),
-                                            color = AccentCyan,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-
-                                    val sizeStr = item.formattedSize()
-                                    if (sizeStr.isNotEmpty()) {
-                                        Spacer(modifier = Modifier.width(12.dp))
-                                        Text(
-                                            text = sizeStr,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = TextSecondary
-                                        )
-                                    }
-
-                                    val dateStr = item.formattedDate()
-                                    if (dateStr.isNotEmpty()) {
-                                        Spacer(modifier = Modifier.width(12.dp))
-                                        Text(
-                                            text = dateStr,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = TextSecondary
-                                        )
-                                    }
+                                val sizeStr = item.formattedSize()
+                                if (sizeStr.isNotEmpty()) {
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = sizeStr,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TextSecondary
+                                    )
                                 }
                             }
 
@@ -518,6 +494,7 @@ fun UpnpBrowseScreen(
                                     openFolder(url, item.id, item.title)
                                 }
                             } else {
+                                recentManager.addRecent(item.id, item.title, item.uri)
                                 onPlayMedia(item)
                             }
                         },
@@ -567,21 +544,6 @@ fun UpnpBrowseScreen(
                                                 }
                                         )
                                         Spacer(modifier = Modifier.width(8.dp))
-                                    }
-
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(AccentCyan.copy(alpha = 0.2f))
-                                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                                    ) {
-                                        Text(
-                                            text = item.fileFormat(),
-                                            color = AccentCyan,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
                                 }
                             }
                             Spacer(modifier = Modifier.height(12.dp))

@@ -43,6 +43,7 @@ import com.replayer.ui.components.NavItem
 import com.replayer.ui.components.TvFocusCard
 import com.replayer.ui.components.TvNavigationRail
 import com.replayer.ui.screens.HomeScreen
+import com.replayer.ui.screens.IptvScreen
 import com.replayer.ui.screens.PlayerScreen
 import com.replayer.ui.screens.SettingsScreen
 import com.replayer.ui.screens.UpnpBrowseScreen
@@ -94,6 +95,13 @@ class MainActivity : ComponentActivity() {
                                             initialUpnpFolder = Pair(fav.id, fav.title)
                                             selectedNav = NavItem.UPNP
                                         }
+                                    },
+                                    onPlayMedia = { mediaItem ->
+                                        lastPlayedMediaId = mediaItem.id
+                                        activeMediaItem = mediaItem
+                                    },
+                                    onPlayChannel = { channel ->
+                                        activeMediaItem = channel.toMediaItem()
                                     }
                                 )
                                 NavItem.UPNP -> UpnpBrowseScreen(
@@ -108,6 +116,13 @@ class MainActivity : ComponentActivity() {
                                     isPlayerActive = (activeMediaItem != null),
                                     onFolderLoaded = { initialUpnpFolder = null },
                                     onConsumeLastPlayedMediaId = { lastPlayedMediaId = null }
+                                )
+                                NavItem.IPTV -> IptvScreen(
+                                    onPlayChannel = { channel ->
+                                        activeMediaItem = channel.toMediaItem()
+                                    },
+                                    onNavigateToSettings = { selectedNav = NavItem.SETTINGS },
+                                    onBackToHome = { selectedNav = NavItem.HOME }
                                 )
                                 NavItem.SETTINGS -> SettingsScreen(
                                     onBack = { selectedNav = NavItem.HOME }

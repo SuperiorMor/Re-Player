@@ -13,6 +13,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -31,6 +32,7 @@ import com.replayer.ui.theme.TextSecondary
 enum class NavItem(val label: String, val icon: ImageVector) {
     HOME("Главная", Icons.Default.Home),
     UPNP("UPnP / DLNA", Icons.Default.Folder),
+    IPTV("ТВ каналы", Icons.Default.Tv),
     SETTINGS("Настройки", Icons.Default.Settings)
 }
 

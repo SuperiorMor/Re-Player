@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
+import com.replayer.data.IptvManager
 import com.replayer.data.ServerConfigManager
 import com.replayer.model.UpnpDevice
 import com.replayer.network.upnp.SsdpDiscovery
@@ -66,6 +67,14 @@ fun SettingsScreen(
     // UPnP scanning state
     var discoveredDevices by remember { mutableStateOf<List<UpnpDevice>>(emptyList()) }
     var isScanningUpnp by remember { mutableStateOf(false) }
+    var showAvailableServers by remember { mutableStateOf(false) }
+
+    // IPTV state
+    val iptvManager = remember { IptvManager(context) }
+    var iptvPlaylistInput by remember { mutableStateOf(iptvManager.getSavedPlaylistUrl() ?: "") }
+    var iptvEpgInput by remember { mutableStateOf(iptvManager.getSavedEpgUrl() ?: "") }
+    val iptvIsLoading by iptvManager.isLoading.collectAsState()
+    val iptvStatusMessage by iptvManager.statusMessage.collectAsState()
 
     // App updates state
     var updateUiState by remember { mutableStateOf<UpdateUiState>(UpdateUiState.Idle) }
@@ -219,106 +228,134 @@ fun SettingsScreen(
                 }
 
                 if (connectedUpnpDevice != null) {
-                    TvFocusCard(
-                        onClick = { serverConfigManager.disconnectUpnpDevice() },
-                        modifier = Modifier
-                            .width(140.dp)
-                            .height(44.dp)
-                    ) {
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text(text = "Отключить", color = Color(0xFFFF5252), style = MaterialTheme.typography.bodyMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        TvFocusCard(
+                            onClick = {
+                                showAvailableServers = !showAvailableServers
+                                if (showAvailableServers) rescanUpnp()
+                            },
+                            modifier = Modifier
+                                .width(150.dp)
+                                .height(44.dp)
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = if (showAvailableServers) "Скрыть серверы" else "Сменить сервер",
+                                    color = AccentCyan,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        }
+
+                        TvFocusCard(
+                            onClick = {
+                                serverConfigManager.disconnectUpnpDevice()
+                                showAvailableServers = true
+                            },
+                            modifier = Modifier
+                                .width(120.dp)
+                                .height(44.dp)
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text(text = "Отключить", color = Color(0xFFFF5252), style = MaterialTheme.typography.bodyMedium)
+                            }
                         }
                     }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        // Discovered Devices Section (shown when none connected or when toggled via "Сменить сервер")
+        if (connectedUpnpDevice == null || showAvailableServers) {
+            Spacer(modifier = Modifier.height(16.dp))
 
-        // Discovered Devices Section
-        Text(
-            text = "Доступные медиасерверы в сети",
-            style = MaterialTheme.typography.titleMedium,
-            color = TextSecondary,
-            modifier = Modifier.padding(bottom = 8.dp)
-        )
+            Text(
+                text = "Доступные медиасерверы в сети",
+                style = MaterialTheme.typography.titleMedium,
+                color = TextSecondary,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
 
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(DarkCard)
-                .padding(16.dp)
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (discoveredDevices.isEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 24.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = if (isScanningUpnp) "Поиск серверов в локальной сети..." else "Серверы не найдены. Убедитесь, что ПК или NAS включены и находятся в одной сети Wi-Fi.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = TextSecondary
-                        )
-                    }
-                } else {
-                    discoveredDevices.forEach { device ->
-                        TvFocusCard(
-                            onClick = { serverConfigManager.connectUpnpDevice(device) },
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(DarkCard)
+                    .padding(16.dp)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (discoveredDevices.isEmpty()) {
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(72.dp)
+                                .padding(vertical = 24.dp),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Row(
+                            Text(
+                                text = if (isScanningUpnp) "Поиск серверов в локальной сети..." else "Серверы не найдены. Убедитесь, что ПК или NAS включены и находятся в одной сети Wi-Fi.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = TextSecondary
+                            )
+                        }
+                    } else {
+                        discoveredDevices.forEach { device ->
+                            TvFocusCard(
+                                onClick = {
+                                    serverConfigManager.connectUpnpDevice(device)
+                                    showAvailableServers = false
+                                },
                                 modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(horizontal = 20.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                                    .fillMaxWidth()
+                                    .height(72.dp)
                             ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Folder, contentDescription = null, tint = AccentCyan)
-                                    Spacer(modifier = Modifier.width(16.dp))
-                                    Column {
-                                        Text(text = device.friendlyName, style = MaterialTheme.typography.titleMedium, color = TextPrimary)
-                                        Text(text = device.manufacturer.ifEmpty { device.location }, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
-                                    }
-                                }
-                                Box(
+                                Row(
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(AccentCyan.copy(alpha = 0.15f))
-                                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                                        .fillMaxSize()
+                                        .padding(horizontal = 20.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text(text = "Подключить", color = AccentCyan, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Folder, contentDescription = null, tint = AccentCyan)
+                                        Spacer(modifier = Modifier.width(16.dp))
+                                        Column {
+                                            Text(text = device.friendlyName, style = MaterialTheme.typography.titleMedium, color = TextPrimary)
+                                            Text(text = device.manufacturer.ifEmpty { device.location }, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                                        }
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(AccentCyan.copy(alpha = 0.15f))
+                                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                                    ) {
+                                        Text(text = "Подключить", color = AccentCyan, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    }
                                 }
                             }
                         }
                     }
-                }
 
-                // Rescan button
-                TvFocusCard(
-                    onClick = { rescanUpnp() },
-                    modifier = Modifier
-                        .width(220.dp)
-                        .height(48.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxSize(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
+                    // Rescan button
+                    TvFocusCard(
+                        onClick = { rescanUpnp() },
+                        modifier = Modifier
+                            .width(220.dp)
+                            .height(48.dp)
                     ) {
-                        if (isScanningUpnp) {
-                            CircularProgressIndicator(modifier = Modifier.size(18.dp), color = AccentCyan, strokeWidth = 2.dp)
-                        } else {
-                            Icon(Icons.Default.Refresh, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
+                        Row(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (isScanningUpnp) {
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp), color = AccentCyan, strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Default.Refresh, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(text = if (isScanningUpnp) "Поиск..." else "Обновить список", style = MaterialTheme.typography.bodyMedium)
                         }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(text = if (isScanningUpnp) "Поиск..." else "Обновить список", style = MaterialTheme.typography.bodyMedium)
                     }
                 }
             }
@@ -327,7 +364,130 @@ fun SettingsScreen(
         Spacer(modifier = Modifier.height(28.dp))
 
         // ---------------------------------------------------------
-        // 2. Обновление приложения
+        // 2. IPTV / Онлайн ТВ
+        // ---------------------------------------------------------
+        Text(
+            text = "IPTV / Онлайн ТВ",
+            style = MaterialTheme.typography.titleLarge,
+            color = TextPrimary,
+            modifier = Modifier.padding(bottom = 12.dp)
+        )
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(DarkCard)
+                .padding(20.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Text(
+                    text = "Добавьте ссылку на плейлист каналов (M3U / M3U8) и программу передач EPG (XMLTV).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary
+                )
+
+                OutlinedTextField(
+                    value = iptvPlaylistInput,
+                    onValueChange = { iptvPlaylistInput = it },
+                    label = { Text("URL плейлиста (.m3u / .m3u8)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        focusedBorderColor = AccentCyan,
+                        unfocusedBorderColor = DarkSurface,
+                        focusedLabelColor = AccentCyan,
+                        unfocusedLabelColor = TextSecondary,
+                        cursorColor = AccentCyan
+                    )
+                )
+
+                OutlinedTextField(
+                    value = iptvEpgInput,
+                    onValueChange = { iptvEpgInput = it },
+                    label = { Text("URL программы передач (.xml / .xml.gz, необязательно)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        focusedBorderColor = AccentCyan,
+                        unfocusedBorderColor = DarkSurface,
+                        focusedLabelColor = AccentCyan,
+                        unfocusedLabelColor = TextSecondary,
+                        cursorColor = AccentCyan
+                    )
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TvFocusCard(
+                        onClick = {
+                            iptvManager.saveConfigAndLoad(iptvPlaylistInput, iptvEpgInput)
+                        },
+                        modifier = Modifier
+                            .width(240.dp)
+                            .height(48.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (iptvIsLoading) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    color = AccentCyan,
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Загрузка...",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = AccentCyan
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.CloudDownload,
+                                    contentDescription = null,
+                                    tint = AccentCyan,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Сохранить и загрузить",
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = AccentCyan
+                                )
+                            }
+                        }
+                    }
+
+                    if (!iptvStatusMessage.isNullOrBlank()) {
+                        Text(
+                            text = iptvStatusMessage ?: "",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (iptvStatusMessage?.contains("Ошибка", ignoreCase = true) == true) {
+                                Color(0xFFFF5252)
+                            } else {
+                                AccentCyan
+                            },
+                            modifier = Modifier.padding(start = 16.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(28.dp))
+
+        // ---------------------------------------------------------
+        // 3. Обновление приложения
         // ---------------------------------------------------------
         Text(
             text = "Обновление приложения",
@@ -645,6 +805,15 @@ fun SettingsScreen(
 }
 
 private fun getFriendlyChangelog(version: String, rawChangelog: String): List<String> {
+    if (version.contains("0.7")) {
+        return listOf(
+            "Полноценный IPTV плеер: загрузка M3U / M3U8 плейлистов и программы передач EPG (XMLTV, включая .xml.gz архив).",
+            "Главный экран в стиле Android TV: верхняя лента недавнего видео и избранных ТВ-каналов, а также компактные папки DLNA.",
+            "Компактные настройки серверов: аккуратная карточка подключенного DLNA с кнопкой смены сервера.",
+            "Чистый проводник файлов: скрыты лишние технические плашки форматов для быстрого и наглядного выбора видео."
+        )
+    }
+
     if (version.contains("0.6")) {
         return listOf(
             "Глобальная оптимизация и стабильность: проект полностью сфокусирован на молниеносной работе с домашними серверами DLNA / UPnP.",
@@ -691,9 +860,9 @@ private fun getFriendlyChangelog(version: String, rawChangelog: String): List<St
 private fun getCurrentAppVersion(context: Context): String {
     return try {
         val pInfo = context.packageManager.getPackageInfo(context.packageName, 0)
-        pInfo.versionName ?: "0.6.0"
+        pInfo.versionName ?: "0.7.0"
     } catch (e: Exception) {
-        "0.6.0"
+        "0.7.0"
     }
 }
 
