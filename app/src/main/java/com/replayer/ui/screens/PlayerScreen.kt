@@ -121,7 +121,6 @@ fun PlayerScreen(
         if (archiveUrl != null) {
             playingArchiveProgram = prog
             engine.play(mediaItem.copy(title = "${fullChannel.name} • ${prog.title}", uri = archiveUrl))
-            osdFeedback = "Архив: ${prog.title} (${prog.formattedStartTime()})"
         } else {
             osdFeedback = "Архив недоступен для этого канала"
         }
@@ -367,16 +366,13 @@ fun PlayerScreen(
                     Spacer(modifier = Modifier.height(4.dp))
                     val selectedAudio = playerState.audioTracks.find { it.id == playerState.selectedAudioTrackId }
                     val audioInfo = selectedAudio?.let { " • Звук: ${it.label}" } ?: ""
-                    val sourceLabel = if (isIptv && playingArchiveProgram != null) {
-                        "Архив (${playingArchiveProgram!!.formattedTimeRange()})"
-                    } else {
-                        mediaItem.sourceType.name
+                    if (!isIptv) {
+                        Text(
+                            text = "Источник: ${mediaItem.sourceType.name}$audioInfo",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = AccentCyan
+                        )
                     }
-                    Text(
-                        text = "Источник: $sourceLabel$audioInfo",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = AccentCyan
-                    )
                 }
 
                 // Bottom Controls: Progress & Audio/Subtitle selection buttons
@@ -385,11 +381,22 @@ fun PlayerScreen(
                         .fillMaxWidth()
                         .align(Alignment.BottomCenter)
                 ) {
-                    val isArchiveScrubbable = isIptv && playingArchiveProgram != null && playerState.durationMs > 0L
                     // Time Labels & Interactive Seek Bar / IPTV EPG Timebar
-                    if (isIptv && !isArchiveScrubbable) {
+                    if (isIptv) {
                         val displayProg = playingArchiveProgram ?: currentProgram
-                        val progFraction = (displayProg?.progress() ?: 0.5f).coerceIn(0f, 1f)
+                        val progFraction = if (playingArchiveProgram != null) {
+                            val arch = playingArchiveProgram!!
+                            val archDurMs = (arch.endTimeMs - arch.startTimeMs).coerceAtLeast(1L)
+                            if (playerState.currentPositionMs in 1L..(archDurMs + 60_000L)) {
+                                (playerState.currentPositionMs.toFloat() / archDurMs.toFloat()).coerceIn(0f, 1f)
+                            } else if (playerState.position > 0f && playerState.durationMs > 0L) {
+                                playerState.position.coerceIn(0f, 1f)
+                            } else {
+                                0f
+                            }
+                        } else {
+                            (currentProgram?.progress() ?: 0.5f).coerceIn(0f, 1f)
+                        }
                         Column(modifier = Modifier.fillMaxWidth()) {
                             if (displayProg != null) {
                                 Text(
@@ -1170,12 +1177,12 @@ fun EpgAccordionDialog(
                                 label = "epg_border"
                             )
 
-                            val badgeText = when {
+                            val badgeText: String? = when {
                                 isPlayingArchiveItem -> "ИДЁТ"
                                 isItemCurrent -> "В ЭФИРЕ"
                                 isItemPast && hasArchive -> "АРХИВ"
                                 isItemPast -> "ПРОШЛА"
-                                else -> "СКОРО"
+                                else -> null
                             }
                             val badgeColor = when {
                                 isPlayingArchiveItem || isItemCurrent -> AccentCyan
@@ -1231,18 +1238,20 @@ fun EpgAccordionDialog(
                                             overflow = TextOverflow.Ellipsis,
                                             modifier = Modifier.weight(1f)
                                         )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Box(
-                                            modifier = Modifier
-                                                .clip(RoundedCornerShape(6.dp))
-                                                .background(badgeColor.copy(alpha = 0.16f))
-                                                .padding(horizontal = 7.dp, vertical = 2.dp)
-                                        ) {
-                                            Text(
-                                                text = badgeText,
-                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                                color = badgeColor
-                                            )
+                                        if (badgeText != null) {
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .background(badgeColor.copy(alpha = 0.16f))
+                                                    .padding(horizontal = 7.dp, vertical = 2.dp)
+                                            ) {
+                                                Text(
+                                                    text = badgeText,
+                                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                                    color = badgeColor
+                                                )
+                                            }
                                         }
                                     }
 

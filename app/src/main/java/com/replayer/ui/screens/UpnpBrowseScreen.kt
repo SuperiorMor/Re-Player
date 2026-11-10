@@ -24,8 +24,8 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AudioFile
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Image
@@ -386,15 +386,18 @@ fun UpnpBrowseScreen(
                                     openFolder(url, item.id, item.title)
                                 }
                             } else {
-                                recentManager.addRecent(
-                                    id = item.id,
-                                    title = item.title,
-                                    uri = item.uri,
-                                    parentId = item.parentId,
-                                    folderTitle = folderStack.lastOrNull()?.second
-                                )
-                                recentManager.resolveVerticalPoster(item, currentItems)
-                                val playables = currentItems.filter { it.type != MediaType.DIRECTORY }
+                                if (item.type == MediaType.VIDEO || item.type == MediaType.AUDIO) {
+                                    recentManager.addRecent(
+                                        id = item.id,
+                                        title = item.title,
+                                        uri = item.uri,
+                                        parentId = item.parentId ?: folderStack.lastOrNull()?.first,
+                                        folderTitle = folderStack.lastOrNull()?.second
+                                    )
+                                    recentManager.resolveVerticalPoster(item, currentItems)
+                                }
+                                val playables = currentItems.filter { it.type == MediaType.VIDEO || it.type == MediaType.AUDIO }
+                                    .ifEmpty { listOf(item) }
                                 onPlayMedia(item, playables)
                             }
                         },
@@ -470,13 +473,13 @@ fun UpnpBrowseScreen(
                                     }
                                 }
 
-                                // Favorite Heart button for folders
+                                // Favorite Star button for folders
                                 if (item.type == MediaType.DIRECTORY) {
                                     Box(
                                         modifier = Modifier
                                             .size(36.dp)
                                             .clip(RoundedCornerShape(8.dp))
-                                            .background(if (isFav) Color(0xFFFF4081).copy(alpha = 0.15f) else Color.Transparent)
+                                            .background(if (isFav) Color(0xFFFFD54F).copy(alpha = 0.15f) else Color.Transparent)
                                             .clickable {
                                                 favoritesManager.toggleFavorite(
                                                     FavoriteFolder(
@@ -491,9 +494,9 @@ fun UpnpBrowseScreen(
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Icon(
-                                            imageVector = if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                            imageVector = if (isFav) Icons.Default.Star else Icons.Default.StarBorder,
                                             contentDescription = "Избранное",
-                                            tint = if (isFav) Color(0xFFFF4081) else TextSecondary,
+                                            tint = if (isFav) Color(0xFFFFD54F) else TextSecondary,
                                             modifier = Modifier.size(20.dp)
                                         )
                                     }
@@ -538,15 +541,18 @@ fun UpnpBrowseScreen(
                                     openFolder(url, item.id, item.title)
                                 }
                             } else {
-                                recentManager.addRecent(
-                                    id = item.id,
-                                    title = item.title,
-                                    uri = item.uri,
-                                    parentId = item.parentId,
-                                    folderTitle = folderStack.lastOrNull()?.second
-                                )
-                                recentManager.resolveVerticalPoster(item, currentItems)
-                                val playables = currentItems.filter { it.type != MediaType.DIRECTORY }
+                                if (item.type == MediaType.VIDEO || item.type == MediaType.AUDIO) {
+                                    recentManager.addRecent(
+                                        id = item.id,
+                                        title = item.title,
+                                        uri = item.uri,
+                                        parentId = item.parentId ?: folderStack.lastOrNull()?.first,
+                                        folderTitle = folderStack.lastOrNull()?.second
+                                    )
+                                    recentManager.resolveVerticalPoster(item, currentItems)
+                                }
+                                val playables = currentItems.filter { it.type == MediaType.VIDEO || it.type == MediaType.AUDIO }
+                                    .ifEmpty { listOf(item) }
                                 onPlayMedia(item, playables)
                             }
                         },
@@ -595,9 +601,9 @@ fun UpnpBrowseScreen(
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         if (item.type == MediaType.DIRECTORY) {
                                             Icon(
-                                                imageVector = if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                                imageVector = if (isFav) Icons.Default.Star else Icons.Default.StarBorder,
                                                 contentDescription = null,
-                                                tint = if (isFav) Color(0xFFFF4081) else TextSecondary,
+                                                tint = if (isFav) Color(0xFFFFD54F) else TextSecondary,
                                                 modifier = Modifier
                                                     .size(20.dp)
                                                     .clickable {

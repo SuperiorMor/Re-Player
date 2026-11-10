@@ -28,7 +28,7 @@ class ContentDirectoryService {
             append("<BrowseFlag>BrowseDirectChildren</BrowseFlag>")
             append("<Filter>*</Filter>")
             append("<StartingIndex>0</StartingIndex>")
-            append("<RequestedCount>100</RequestedCount>")
+            append("<RequestedCount>500</RequestedCount>")
             append("<SortCriteria></SortCriteria>")
             append("</u:Browse>")
             append("</s:Body>")
@@ -105,6 +105,9 @@ class ContentDirectoryService {
                             (upnpCls.contains("videoItem", ignoreCase = true) && proto.contains("image/", ignoreCase = true))
 
                         if (!currentResIsThumb) {
+                            if (proto.isNotBlank() && !currentItem.containsKey("protocolInfo")) {
+                                currentItem["protocolInfo"] = proto
+                            }
                             if (!sizeAttr.isNullOrEmpty() && !currentItem.containsKey("size")) {
                                 currentItem["size"] = sizeAttr
                             }
@@ -152,24 +155,32 @@ class ContentDirectoryService {
                         val date = currentItem["date"]
                         val albumArt = currentItem["albumArt"]
                         val resolution = currentItem["resolution"]
+                        val proto = currentItem["protocolInfo"] ?: ""
+                        val resClean = res.substringBefore('?').substringBefore('#')
+                        val titleLower = title.lowercase()
+                        val resLower = resClean.lowercase()
+                        fun hasAnyExt(vararg exts: String): Boolean =
+                            exts.any { titleLower.endsWith(it) || resLower.endsWith(it) }
+
                         val ext = title.substringAfterLast('.', "").uppercase()
                         val format = if (ext.isNotEmpty() && ext.length <= 5) ext else null
 
                         val mediaType = when {
                             isContainer -> MediaType.DIRECTORY
-                            upnpClass.contains("videoItem", ignoreCase = true) -> MediaType.VIDEO
-                            upnpClass.contains("audioItem", ignoreCase = true) -> MediaType.AUDIO
-                            upnpClass.contains("imageItem", ignoreCase = true) -> MediaType.IMAGE
-                            res.endsWith(".mkv", ignoreCase = true) || res.endsWith(".mp4", ignoreCase = true) ||
-                            res.endsWith(".avi", ignoreCase = true) || res.endsWith(".ts", ignoreCase = true) ||
-                            res.endsWith(".m2ts", ignoreCase = true) || res.endsWith(".mov", ignoreCase = true) ||
-                            res.endsWith(".webm", ignoreCase = true) -> MediaType.VIDEO
-                            res.endsWith(".mp3", ignoreCase = true) || res.endsWith(".flac", ignoreCase = true) ||
-                            res.endsWith(".m4a", ignoreCase = true) || res.endsWith(".wav", ignoreCase = true) ||
-                            res.endsWith(".aac", ignoreCase = true) || res.endsWith(".ogg", ignoreCase = true) -> MediaType.AUDIO
-                            res.endsWith(".jpg", ignoreCase = true) || res.endsWith(".jpeg", ignoreCase = true) ||
-                            res.endsWith(".png", ignoreCase = true) || res.endsWith(".webp", ignoreCase = true) -> MediaType.IMAGE
-                            else -> MediaType.VIDEO
+                            upnpClass.contains("imageItem", ignoreCase = true) ||
+                                (!upnpClass.contains("videoItem", ignoreCase = true) &&
+                                    !upnpClass.contains("audioItem", ignoreCase = true) &&
+                                    (proto.contains("image/", ignoreCase = true) ||
+                                        hasAnyExt(".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"))) -> MediaType.IMAGE
+                            hasAnyExt(".srt", ".ass", ".ssa", ".sub", ".vtt", ".idx") ||
+                                proto.contains("text/", ignoreCase = true) -> MediaType.UNKNOWN
+                            upnpClass.contains("audioItem", ignoreCase = true) ||
+                                proto.contains("audio/", ignoreCase = true) ||
+                                hasAnyExt(".mp3", ".flac", ".m4a", ".wav", ".aac", ".ogg", ".opus", ".wma") -> MediaType.AUDIO
+                            upnpClass.contains("videoItem", ignoreCase = true) ||
+                                proto.contains("video/", ignoreCase = true) ||
+                                hasAnyExt(".mkv", ".mp4", ".avi", ".ts", ".m2ts", ".mov", ".webm", ".m4v", ".wmv", ".mpg", ".mpeg", ".flv") -> MediaType.VIDEO
+                            else -> MediaType.UNKNOWN
                         }
 
                         items.add(

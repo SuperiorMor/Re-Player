@@ -780,7 +780,7 @@ fun SettingsScreen(
                                 is UpdateUiState.NoReleases -> "Релизы на GitHub не найдены"
                                 is UpdateUiState.Available -> "Доступна новая версия: ${state.release.tagName}"
                                 is UpdateUiState.Downloading -> "Идёт скачивание файла обновления..."
-                                is UpdateUiState.ReadyToInstall -> "Загрузка завершена! Нажмите «Установить»."
+                                is UpdateUiState.ReadyToInstall -> "Загрузка завершена! Нажмите кнопку «Установка»."
                                 is UpdateUiState.Error -> state.message
                                 else -> "Проверка новых версий на GitHub и установка в один клик"
                             },
@@ -913,7 +913,7 @@ fun SettingsScreen(
                                         modifier = Modifier.size(18.dp)
                                     )
                                     Text(
-                                        text = "Установить",
+                                        text = "Установка",
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = AccentCyan,
                                         fontWeight = FontWeight.Bold

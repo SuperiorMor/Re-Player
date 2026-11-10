@@ -17,7 +17,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Star
@@ -43,6 +42,7 @@ import coil.compose.AsyncImage
 import com.replayer.data.FavoritesManager
 import com.replayer.data.IptvManager
 import com.replayer.data.RecentMediaManager
+import com.replayer.data.ServerConfigManager
 import com.replayer.model.EpgProgram
 import com.replayer.model.FavoriteFolder
 import com.replayer.model.IptvChannel
@@ -66,16 +66,25 @@ fun HomeScreen(
     val favoritesManager = remember { FavoritesManager(context) }
     val recentManager = remember { RecentMediaManager.getInstance(context) }
     val iptvManager = remember { IptvManager.getInstance(context) }
+    val serverConfigManager = remember { ServerConfigManager(context) }
 
     val favorites by favoritesManager.favorites.collectAsState()
     val recentList by recentManager.recentList.collectAsState()
     val progressMap by recentManager.progressMap.collectAsState()
+    val connectedDevice by serverConfigManager.connectedUpnpDevice.collectAsState()
     val channels by iptvManager.channels.collectAsState()
     val favoriteChannelIds by iptvManager.favoriteChannelIds.collectAsState()
     val epgMap by iptvManager.epgMap.collectAsState()
 
     val favoriteChannels = remember(channels, favoriteChannelIds) {
         iptvManager.getFavoriteChannels()
+    }
+
+    LaunchedEffect(connectedDevice?.contentDirectoryControlUrl, recentList) {
+        val controlUrl = connectedDevice?.contentDirectoryControlUrl ?: return@LaunchedEffect
+        if (recentList.any { it.thumbnailUrl.isNullOrBlank() && !it.parentId.isNullOrBlank() }) {
+            recentManager.resolveMissingPosters(controlUrl)
+        }
     }
 
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -93,15 +102,16 @@ fun HomeScreen(
             .padding(horizontal = 28.dp, vertical = 18.dp)
     ) {
         // -------------------------------------------------------------
-        // ВЕРХНИЙ БЛОК: СЛЕВА 2 ПОСТЕРА «ПРОДОЛЖИТЬ ПРОСМОТР» | СПРАВА «ИЗБРАННЫЕ ПАПКИ»
+        // ВЕРХНИЙ БЛОК: СЛЕВА ПОСТЕРЫ (~ПОЛОВИНА ЭКРАНА) | СПРАВА «ИЗБРАННЫЕ ПАПКИ» ДО КРАЯ ЭКРАНА
         // -------------------------------------------------------------
+        val posterSectionHeight = 220.dp
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.Top
         ) {
-            // LEFT COLUMN: Продолжить просмотр (up to 2 vertical posters, 1 per folder)
+            // LEFT COLUMN: Продолжить просмотр (~46% ширины, до 2 постеров с одной папки макс.)
             val recentPosters = remember(recentList) { recentList.take(2) }
-            Column(modifier = Modifier.width(248.dp)) {
+            Column(modifier = Modifier.weight(0.46f)) {
                 Text(
                     text = "Продолжить просмотр",
                     style = MaterialTheme.typography.titleMedium.copy(
@@ -118,7 +128,7 @@ fun HomeScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(168.dp)
+                            .height(posterSectionHeight)
                             .clip(RoundedCornerShape(12.dp))
                             .background(DarkCard)
                             .padding(16.dp),
@@ -129,7 +139,7 @@ fun HomeScreen(
                                 imageVector = Icons.Default.PlayArrow,
                                 contentDescription = null,
                                 tint = AccentCyan.copy(alpha = 0.55f),
-                                modifier = Modifier.size(30.dp)
+                                modifier = Modifier.size(34.dp)
                             )
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
@@ -142,7 +152,7 @@ fun HomeScreen(
                 } else {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
                         recentPosters.forEach { recent ->
                             val watchProgress = remember(recent, progressMap) {
@@ -154,8 +164,8 @@ fun HomeScreen(
                             HomeShelfFocusCard(
                                 onClick = { onPlayMedia(recent.toMediaItem()) },
                                 modifier = Modifier
-                                    .width(118.dp)
-                                    .height(168.dp)
+                                    .weight(1f)
+                                    .height(posterSectionHeight)
                             ) { isFocused ->
                                 Box(modifier = Modifier.fillMaxSize()) {
                                     // Background: Full-bleed vertical cover poster OR sleek slate fallback
@@ -201,7 +211,7 @@ fun HomeScreen(
                                     Box(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .fillMaxHeight(0.55f)
+                                            .fillMaxHeight(0.50f)
                                             .align(Alignment.BottomCenter)
                                             .background(
                                                 Brush.verticalGradient(
@@ -213,7 +223,7 @@ fun HomeScreen(
                                             )
                                     )
 
-                                    // Single-line title with marquee on focus (NO camera icon, NO DLNA badge)
+                                    // Single-line title with marquee on focus
                                     Column(
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -222,7 +232,7 @@ fun HomeScreen(
                                         Text(
                                             text = recent.title,
                                             style = MaterialTheme.typography.bodySmall.copy(
-                                                fontSize = 12.sp,
+                                                fontSize = 13.sp,
                                                 fontWeight = FontWeight.SemiBold
                                             ),
                                             color = TextPrimary,
@@ -230,7 +240,7 @@ fun HomeScreen(
                                             overflow = TextOverflow.Ellipsis,
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .padding(horizontal = 8.dp, vertical = 7.dp)
+                                                .padding(horizontal = 10.dp, vertical = 8.dp)
                                                 .then(
                                                     if (isFocused) {
                                                         Modifier.basicMarquee(
@@ -270,14 +280,19 @@ fun HomeScreen(
                                 }
                             }
                         }
+
+                        // Preserve crisp vertical poster proportions when only 1 recent item exists
+                        if (recentPosters.size == 1) {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.width(24.dp))
+            Spacer(modifier = Modifier.width(20.dp))
 
-            // RIGHT COLUMN: Избранные папки DLNA (larger 2-row horizontal grid cards)
-            Column(modifier = Modifier.weight(1f)) {
+            // RIGHT COLUMN: Избранные папки DLNA (растянуты до правого края экрана)
+            Column(modifier = Modifier.weight(0.54f)) {
                 Text(
                     text = "Избранные папки",
                     style = MaterialTheme.typography.titleMedium.copy(
@@ -294,7 +309,7 @@ fun HomeScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(168.dp)
+                            .height(posterSectionHeight)
                             .clip(RoundedCornerShape(12.dp))
                             .background(DarkCard)
                             .padding(horizontal = 24.dp, vertical = 20.dp),
@@ -309,74 +324,85 @@ fun HomeScreen(
                             )
                             Spacer(modifier = Modifier.width(12.dp))
                             Text(
-                                text = "Нажимайте сердечко ♥ рядом с папкой в DLNA для быстрого доступа",
+                                text = "Нажимайте звёздочку ★ рядом с папкой в DLNA для быстрого доступа",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = TextSecondary
                             )
                         }
                     }
                 } else {
-                    LazyHorizontalGrid(
-                        rows = GridCells.Fixed(2),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                        contentPadding = PaddingValues(horizontal = 2.dp, vertical = 2.dp),
+                    BoxWithConstraints(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(168.dp)
+                            .height(posterSectionHeight)
                     ) {
-                        gridItemsIndexed(favorites, key = { idx, fav -> "${fav.id}_$idx" }) { _, fav ->
-                            HomeShelfFocusCard(
-                                onClick = { onOpenFavorite(fav) },
-                                modifier = Modifier
-                                    .width(284.dp)
-                                    .fillMaxHeight()
-                            ) { _ ->
-                                Row(
+                        val gridWidth = maxWidth
+                        val cardWidth = if (favorites.size <= 2) {
+                            gridWidth - 4.dp
+                        } else {
+                            ((gridWidth - 16.dp) / 2f).coerceAtLeast(200.dp)
+                        }
+
+                        LazyHorizontalGrid(
+                            rows = GridCells.Fixed(2),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                            contentPadding = PaddingValues(horizontal = 2.dp, vertical = 2.dp),
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            gridItemsIndexed(favorites, key = { idx, fav -> "${fav.id}_$idx" }) { _, fav ->
+                                HomeShelfFocusCard(
+                                    onClick = { onOpenFavorite(fav) },
                                     modifier = Modifier
-                                        .fillMaxSize()
-                                        .padding(horizontal = 16.dp, vertical = 10.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
+                                        .width(cardWidth)
+                                        .fillMaxHeight()
+                                ) { _ ->
                                     Row(
-                                        modifier = Modifier.weight(1f),
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(38.dp)
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(AccentCyan.copy(alpha = 0.14f)),
-                                            contentAlignment = Alignment.Center
+                                        Row(
+                                            modifier = Modifier.weight(1f),
+                                            verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Folder,
-                                                contentDescription = null,
-                                                tint = AccentCyan,
-                                                modifier = Modifier.size(22.dp)
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(40.dp)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(AccentCyan.copy(alpha = 0.14f)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Folder,
+                                                    contentDescription = null,
+                                                    tint = AccentCyan,
+                                                    modifier = Modifier.size(22.dp)
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.width(12.dp))
+                                            Text(
+                                                text = fav.title,
+                                                style = MaterialTheme.typography.titleSmall.copy(
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    lineHeight = 18.sp
+                                                ),
+                                                color = TextPrimary,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis
                                             )
                                         }
-                                        Spacer(modifier = Modifier.width(12.dp))
-                                        Text(
-                                            text = fav.title,
-                                            style = MaterialTheme.typography.titleSmall.copy(
-                                                fontSize = 14.sp,
-                                                fontWeight = FontWeight.SemiBold,
-                                                lineHeight = 18.sp
-                                            ),
-                                            color = TextPrimary,
-                                            maxLines = 2,
-                                            overflow = TextOverflow.Ellipsis
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Icon(
+                                            imageVector = Icons.Default.Star,
+                                            contentDescription = "В избранном",
+                                            tint = Color(0xFFFFD54F),
+                                            modifier = Modifier.size(18.dp)
                                         )
                                     }
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Icon(
-                                        imageVector = Icons.Default.Favorite,
-                                        contentDescription = "В избранном",
-                                        tint = Color(0xFFFF4081),
-                                        modifier = Modifier.size(16.dp)
-                                    )
                                 }
                             }
                         }
@@ -385,7 +411,7 @@ fun HomeScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(22.dp))
+        Spacer(modifier = Modifier.height(20.dp))
 
         // -------------------------------------------------------------
         // НИЖНИЙ БЛОК: ТЕЛЕПРОГРАММА ИЗБРАННЫХ КАНАЛОВ (Google TV Live Guide)
@@ -419,7 +445,7 @@ fun HomeScreen(
                     )
                     Spacer(modifier = Modifier.width(12.dp))
                     Text(
-                        text = "Отмечайте каналы сердечком в разделе «ТВ каналы», чтобы видеть их программу передач здесь.",
+                        text = "Отмечайте каналы звёздочкой в разделе «ТВ каналы», чтобы видеть их программу передач здесь.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = TextSecondary
                     )
@@ -536,12 +562,13 @@ private fun GoogleTvLiveGuide(
     Box(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             // Timeline Ruler Header
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .padding(horizontal = 4.dp)
                     .height(26.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -596,7 +623,7 @@ private fun GoogleTvLiveGuide(
                 }
             }
 
-            // Channel Rows
+            // Channel Rows (single focusable unit per channel row)
             favoriteChannels.forEach { channel ->
                 val progs = remember(channel, epgMap) {
                     iptvManager.getProgramsForChannel(channel)
@@ -604,21 +631,47 @@ private fun GoogleTvLiveGuide(
                 val slots = remember(progs, windowStart, windowEnd) {
                     buildTimelineSlots(progs, windowStart, windowEnd)
                 }
+                val rowInteractionSource = remember { MutableInteractionSource() }
+                val isRowFocused by rowInteractionSource.collectIsFocusedAsState()
+                val rowScale by animateFloatAsState(
+                    targetValue = if (isRowFocused) 1.012f else 1.0f,
+                    label = "gtv_row_scale"
+                )
 
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .scale(rowScale)
+                        .zIndex(if (isRowFocused) 1f else 0f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (isRowFocused) Color(0x18FFFFFF) else Color.Transparent)
+                        .border(
+                            width = if (isRowFocused) 2.dp else 1.dp,
+                            color = if (isRowFocused) Color.White else Color.Transparent,
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        .clickable(
+                            interactionSource = rowInteractionSource,
+                            indication = null,
+                            onClick = { onPlayChannel(channel) }
+                        )
+                        .focusable(interactionSource = rowInteractionSource)
+                        .padding(horizontal = 4.dp, vertical = 3.dp)
                         .height(56.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Left Channel Logo Box with tiny star badge
+                    // Left Channel Logo Box (clean logo only, no star badge)
                     Box(
                         modifier = Modifier
                             .width(logoColWidth)
                             .fillMaxHeight()
                             .clip(RoundedCornerShape(10.dp))
-                            .background(Color(0xFF191C22))
-                            .border(1.dp, Color(0xFF262B35), RoundedCornerShape(10.dp)),
+                            .background(if (isRowFocused) Color(0xFF242934) else Color(0xFF191C22))
+                            .border(
+                                width = 1.dp,
+                                color = if (isRowFocused) Color(0x66FFFFFF) else Color(0xFF262B35),
+                                shape = RoundedCornerShape(10.dp)
+                            ),
                         contentAlignment = Alignment.Center
                     ) {
                         if (!channel.logoUrl.isNullOrBlank()) {
@@ -640,21 +693,11 @@ private fun GoogleTvLiveGuide(
                                 modifier = Modifier.padding(horizontal = 8.dp)
                             )
                         }
-
-                        Icon(
-                            imageVector = Icons.Default.Star,
-                            contentDescription = null,
-                            tint = Color(0xCCFFFFFF),
-                            modifier = Modifier
-                                .align(Alignment.BottomEnd)
-                                .padding(4.dp)
-                                .size(11.dp)
-                        )
                     }
 
                     Spacer(modifier = Modifier.width(colGap))
 
-                    // Right Timeline Slots
+                    // Right Timeline Slots (purely visual inside focused channel row)
                     Row(
                         modifier = Modifier
                             .weight(1f)
@@ -665,6 +708,7 @@ private fun GoogleTvLiveGuide(
                             val durationMs = (slot.endMs - slot.startMs).coerceAtLeast(60_000L)
                             val weight = (durationMs.toFloat() / totalWindowMs.toFloat()).coerceAtLeast(0.05f)
                             val isTooNarrowForText = durationMs < 6 * 60_000L
+                            val isLiveSlot = nowMs in slot.startMs until slot.endMs
                             val title = if (slot.program != null) {
                                 if (slot.startedBeforeWindow) "‹  ${slot.program.title}" else slot.program.title
                             } else {
@@ -673,7 +717,8 @@ private fun GoogleTvLiveGuide(
 
                             GoogleTvProgramTile(
                                 title = if (isTooNarrowForText) "" else title,
-                                onClick = { onPlayChannel(channel) },
+                                isHighlighted = isRowFocused && isLiveSlot,
+                                isRowFocused = isRowFocused,
                                 modifier = Modifier
                                     .weight(weight)
                                     .fillMaxHeight()
@@ -688,7 +733,7 @@ private fun GoogleTvLiveGuide(
         Row(
             modifier = Modifier
                 .matchParentSize()
-                .padding(top = 9.dp)
+                .padding(top = 9.dp, start = 4.dp, end = 4.dp)
         ) {
             Spacer(modifier = Modifier.width(logoColWidth + colGap))
             BoxWithConstraints(
@@ -729,29 +774,27 @@ private fun GoogleTvLiveGuide(
 @Composable
 private fun GoogleTvProgramTile(
     title: String,
-    onClick: () -> Unit,
+    isHighlighted: Boolean,
+    isRowFocused: Boolean,
     modifier: Modifier = Modifier
 ) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isFocused by interactionSource.collectIsFocusedAsState()
-    val scale by animateFloatAsState(if (isFocused) 1.02f else 1.0f, label = "gtv_tile_scale")
-
-    val bgColor = if (isFocused) Color(0xFFE8EAED) else Color(0xFF1A1D24)
-    val borderColor = if (isFocused) Color.White else Color(0xFF282C36)
-    val textColor = if (isFocused) Color(0xFF111318) else TextPrimary
+    val bgColor = when {
+        isHighlighted -> Color(0xFFE8EAED)
+        isRowFocused -> Color(0xFF232732)
+        else -> Color(0xFF1A1D24)
+    }
+    val borderColor = when {
+        isHighlighted -> Color.White
+        isRowFocused -> Color(0xFF3E4554)
+        else -> Color(0xFF282C36)
+    }
+    val textColor = if (isHighlighted) Color(0xFF111318) else TextPrimary
 
     Box(
         modifier = modifier
-            .scale(scale)
             .clip(RoundedCornerShape(10.dp))
             .background(bgColor)
-            .border(if (isFocused) 2.dp else 1.dp, borderColor, RoundedCornerShape(10.dp))
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null,
-                onClick = onClick
-            )
-            .focusable(interactionSource = interactionSource)
+            .border(1.dp, borderColor, RoundedCornerShape(10.dp))
             .padding(horizontal = 14.dp),
         contentAlignment = Alignment.CenterStart
     ) {
@@ -760,7 +803,7 @@ private fun GoogleTvProgramTile(
                 text = title,
                 style = MaterialTheme.typography.bodyMedium.copy(
                     fontSize = 14.sp,
-                    fontWeight = if (isFocused) FontWeight.Bold else FontWeight.Medium
+                    fontWeight = if (isHighlighted) FontWeight.Bold else FontWeight.Medium
                 ),
                 color = textColor,
                 maxLines = 1,

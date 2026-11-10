@@ -14,8 +14,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
@@ -586,9 +586,9 @@ fun IptvScreen(
                                             .size(30.dp)
                                     ) {
                                         Icon(
-                                            imageVector = if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                            imageVector = if (isFav) Icons.Default.Star else Icons.Default.StarBorder,
                                             contentDescription = if (isFav) "В избранном" else "Добавить в избранное",
-                                            tint = if (isFav) Color(0xFFFF4081) else TextSecondary,
+                                            tint = if (isFav) Color(0xFFFFD54F) else TextSecondary,
                                             modifier = Modifier.size(16.dp)
                                         )
                                     }
