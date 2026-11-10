@@ -164,6 +164,12 @@ class TelegramConfigServer(
                     sendHtml(output, "200 OK", buildWebPageHtml(statusBanner))
                 }
 
+                method == "POST" && path == "/reset" -> {
+                    CrashReporter.clearCustomConfig()
+                    onConfigUpdated()
+                    sendHtml(output, "200 OK", buildWebPageHtml(true to "Сброшено на встроенный канал отправки логов."))
+                }
+
                 method == "POST" && path == "/diag" -> {
                     val res = runBlocking(Dispatchers.IO) { CrashReporter.sendDiagnosticSnapshotNow() }
                     val banner = if (res.isSuccess) {
@@ -239,10 +245,24 @@ class TelegramConfigServer(
     }
 
     private fun buildWebPageHtml(statusBanner: Pair<Boolean, String>?): String {
-        val currentToken = escapeHtml(CrashReporter.getBotToken())
-        val currentChatId = escapeHtml(CrashReporter.getChatId())
+        val currentToken = escapeHtml(CrashReporter.getCustomBotToken())
+        val currentChatId = escapeHtml(CrashReporter.getCustomChatId())
+        val hasBuiltIn = CrashReporter.hasBuiltInConfig()
+        val hasCustom = CrashReporter.hasCustomOverride()
         val reports = CrashReporter.reports.value
         val df = SimpleDateFormat("dd.MM HH:mm:ss", Locale.getDefault())
+
+        val builtInInfoHtml = if (hasBuiltIn && !hasCustom) {
+            "<div style='padding:10px 12px;border-radius:10px;background:#102938;border:1px solid #00E5FF66;margin-bottom:14px;font-size:13px;color:#BAE6FD;'>" +
+                "В эту сборку уже встроен канал отправки логов разработчику (токен скрыт в целях безопасности). Заполняйте форму ниже только если хотите перенаправить логи в своего личного бота." +
+                "</div>"
+        } else ""
+
+        val resetBtnHtml = if (hasBuiltIn && hasCustom) {
+            "<form method='POST' action='/reset' style='margin-top:10px;'>" +
+                "<button class='secondary' type='submit' style='width:100%;'>Сбросить на встроенный канал разработчика</button>" +
+                "</form>"
+        } else ""
 
         val bannerHtml = if (statusBanner != null) {
             val bg = if (statusBanner.first) "#123828" else "#3B1920"
@@ -300,6 +320,7 @@ class TelegramConfigServer(
                   2. Откройте созданного бота в Telegram и нажмите <b>Start</b> (отправьте <code>/start</code>).<br/>
                   3. Оставьте Chat ID пустым и нажмите «Найти Chat ID и сохранить».
                 </p>
+                $builtInInfoHtml
                 $bannerHtml
                 <form method="POST" action="/save">
                   <label>Bot Token</label>
@@ -311,6 +332,7 @@ class TelegramConfigServer(
                     <button class="secondary" type="submit" name="action" value="save">Сохранить и тест</button>
                   </div>
                 </form>
+                $resetBtnHtml
 
                 <div class="section">
                   <form method="POST" action="/diag">

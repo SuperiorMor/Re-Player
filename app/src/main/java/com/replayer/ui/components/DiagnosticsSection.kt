@@ -74,7 +74,9 @@ fun DiagnosticsSection() {
 
     var configVersion by remember { mutableIntStateOf(0) }
     val isConfigured = remember(configVersion) { CrashReporter.isConfigured() }
-    val currentChatId = remember(configVersion) { CrashReporter.getChatId() }
+    val hasCustom = remember(configVersion) { CrashReporter.hasCustomOverride() }
+    val hasBuiltIn = remember(configVersion) { CrashReporter.hasBuiltInConfig() }
+    val currentChatId = remember(configVersion) { CrashReporter.getCustomChatId() }
     var autoSendEnabled by remember(configVersion) { mutableStateOf(CrashReporter.isAutoSendEnabled()) }
 
     var isSendingNow by remember { mutableStateOf(false) }
@@ -125,14 +127,26 @@ fun DiagnosticsSection() {
                     Column {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = if (isConfigured) "Telegram подключён" else "Telegram не настроен",
+                                text = when {
+                                    hasCustom -> "Свой Telegram подключён"
+                                    hasBuiltIn -> "Телеметрия сбоев активна"
+                                    isConfigured -> "Telegram подключён"
+                                    else -> "Telegram не настроен"
+                                },
                                 style = MaterialTheme.typography.titleMedium,
                                 color = if (isConfigured) Color(0xFF4ADE80) else TextPrimary
                             )
-                            if (isConfigured && currentChatId.isNotBlank()) {
+                            if (hasCustom && currentChatId.isNotBlank()) {
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
                                     text = "ID: $currentChatId",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = TextSecondary
+                                )
+                            } else if (!hasCustom && hasBuiltIn) {
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "встроено",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = TextSecondary
                                 )
@@ -301,8 +315,8 @@ private fun TelegramSetupDialog(
     var serverFailed by remember { mutableStateOf(false) }
     var manualMode by remember { mutableStateOf(false) }
 
-    var tokenInput by remember { mutableStateOf(CrashReporter.getBotToken()) }
-    var chatIdInput by remember { mutableStateOf(CrashReporter.getChatId()) }
+    var tokenInput by remember { mutableStateOf(CrashReporter.getCustomBotToken()) }
+    var chatIdInput by remember { mutableStateOf(CrashReporter.getCustomChatId()) }
     var statusText by remember { mutableStateOf<String?>(null) }
     var isBusy by remember { mutableStateOf(false) }
 
@@ -310,8 +324,8 @@ private fun TelegramSetupDialog(
         TelegramConfigServer(
             onConfigUpdated = {
                 scope.launch(Dispatchers.Main) {
-                    tokenInput = CrashReporter.getBotToken()
-                    chatIdInput = CrashReporter.getChatId()
+                    tokenInput = CrashReporter.getCustomBotToken()
+                    chatIdInput = CrashReporter.getCustomChatId()
                     statusText = "Конфигурация обновлена с телефона!"
                     onConfigChanged()
                 }

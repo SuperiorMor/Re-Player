@@ -123,16 +123,44 @@ object CrashReporter {
         }
     }
 
-    fun getBotToken(): String {
+    fun hasBuiltInConfig(): Boolean {
+        return BuildConfig.DEFAULT_TG_BOT_TOKEN.trim().isNotBlank() &&
+            BuildConfig.DEFAULT_TG_CHAT_ID.trim().isNotBlank()
+    }
+
+    fun hasCustomOverride(): Boolean {
+        if (!::prefs.isInitialized) return false
+        return !prefs.getString(KEY_BOT_TOKEN, null).isNullOrBlank()
+    }
+
+    fun getCustomBotToken(): String {
         if (!::prefs.isInitialized) return ""
+        return prefs.getString(KEY_BOT_TOKEN, null)?.trim().orEmpty()
+    }
+
+    fun getCustomChatId(): String {
+        if (!::prefs.isInitialized) return ""
+        return prefs.getString(KEY_CHAT_ID, null)?.trim().orEmpty()
+    }
+
+    fun getBotToken(): String {
+        if (!::prefs.isInitialized) return BuildConfig.DEFAULT_TG_BOT_TOKEN.trim()
         val saved = prefs.getString(KEY_BOT_TOKEN, null)?.trim()
         return if (!saved.isNullOrEmpty()) saved else BuildConfig.DEFAULT_TG_BOT_TOKEN.trim()
     }
 
     fun getChatId(): String {
-        if (!::prefs.isInitialized) return ""
+        if (!::prefs.isInitialized) return BuildConfig.DEFAULT_TG_CHAT_ID.trim()
         val saved = prefs.getString(KEY_CHAT_ID, null)?.trim()
         return if (!saved.isNullOrEmpty()) saved else BuildConfig.DEFAULT_TG_CHAT_ID.trim()
+    }
+
+    fun clearCustomConfig() {
+        if (!::prefs.isInitialized) return
+        prefs.edit()
+            .remove(KEY_BOT_TOKEN)
+            .remove(KEY_CHAT_ID)
+            .commit()
     }
 
     fun isConfigured(): Boolean {
@@ -649,6 +677,10 @@ object CrashReporter {
             httpClient.newCall(req).execute().use { resp ->
                 if (resp.isSuccessful) {
                     Result.success(Unit)
+                } else if ((resp.code == 401 || resp.code == 404) && hasCustomOverride() && hasBuiltInConfig() && botToken == getCustomBotToken()) {
+                    // Auto-recover if user's old saved token was revoked and built-in token exists
+                    clearCustomConfig()
+                    sendTelegramText(getBotToken(), getChatId(), text)
                 } else {
                     val body = resp.body?.string().orEmpty()
                     val desc = try { JSONObject(body).optString("description") } catch (_: Throwable) { "" }
@@ -685,6 +717,9 @@ object CrashReporter {
             httpClient.newCall(req).execute().use { resp ->
                 if (resp.isSuccessful) {
                     Result.success(Unit)
+                } else if ((resp.code == 401 || resp.code == 404) && hasCustomOverride() && hasBuiltInConfig() && token == getCustomBotToken()) {
+                    clearCustomConfig()
+                    sendTelegramDocument(getBotToken(), getChatId(), fileName, content, caption)
                 } else {
                     val respStr = resp.body?.string().orEmpty()
                     val desc = try { JSONObject(respStr).optString("description") } catch (_: Throwable) { "" }
