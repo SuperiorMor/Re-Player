@@ -13,8 +13,13 @@ android {
         applicationId = "com.replayer"
         minSdk = 24
         targetSdk = 35
-        versionCode = 40
-        versionName = "0.9.3"
+        versionCode = 41
+        versionName = "0.9.4"
+
+        val defaultTgToken = (System.getenv("TG_BOT_TOKEN") ?: "").replace("\\", "\\\\").replace("\"", "\\\"")
+        val defaultTgChat = (System.getenv("TG_CHAT_ID") ?: "").replace("\\", "\\\\").replace("\"", "\\\"")
+        buildConfigField("String", "DEFAULT_TG_BOT_TOKEN", "\"$defaultTgToken\"")
+        buildConfigField("String", "DEFAULT_TG_CHAT_ID", "\"$defaultTgChat\"")
 
         ndk {
             abiFilters += listOf("armeabi-v7a", "arm64-v8a")
@@ -99,5 +104,6 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.okhttp.logging)
     implementation(libs.coil.compose)
+    implementation("com.google.zxing:core:3.5.3")
 }
 

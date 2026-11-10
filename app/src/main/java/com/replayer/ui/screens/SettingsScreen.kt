@@ -34,6 +34,7 @@ import com.replayer.data.IptvManager
 import com.replayer.data.ServerConfigManager
 import com.replayer.model.UpnpDevice
 import com.replayer.network.upnp.SsdpDiscovery
+import com.replayer.ui.components.DiagnosticsSection
 import com.replayer.ui.components.TvFocusCard
 import com.replayer.ui.theme.*
 import com.replayer.updater.ReleaseInfo
@@ -943,6 +944,8 @@ fun SettingsScreen(
                 }
             }
         }
+
+        DiagnosticsSection()
     }
 
     // ---------------------------------------------------------

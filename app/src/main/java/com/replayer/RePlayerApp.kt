@@ -1,10 +1,12 @@
 package com.replayer
 
 import android.app.Application
+import android.content.ComponentCallbacks2
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
+import com.replayer.diagnostics.CrashReporter
 import com.replayer.updater.UpdateManager
 import okhttp3.OkHttpClient
 import java.io.File
@@ -13,6 +15,7 @@ import java.util.concurrent.TimeUnit
 class RePlayerApp : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
+        CrashReporter.init(this)
         try {
             UpdateManager(this).cleanOldUpdates()
         } catch (_: Throwable) {}
@@ -65,5 +68,12 @@ class RePlayerApp : Application(), ImageLoaderFactory {
             }
             .crossfade(true)
             .build()
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+            CrashReporter.breadcrumb("Memory", "onTrimMemory level=$level")
+        }
     }
 }

@@ -24,6 +24,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,6 +37,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import com.replayer.diagnostics.CrashReporter
 import com.replayer.model.FavoriteFolder
 import com.replayer.model.MediaItem
 import com.replayer.model.MediaSourceType
@@ -65,6 +67,18 @@ class MainActivity : ComponentActivity() {
                 var showExitDialog by remember { mutableStateOf(false) }
                 var initialUpnpFolder by remember { mutableStateOf<Pair<String, String>?>(null) }
                 var lastPlayedMediaId by remember { mutableStateOf<String?>(null) }
+
+                LaunchedEffect(selectedNav) {
+                    CrashReporter.breadcrumb("Nav", "Tab=$selectedNav")
+                }
+                LaunchedEffect(activeMediaItem?.id) {
+                    val item = activeMediaItem
+                    if (item != null) {
+                        CrashReporter.breadcrumb("Nav", "OpenPlayer: ${item.sourceType} ${item.title}")
+                    } else {
+                        CrashReporter.breadcrumb("Nav", "ClosePlayer")
+                    }
+                }
 
                 // Exit confirmation dialog on Home screen
                 if (activeMediaItem == null && selectedNav == NavItem.HOME && !showExitDialog) {

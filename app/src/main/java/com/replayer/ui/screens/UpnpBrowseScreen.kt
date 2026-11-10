@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.sp
 import com.replayer.data.FavoritesManager
 import com.replayer.data.RecentMediaManager
 import com.replayer.data.ServerConfigManager
+import com.replayer.diagnostics.CrashReporter
 import com.replayer.model.FavoriteFolder
 import com.replayer.model.MediaItem
 import com.replayer.model.MediaSourceType
@@ -124,6 +125,7 @@ fun UpnpBrowseScreen(
     }
 
     fun openFolder(controlUrl: String, folderId: String, title: String) {
+        CrashReporter.breadcrumb("DLNA", "openFolder: $title ($folderId)")
         onConsumeLastPlayedMediaId()
         folderStack = folderStack + Pair(folderId, title)
         loadFolder(controlUrl, folderId)

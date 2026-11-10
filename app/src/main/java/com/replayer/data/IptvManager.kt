@@ -2,6 +2,7 @@ package com.replayer.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.replayer.diagnostics.CrashReporter
 import com.replayer.model.EpgProgram
 import com.replayer.model.IptvChannel
 import com.replayer.network.iptv.M3uParser
@@ -145,6 +146,7 @@ class IptvManager private constructor(private val context: Context) {
             _epgMap.value = cachedEpg
 
             cachedLogosMap = loadCachedLogos()
+            CrashReporter.breadcrumb("IPTV", "Init cache: channels=${cachedCh.size}, epgKeys=${cachedEpg.size}")
 
             // 2. Wait 3 seconds so Compose UI renders frame 1 smoothly
             delay(3000)
@@ -730,6 +732,7 @@ class IptvManager private constructor(private val context: Context) {
     suspend fun fetchEpg(epgUrl: String) = withContext(Dispatchers.IO) {
         if (epgUrl.isBlank() || isFetchingEpg) return@withContext
         isFetchingEpg = true
+        CrashReporter.breadcrumb("IPTV", "fetchEpg start")
         val targetUrl = normalizeEpgUrl(epgUrl)
         _epgProgress.value = 0f
         _statusMessage.value = "Загрузка телепрограммы (EPG)..."
@@ -806,8 +809,10 @@ class IptvManager private constructor(private val context: Context) {
 
             saveLastEpgUpdateTime(System.currentTimeMillis())
             val totalProgs = parseResult.programs.values.sumOf { it.size }
+            CrashReporter.breadcrumb("IPTV", "fetchEpg done: progs=$totalProgs")
             _statusMessage.value = "Телепрограмма обновлена: $totalProgs передач для ${_channels.value.size} каналов"
         } catch (e: Exception) {
+            CrashReporter.breadcrumb("IPTV", "fetchEpg error: ${e.message}")
             _statusMessage.value = "Сбой EPG: ${e.localizedMessage ?: "Сбой соединения"}"
         } finally {
             _epgProgress.value = null
