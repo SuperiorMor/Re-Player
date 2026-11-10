@@ -19,14 +19,8 @@ import androidx.compose.material.icons.outlined.LiveTv
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -38,7 +32,6 @@ import androidx.compose.ui.unit.dp
 import com.replayer.ui.theme.AccentCyanBright
 import com.replayer.ui.theme.SurfaceDark
 import com.replayer.ui.theme.TextSecondary
-import kotlinx.coroutines.delay
 
 enum class NavItem(val label: String, val icon: ImageVector) {
     HOME("Главная", Icons.Outlined.Home),
@@ -52,34 +45,14 @@ fun TvNavigationRail(
     selectedItem: NavItem,
     onItemSelected: (NavItem) -> Unit,
     onEnterSection: (NavItem) -> Unit = onItemSelected,
-    onRailFocusChanged: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    var pendingFocusedItem by remember { mutableStateOf<NavItem?>(null) }
-
-    // Switch active tab automatically as the user highlights items in the menu (with short debounce)
-    // while keeping focus inside the navigation rail until Right or OK is pressed.
-    LaunchedEffect(pendingFocusedItem) {
-        val target = pendingFocusedItem ?: return@LaunchedEffect
-        if (target != selectedItem) {
-            delay(110)
-            onItemSelected(target)
-        }
-    }
-
     Column(
         modifier = modifier
             .fillMaxHeight()
             .width(92.dp)
             .background(SurfaceDark)
-            .padding(top = 24.dp, bottom = 24.dp)
-            .onFocusChanged { state ->
-                val hasFocus = state.hasFocus
-                onRailFocusChanged(hasFocus)
-                if (!hasFocus) {
-                    pendingFocusedItem = null
-                }
-            },
+            .padding(top = 24.dp, bottom = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Top
     ) {
@@ -104,14 +77,12 @@ fun TvNavigationRail(
                 modifier = Modifier
                     .padding(vertical = 7.dp)
                     .size(50.dp)
-                    .onFocusChanged { focusState ->
-                        if (focusState.hasFocus) {
-                            pendingFocusedItem = item
-                        }
-                    }
                     .onPreviewKeyEvent { keyEvent ->
-                        if (keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.DirectionRight) {
-                            onItemSelected(item)
+                        // Allow pressing Right from the currently open section icon to jump straight inside
+                        if (keyEvent.type == KeyEventType.KeyDown &&
+                            keyEvent.key == Key.DirectionRight &&
+                            item == selectedItem
+                        ) {
                             onEnterSection(item)
                             true
                         } else {

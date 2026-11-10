@@ -9,6 +9,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -106,7 +107,6 @@ fun UpnpBrowseScreen(
     initialFolder: Pair<String, String>? = null,
     lastPlayedMediaId: String? = null,
     isPlayerActive: Boolean = false,
-    isRailFocused: Boolean = false,
     enterSectionTrigger: Int = 0,
     onFolderLoaded: () -> Unit = {},
     onConsumeLastPlayedMediaId: () -> Unit = {}
@@ -131,9 +131,13 @@ fun UpnpBrowseScreen(
 
     val listState = rememberLazyListState()
     val targetItemFocusRequester = remember { FocusRequester() }
+    val loadingFocusRequester = remember { FocusRequester() }
+    val emptyFocusRequester = remember { FocusRequester() }
     val settingsCtaFocusRequester = remember { FocusRequester() }
     var focusTargetIndex by remember { mutableIntStateOf(0) }
     var focusedItem by remember { mutableStateOf<MediaItem?>(null) }
+    var lastFocusedFolderId by remember { mutableStateOf<String?>(null) }
+    var isTransitioningFocus by remember { mutableStateOf(false) }
     var lastExitTimestamp by remember { mutableLongStateOf(0L) }
     var lastHandledEnterTrigger by remember { mutableIntStateOf(0) }
 
@@ -141,7 +145,11 @@ fun UpnpBrowseScreen(
 
     fun loadFolder(controlUrl: String, folderId: String) {
         val reqId = ++activeLoadRequestId
+        isTransitioningFocus = true
         isLoadingFolder = true
+        try {
+            loadingFocusRequester.requestFocus()
+        } catch (_: Exception) {}
         scope.launch {
             val loaded = contentDirectory.browse(controlUrl, folderId)
             if (reqId == activeLoadRequestId) {
@@ -149,6 +157,14 @@ fun UpnpBrowseScreen(
                 loadedFolderId = folderId
                 isLoadingFolder = false
             }
+        }
+    }
+
+    LaunchedEffect(isLoadingFolder) {
+        if (isLoadingFolder) {
+            try {
+                loadingFocusRequester.requestFocus()
+            } catch (_: Exception) {}
         }
     }
 
@@ -227,6 +243,7 @@ fun UpnpBrowseScreen(
     // Restore focus to the last-opened (or last-played) item inside the current folder
     LaunchedEffect(loadedFolderId, isLoadingFolder, isPlayerActive, lastPlayedMediaId, enterSectionTrigger) {
         if (connectedDevice == null) {
+            isTransitioningFocus = false
             if (enterSectionTrigger != lastHandledEnterTrigger && enterSectionTrigger > 0) {
                 lastHandledEnterTrigger = enterSectionTrigger
                 delay(50)
@@ -242,33 +259,38 @@ fun UpnpBrowseScreen(
         val items = latestSortedItems
         if (items.isEmpty()) {
             focusedItem = null
+            lastFocusedFolderId = loadedFolderId
+            delay(30)
+            try {
+                emptyFocusRequester.requestFocus()
+            } catch (_: Exception) {}
+            isTransitioningFocus = false
             return@LaunchedEffect
         }
 
         val lastSaved = recentManager.getLastOpenedKeyInFolder(currentFolderId)
+        val sameFolderReenter = (loadedFolderId == lastFocusedFolderId && focusedItem != null && lastPlayedMediaId == null)
         val resolvedIdx = when {
             lastPlayedMediaId != null -> items.indexOfFirst { it.id == lastPlayedMediaId }
+            sameFolderReenter -> items.indexOfFirst { it.id == focusedItem?.id }
             lastSaved != null -> items.indexOfFirst {
                 it.id == lastSaved.first || (lastSaved.second.isNotBlank() && it.uri == lastSaved.second)
             }
             else -> 0
         }.let { if (it in items.indices) it else 0 }
 
+        lastFocusedFolderId = loadedFolderId
+        lastHandledEnterTrigger = enterSectionTrigger
         focusTargetIndex = resolvedIdx
         focusedItem = items[resolvedIdx]
-        delay(40)
         try {
             listState.scrollToItem(resolvedIdx)
         } catch (_: Exception) {}
-
-        val explicitEnter = enterSectionTrigger != lastHandledEnterTrigger
-        if (explicitEnter || !isRailFocused) {
-            if (explicitEnter) lastHandledEnterTrigger = enterSectionTrigger
-            delay(50)
-            try {
-                targetItemFocusRequester.requestFocus()
-            } catch (_: Exception) {}
-        }
+        delay(45)
+        try {
+            targetItemFocusRequester.requestFocus()
+        } catch (_: Exception) {}
+        isTransitioningFocus = false
     }
 
     if (connectedDevice == null) {
@@ -395,7 +417,10 @@ fun UpnpBrowseScreen(
         Box(modifier = Modifier.fillMaxSize()) {
             if (sortedItems.isEmpty() && !isLoadingFolder) {
                 Box(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .focusRequester(emptyFocusRequester)
+                        .focusable(),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
@@ -647,32 +672,39 @@ fun UpnpBrowseScreen(
                 }
             }
 
-            if (isLoadingFolder) {
+            if (isLoadingFolder || isTransitioningFocus) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.48f)),
+                        .focusRequester(loadingFocusRequester)
+                        .focusable()
+                        .then(
+                            if (isLoadingFolder) Modifier.background(Color.Black.copy(alpha = 0.48f))
+                            else Modifier
+                        ),
                     contentAlignment = Alignment.Center
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(DarkCard)
-                            .border(1.dp, BorderSubtle, RoundedCornerShape(14.dp))
-                            .padding(horizontal = 24.dp, vertical = 16.dp)
-                    ) {
-                        CircularProgressIndicator(
-                            color = AccentCyan,
-                            strokeWidth = 2.5.dp,
-                            modifier = Modifier.size(22.dp)
-                        )
-                        Spacer(modifier = Modifier.width(14.dp))
-                        Text(
-                            text = "Загрузка содержимого...",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = TextPrimary
-                        )
+                    if (isLoadingFolder) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(DarkCard)
+                                .border(1.dp, BorderSubtle, RoundedCornerShape(14.dp))
+                                .padding(horizontal = 24.dp, vertical = 16.dp)
+                        ) {
+                            CircularProgressIndicator(
+                                color = AccentCyan,
+                                strokeWidth = 2.5.dp,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Spacer(modifier = Modifier.width(14.dp))
+                            Text(
+                                text = "Загрузка содержимого...",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = TextPrimary
+                            )
+                        }
                     }
                 }
             }

@@ -71,7 +71,6 @@ class MainActivity : ComponentActivity() {
                 var showExitDialog by remember { mutableStateOf(false) }
                 var initialUpnpFolder by remember { mutableStateOf<Pair<String, String>?>(null) }
                 var lastPlayedMediaId by remember { mutableStateOf<String?>(null) }
-                var isRailFocused by remember { mutableStateOf(false) }
                 var sectionFocusTrigger by remember { mutableIntStateOf(0) }
 
                 LaunchedEffect(selectedNav) {
@@ -119,8 +118,7 @@ class MainActivity : ComponentActivity() {
                                 selectedNav = it
                                 initialUpnpFolder = null
                                 sectionFocusTrigger++
-                            },
-                            onRailFocusChanged = { isRailFocused = it }
+                            }
                         )
 
                         Box(modifier = Modifier.weight(1f).fillMaxSize()) {
@@ -159,7 +157,6 @@ class MainActivity : ComponentActivity() {
                                     initialFolder = initialUpnpFolder,
                                     lastPlayedMediaId = lastPlayedMediaId,
                                     isPlayerActive = (activeMediaItem != null),
-                                    isRailFocused = isRailFocused,
                                     enterSectionTrigger = sectionFocusTrigger,
                                     onFolderLoaded = { initialUpnpFolder = null },
                                     onConsumeLastPlayedMediaId = { lastPlayedMediaId = null }

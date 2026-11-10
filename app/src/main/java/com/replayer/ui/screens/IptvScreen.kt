@@ -79,9 +79,34 @@ fun IptvScreen(
     var selectedFolder by remember { mutableStateOf<String?>(null) }
     var sortMode by remember { mutableStateOf(ChannelSortMode.BY_WATCH_TIME) }
     val entryFocusRequester = remember { FocusRequester() }
+    val holdFocusRequester = remember { FocusRequester() }
+    var isSwitchingView by remember { mutableStateOf(false) }
+    var pendingFolderTarget by remember { mutableStateOf<String?>(null) }
+    var pendingHasSwitch by remember { mutableStateOf(false) }
 
-    LaunchedEffect(enterSectionTrigger) {
-        if (enterSectionTrigger > 0) {
+    fun switchCategory(targetFolder: String?) {
+        pendingFolderTarget = targetFolder
+        pendingHasSwitch = true
+        isSwitchingView = true
+    }
+
+    LaunchedEffect(isSwitchingView, pendingHasSwitch) {
+        if (!isSwitchingView || !pendingHasSwitch) return@LaunchedEffect
+        delay(16)
+        try {
+            holdFocusRequester.requestFocus()
+        } catch (_: Exception) {}
+        selectedFolder = pendingFolderTarget
+        pendingHasSwitch = false
+        delay(45)
+        try {
+            entryFocusRequester.requestFocus()
+        } catch (_: Exception) {}
+        isSwitchingView = false
+    }
+
+    LaunchedEffect(enterSectionTrigger, isLoading, channels.isEmpty()) {
+        if (enterSectionTrigger > 0 && !isSwitchingView) {
             delay(50)
             try {
                 entryFocusRequester.requestFocus()
@@ -126,7 +151,7 @@ fun IptvScreen(
     // Remote back button handling: inside folder -> back to folders; on folders -> back to Home
     BackHandler(enabled = true) {
         if (selectedFolder != null && folders.size > 1) {
-            selectedFolder = null
+            switchCategory(null)
         } else {
             onBackToHome()
         }
@@ -139,6 +164,14 @@ fun IptvScreen(
             .fillMaxSize()
             .padding(start = 28.dp, end = 28.dp, top = 24.dp, bottom = 16.dp)
     ) {
+        if (isSwitchingView) {
+            Box(
+                modifier = Modifier
+                    .size(1.dp)
+                    .focusRequester(holdFocusRequester)
+                    .focusable()
+            )
+        }
         // TOP BAR — vertically aligned with the left 64dp Logo
         Row(
             modifier = Modifier
@@ -153,7 +186,7 @@ fun IptvScreen(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (folders.size > 1 && selectedFolder != null) {
                         TvFocusCard(
-                            onClick = { selectedFolder = null },
+                            onClick = { switchCategory(null) },
                             modifier = Modifier
                                 .width(116.dp)
                                 .height(38.dp)
@@ -251,6 +284,10 @@ fun IptvScreen(
                         modifier = Modifier
                             .width(160.dp)
                             .height(44.dp)
+                            .then(
+                                if (channels.isEmpty() && isLoading) Modifier.focusRequester(entryFocusRequester)
+                                else Modifier
+                            )
                     ) {
                         Row(
                             modifier = Modifier.fillMaxSize(),
@@ -436,7 +473,7 @@ fun IptvScreen(
                     }
 
                     TvFocusCard(
-                        onClick = { selectedFolder = folder },
+                        onClick = { switchCategory(folder) },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(84.dp)
