@@ -19,16 +19,26 @@ import org.videolan.libvlc.LibVLC
 import org.videolan.libvlc.Media
 import org.videolan.libvlc.MediaPlayer
 import org.videolan.libvlc.util.VLCVideoLayout
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicLong
 
 class RePlayerEngine(private val context: Context) {
     private val libVlc: LibVLC = LibVLC(
         context,
-        arrayListOf("--no-drop-late-frames", "--no-skip-frames", "--audio-time-stretch")
+        arrayListOf(
+            "--no-drop-late-frames",
+            "--no-skip-frames",
+            "--audio-time-stretch",
+            "--ipv4-timeout=5000",
+            "--http-reconnect"
+        )
     )
-    val mediaPlayer: MediaPlayer = MediaPlayer(libVlc)
+    private val mediaPlayer: MediaPlayer = MediaPlayer(libVlc)
     private val _playerState = MutableStateFlow(RePlayerState())
     val playerState: StateFlow<RePlayerState> = _playerState.asStateFlow()
-    private val scope = CoroutineScope(Dispatchers.Main)
+    private val scope = CoroutineScope(Dispatchers.IO)
+    private val engineExecutor = Executors.newSingleThreadExecutor()
+    private val playRequestSeq = AtomicLong(0L)
     private var progressJob: Job? = null
     private var currentLayout: VLCVideoLayout? = null
     @Volatile
@@ -58,12 +68,7 @@ class RePlayerEngine(private val context: Context) {
                     }
                     MediaPlayer.Event.TimeChanged -> {
                         val time = event.timeChanged
-                        val length = try {
-                            if (mediaPlayer.length > 0) mediaPlayer.length else _playerState.value.durationMs
-                        } catch (_: Throwable) {
-                            _playerState.value.durationMs
-                        }
-                        _playerState.value = _playerState.value.copy(currentPositionMs = time, durationMs = length)
+                        _playerState.value = _playerState.value.copy(currentPositionMs = time)
                     }
                     MediaPlayer.Event.LengthChanged -> {
                         _playerState.value = _playerState.value.copy(durationMs = event.lengthChanged)
@@ -89,6 +94,7 @@ class RePlayerEngine(private val context: Context) {
     }
 
     fun attachVideoLayout(layout: VLCVideoLayout) {
+        if (isReleased) return
         currentLayout = layout
         try {
             if (!mediaPlayer.vlcVout.areViewsAttached()) {
@@ -102,84 +108,143 @@ class RePlayerEngine(private val context: Context) {
     fun play(mediaItem: MediaItem) {
         if (isReleased) return
         CrashReporter.breadcrumb("Player", "play(${mediaItem.sourceType}): ${mediaItem.title}")
-        _playerState.value = _playerState.value.copy(currentMediaTitle = mediaItem.title, errorMessage = null)
+        val reqId = playRequestSeq.incrementAndGet()
+        stopProgressTracking()
+        _playerState.value = _playerState.value.copy(
+            currentMediaTitle = mediaItem.title,
+            errorMessage = null,
+            isBuffering = true
+        )
         if (mediaItem.uri.isBlank()) {
-            _playerState.value = _playerState.value.copy(errorMessage = "Пустая ссылка потока", isPlaying = false)
-            return
-        }
-        try {
-            val streamUri = Uri.parse(mediaItem.uri)
-            val isIptv = mediaItem.sourceType == com.replayer.model.MediaSourceType.IPTV
-            val media = Media(libVlc, streamUri).apply {
-                setHWDecoderEnabled(true, false)
-                if (isIptv) {
-                    addOption(":network-caching=3000")
-                    addOption(":live-caching=1500")
-                    addOption(":http-user-agent=RePlayer-TV")
-                } else {
-                    addOption(":network-caching=15000")
-                    addOption(":file-caching=2000")
-                }
-            }
-            mediaPlayer.media = media
-            media.release()
-
-            currentLayout?.let { layout ->
-                try {
-                    if (!mediaPlayer.vlcVout.areViewsAttached()) {
-                        mediaPlayer.attachViews(layout, null, true, false)
-                    }
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-            }
-            mediaPlayer.play()
-        } catch (t: Throwable) {
-            CrashReporter.breadcrumb("Player", "play exception: ${t.message}")
             _playerState.value = _playerState.value.copy(
-                errorMessage = "Ошибка запуска: ${t.localizedMessage ?: "сбой"}",
+                errorMessage = "Пустая ссылка потока",
                 isPlaying = false,
                 isBuffering = false
             )
+            return
         }
+
+        // Attach surface on UI thread without waiting for native stream teardown
+        currentLayout?.let { layout ->
+            try {
+                if (!mediaPlayer.vlcVout.areViewsAttached()) {
+                    mediaPlayer.attachViews(layout, null, true, false)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        try {
+            engineExecutor.execute {
+                if (isReleased || reqId != playRequestSeq.get()) return@execute
+                try {
+                    val streamUri = Uri.parse(mediaItem.uri)
+                    val isIptv = mediaItem.sourceType == com.replayer.model.MediaSourceType.IPTV
+                    val media = Media(libVlc, streamUri).apply {
+                        setHWDecoderEnabled(true, false)
+                        if (isIptv) {
+                            addOption(":network-caching=3000")
+                            addOption(":live-caching=1500")
+                            addOption(":http-user-agent=RePlayer-TV")
+                        } else {
+                            addOption(":network-caching=15000")
+                            addOption(":file-caching=2000")
+                        }
+                    }
+                    // mediaPlayer.media = ... calls libvlc input_Close (vlc_join); must run off the main thread!
+                    mediaPlayer.media = media
+                    media.release()
+
+                    if (!isReleased && reqId == playRequestSeq.get()) {
+                        mediaPlayer.play()
+                    }
+                } catch (t: Throwable) {
+                    if (!isReleased && reqId == playRequestSeq.get()) {
+                        CrashReporter.breadcrumb("Player", "play exception: ${t.message}")
+                        _playerState.value = _playerState.value.copy(
+                            errorMessage = "Ошибка запуска: ${t.localizedMessage ?: "сбой"}",
+                            isPlaying = false,
+                            isBuffering = false
+                        )
+                    }
+                }
+            }
+        } catch (_: Throwable) {}
     }
 
     fun togglePlayPause() {
-        if (mediaPlayer.isPlaying) mediaPlayer.pause() else mediaPlayer.play()
+        if (isReleased) return
+        try {
+            engineExecutor.execute {
+                if (isReleased) return@execute
+                try {
+                    if (mediaPlayer.isPlaying) mediaPlayer.pause() else mediaPlayer.play()
+                } catch (_: Throwable) {}
+            }
+        } catch (_: Throwable) {}
     }
 
     fun seekRelative(deltaMs: Long) {
-        val duration = if (mediaPlayer.length > 0) mediaPlayer.length else _playerState.value.durationMs
-        val target = (mediaPlayer.time + deltaMs).coerceIn(0L, duration.coerceAtLeast(0L))
-        mediaPlayer.time = target
-        _playerState.value = _playerState.value.copy(currentPositionMs = target)
+        if (isReleased) return
+        try {
+            engineExecutor.execute {
+                if (isReleased) return@execute
+                try {
+                    val duration = if (mediaPlayer.length > 0) mediaPlayer.length else _playerState.value.durationMs
+                    val target = (mediaPlayer.time + deltaMs).coerceIn(0L, duration.coerceAtLeast(0L))
+                    mediaPlayer.time = target
+                    _playerState.value = _playerState.value.copy(currentPositionMs = target)
+                } catch (_: Throwable) {}
+            }
+        } catch (_: Throwable) {}
     }
 
     fun seekTo(positionMs: Long) {
-        val duration = if (mediaPlayer.length > 0) mediaPlayer.length else _playerState.value.durationMs
-        val target = positionMs.coerceIn(0L, duration.coerceAtLeast(0L))
-        mediaPlayer.time = target
-        _playerState.value = _playerState.value.copy(currentPositionMs = target)
+        if (isReleased) return
+        try {
+            engineExecutor.execute {
+                if (isReleased) return@execute
+                try {
+                    val duration = if (mediaPlayer.length > 0) mediaPlayer.length else _playerState.value.durationMs
+                    val target = positionMs.coerceIn(0L, duration.coerceAtLeast(0L))
+                    mediaPlayer.time = target
+                    _playerState.value = _playerState.value.copy(currentPositionMs = target)
+                } catch (_: Throwable) {}
+            }
+        } catch (_: Throwable) {}
     }
 
     fun selectAudioTrack(track: AudioTrackInfo) {
-        // ИСПРАВЛЕНИЕ: Передаем именно ID трека, а не его индекс в массиве
-        if (track.index != -1) {
-            mediaPlayer.setAudioTrack(track.index)
-            _playerState.value = _playerState.value.copy(selectedAudioTrackId = track.id)
-            updateTracks()
-        }
+        if (isReleased || track.index == -1) return
+        _playerState.value = _playerState.value.copy(selectedAudioTrackId = track.id)
+        try {
+            engineExecutor.execute {
+                if (isReleased) return@execute
+                try {
+                    mediaPlayer.setAudioTrack(track.index)
+                    updateTracks()
+                } catch (_: Throwable) {}
+            }
+        } catch (_: Throwable) {}
     }
 
     fun selectSubtitleTrack(track: SubtitleTrackInfo?) {
-        if (track == null) {
-            mediaPlayer.setSpuTrack(-1)
-            _playerState.value = _playerState.value.copy(selectedSubtitleTrackId = null)
-        } else {
-            mediaPlayer.setSpuTrack(track.index)
-            _playerState.value = _playerState.value.copy(selectedSubtitleTrackId = track.id)
-        }
-        updateTracks()
+        if (isReleased) return
+        _playerState.value = _playerState.value.copy(selectedSubtitleTrackId = track?.id)
+        try {
+            engineExecutor.execute {
+                if (isReleased) return@execute
+                try {
+                    if (track == null) {
+                        mediaPlayer.setSpuTrack(-1)
+                    } else {
+                        mediaPlayer.setSpuTrack(track.index)
+                    }
+                    updateTracks()
+                } catch (_: Throwable) {}
+            }
+        } catch (_: Throwable) {}
     }
 
     private fun updateTracks() {
@@ -252,17 +317,28 @@ class RePlayerEngine(private val context: Context) {
     fun release() {
         if (isReleased) return
         isReleased = true
+        playRequestSeq.incrementAndGet()
         CrashReporter.breadcrumb("Player", "release()")
         stopProgressTracking()
+
+        // Detach UI listeners and surface synchronously so Android View cleanup never deadlocks,
+        // then run blocking libvlc_media_player_stop/release on background executor to prevent ANR.
         try {
-            // ИСПРАВЛЕНИЕ ВЫЛЕТОВ: Сначала отключаем слушатель и отсоединяем вьюху, потом убиваем плеер
             mediaPlayer.setEventListener(null)
-            mediaPlayer.stop()
-            mediaPlayer.detachViews()
-            mediaPlayer.release()
-            libVlc.release()
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        } catch (_: Throwable) {}
+        try {
+            if (mediaPlayer.vlcVout.areViewsAttached()) {
+                mediaPlayer.detachViews()
+            }
+        } catch (_: Throwable) {}
+
+        try {
+            engineExecutor.execute {
+                try { mediaPlayer.stop() } catch (_: Throwable) {}
+                try { mediaPlayer.release() } catch (_: Throwable) {}
+                try { libVlc.release() } catch (_: Throwable) {}
+            }
+            engineExecutor.shutdown()
+        } catch (_: Throwable) {}
     }
 }

@@ -83,16 +83,24 @@ object CrashReporter {
         appContext = context.applicationContext
         prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         reportsDir = File(appContext.filesDir, "crash_reports").apply { mkdirs() }
-        currentBreadcrumbsFile = File(reportsDir, "session_breadcrumbs.log")
+        val pid = Process.myPid()
+        currentBreadcrumbsFile = File(reportsDir, "breadcrumbs_${pid}.log")
         prevBreadcrumbsFile = File(reportsDir, "prev_session_breadcrumbs.log")
 
-        // Preserve last session's breadcrumbs before clearing for current session
+        // Prune stale per-PID breadcrumb files (keep up to 6 newest within last 48h)
         try {
-            if (currentBreadcrumbsFile.exists() && currentBreadcrumbsFile.length() > 0L) {
-                if (prevBreadcrumbsFile.exists()) prevBreadcrumbsFile.delete()
-                currentBreadcrumbsFile.renameTo(prevBreadcrumbsFile)
+            val cutoff = System.currentTimeMillis() - 48L * 3600 * 1000L
+            val pidLogs = reportsDir.listFiles { f ->
+                f.isFile && f.name.startsWith("breadcrumbs_") && f.name.endsWith(".log")
+            }?.sortedByDescending { it.lastModified() } ?: emptyList()
+            pidLogs.forEachIndexed { idx, file ->
+                if (idx >= 6 || file.lastModified() < cutoff) {
+                    file.delete()
+                }
             }
-            currentBreadcrumbsFile.writeText("")
+            if (currentBreadcrumbsFile.exists()) {
+                currentBreadcrumbsFile.writeText("")
+            }
         } catch (_: Throwable) {}
 
         previousHandler = Thread.getDefaultUncaughtExceptionHandler()
@@ -255,8 +263,7 @@ object CrashReporter {
 
                 val details = buildString {
                     appendLine("Exit Reason: $reasonLabel ($reasonCode)")
-                    appendLine("Status: ${info.status}")
-                    appendLine("Importance: ${info.importance}")
+                    appendLine("PID: ${info.pid} | Status: ${info.status} | Importance: ${info.importance}")
                     appendLine("PSS: ${info.pss} KB | RSS: ${info.rss} KB")
                     if (!info.description.isNullOrBlank()) {
                         appendLine("Description: ${info.description}")
@@ -267,8 +274,13 @@ object CrashReporter {
                     }
                 }
 
+                val pidCrumbsFile = File(reportsDir, "breadcrumbs_${info.pid}.log")
                 val prevCrumbs = try {
-                    if (prevBreadcrumbsFile.exists()) prevBreadcrumbsFile.readText() else null
+                    when {
+                        pidCrumbsFile.exists() -> pidCrumbsFile.readText()
+                        prevBreadcrumbsFile.exists() -> prevBreadcrumbsFile.readText()
+                        else -> null
+                    }
                 } catch (_: Throwable) {
                     null
                 }
