@@ -118,12 +118,12 @@ fun HomeScreen(
         // ВЕРХНИЙ БЛОК: СЛЕВА ПОСТЕРЫ (~ПОЛОВИНА ЭКРАНА) | СПРАВА «ИЗБРАННЫЕ ПАПКИ» ДО КРАЯ ЭКРАНА
         // -------------------------------------------------------------
         val posterSectionHeight = 208.dp
+        val recentPosters = remember(recentList) { recentList.take(2) }
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.Top
         ) {
             // LEFT COLUMN: Продолжить просмотр (~46% ширины, до 2 постеров с одной папки макс.)
-            val recentPosters = remember(recentList) { recentList.take(2) }
             Column(modifier = Modifier.weight(0.46f)) {
                 Text(
                     text = "Продолжить просмотр",
@@ -335,7 +335,7 @@ fun HomeScreen(
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
-                                imageVector = Icons.Default.Folder,
+                                imageVector = Icons.Outlined.FolderOpen,
                                 contentDescription = null,
                                 tint = TextSecondary,
                                 modifier = Modifier.size(26.dp)
