@@ -378,7 +378,13 @@ class IptvManager private constructor(private val context: Context) {
 
     fun getFavoriteChannels(): List<IptvChannel> {
         val favIds = _favoriteChannelIds.value
-        return _channels.value.filter { favIds.contains(it.id) }
+        val times = _watchTimes.value
+        return _channels.value
+            .filter { favIds.contains(it.id) }
+            .sortedWith(
+                compareByDescending<IptvChannel> { times[it.id] ?: 0L }
+                    .thenBy { it.name.lowercase() }
+            )
     }
 
     fun recordWatchTime(channelId: String, deltaSeconds: Long) {

@@ -1,9 +1,14 @@
 package com.replayer.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -26,6 +31,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
@@ -249,21 +255,38 @@ fun IptvScreen(
         // Live EPG / Playlist background progress indicator (Requirement 1)
         if (epgProgress != null || isLoading) {
             Spacer(modifier = Modifier.height(10.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                LinearProgressIndicator(
-                    progress = { epgProgress ?: 0.5f },
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(DarkCard)
+                    .border(1.dp, BorderSubtle, RoundedCornerShape(10.dp))
+                    .padding(horizontal = 14.dp, vertical = 8.dp)
+            ) {
+                Box(
                     modifier = Modifier
                         .weight(1f)
                         .height(6.dp)
-                        .clip(RoundedCornerShape(3.dp)),
-                    color = AccentCyan,
-                    trackColor = DarkSurface
-                )
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(DarkSurface)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(fraction = (epgProgress ?: 0.5f).coerceIn(0.04f, 1f))
+                            .fillMaxHeight()
+                            .background(
+                                Brush.horizontalGradient(
+                                    colors = listOf(AccentCyan, AccentGold, AccentOrange)
+                                )
+                            )
+                    )
+                }
                 Spacer(modifier = Modifier.width(12.dp))
                 Text(
                     text = statusMsg ?: "Загрузка...",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = AccentCyan
+                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                    color = AccentCyanBright
                 )
             }
         }
@@ -277,11 +300,24 @@ fun IptvScreen(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(DarkCard)
+                            .border(1.dp, BorderSubtle, RoundedCornerShape(14.dp))
+                            .padding(horizontal = 24.dp, vertical = 16.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            color = AccentCyan,
+                            strokeWidth = 2.5.dp,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Spacer(modifier = Modifier.width(14.dp))
                         Text(
                             text = statusMsg ?: "Загрузка каналов...",
                             style = MaterialTheme.typography.titleMedium,
-                            color = AccentCyan
+                            color = TextPrimary
                         )
                     }
                 }
@@ -468,9 +504,12 @@ fun IptvScreen(
                             iptvManager.getCurrentProgram(channel)
                         }
                         val progress = currentProg?.progress()?.coerceIn(0f, 1f) ?: 0f
+                        val starInteraction = remember { MutableInteractionSource() }
+                        val isStarFocused by starInteraction.collectIsFocusedAsState()
 
                         TvFocusCard(
                             onClick = { onPlayChannel(channel) },
+                            isSelected = isStarFocused,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(48.dp)
@@ -485,8 +524,8 @@ fun IptvScreen(
                                             .background(
                                                 Brush.horizontalGradient(
                                                     colors = listOf(
-                                                        AccentCyan.copy(alpha = 0.05f),
-                                                        AccentCyan.copy(alpha = 0.19f)
+                                                        AccentCyan.copy(alpha = 0.06f),
+                                                        AccentOrange.copy(alpha = 0.16f)
                                                     )
                                                 )
                                             )
@@ -508,7 +547,7 @@ fun IptvScreen(
                                             modifier = Modifier
                                                 .size(30.dp)
                                                 .clip(RoundedCornerShape(6.dp))
-                                                .background(DarkSurface.copy(alpha = 0.8f)),
+                                                .background(DarkSurface.copy(alpha = 0.85f)),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Icon(
@@ -553,14 +592,14 @@ fun IptvScreen(
                                                     Box(
                                                         modifier = Modifier
                                                             .clip(RoundedCornerShape(4.dp))
-                                                            .background(Color(0xFF66BB6A).copy(alpha = 0.16f))
+                                                            .background(StatusSuccess.copy(alpha = 0.16f))
                                                             .padding(horizontal = 4.dp, vertical = 1.dp)
                                                     ) {
                                                         Text(
                                                             text = if (channel.catchupDays > 0) "↺ ${channel.catchupDays}д" else "↺",
                                                             fontSize = 9.sp,
                                                             fontWeight = FontWeight.Bold,
-                                                            color = Color(0xFF81C784)
+                                                            color = StatusSuccess
                                                         )
                                                     }
                                                 }
@@ -578,17 +617,51 @@ fun IptvScreen(
                                         }
                                     }
 
-                                    // Compact Favorite Toggle Button
-                                    IconButton(
-                                        onClick = { iptvManager.toggleFavorite(channel.id) },
+                                    // Compact TV-Focusable Favorite Toggle Button with explicit FocusBorder
+                                    val starScale by animateFloatAsState(if (isStarFocused) 1.12f else 1.0f, label = "star_scale")
+                                    val starBg by animateColorAsState(
+                                        targetValue = when {
+                                            isStarFocused && isFav -> AccentGold.copy(alpha = 0.24f)
+                                            isStarFocused -> AccentCyan.copy(alpha = 0.22f)
+                                            isFav -> AccentGold.copy(alpha = 0.12f)
+                                            else -> Color.Transparent
+                                        },
+                                        label = "star_bg"
+                                    )
+                                    val starBorder = when {
+                                        isStarFocused && isFav -> AccentGold
+                                        isStarFocused -> FocusBorder
+                                        isFav -> AccentGold.copy(alpha = 0.45f)
+                                        else -> Color.Transparent
+                                    }
+                                    Box(
                                         modifier = Modifier
                                             .padding(start = 4.dp)
                                             .size(30.dp)
+                                            .scale(starScale)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(starBg)
+                                            .then(
+                                                if (starBorder != Color.Transparent) {
+                                                    Modifier.border(if (isStarFocused) 2.dp else 1.dp, starBorder, RoundedCornerShape(8.dp))
+                                                } else Modifier
+                                            )
+                                            .clickable(
+                                                interactionSource = starInteraction,
+                                                indication = null
+                                            ) {
+                                                iptvManager.toggleFavorite(channel.id)
+                                            },
+                                        contentAlignment = Alignment.Center
                                     ) {
                                         Icon(
                                             imageVector = if (isFav) Icons.Default.Star else Icons.Default.StarBorder,
                                             contentDescription = if (isFav) "В избранном" else "Добавить в избранное",
-                                            tint = if (isFav) Color(0xFFFFD54F) else TextSecondary,
+                                            tint = when {
+                                                isFav -> AccentGold
+                                                isStarFocused -> AccentCyanBright
+                                                else -> TextSecondary
+                                            },
                                             modifier = Modifier.size(16.dp)
                                         )
                                     }

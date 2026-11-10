@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -133,13 +134,11 @@ fun SettingsScreen(
     val updateActionFocusRequester = remember { FocusRequester() }
 
     LaunchedEffect(updateUiState) {
-        if (updateUiState !is UpdateUiState.Idle) {
-            for (d in listOf(30L, 80L, 160L, 300L, 500L)) {
-                delay(d)
-                try {
-                    updateActionFocusRequester.requestFocus()
-                } catch (_: Exception) {}
-            }
+        if (updateUiState is UpdateUiState.ReadyToInstall) {
+            delay(60)
+            try {
+                updateActionFocusRequester.requestFocus()
+            } catch (_: Exception) {}
         }
     }
 
@@ -502,7 +501,7 @@ fun SettingsScreen(
                                     modifier = Modifier
                                         .fillMaxHeight()
                                         .fillMaxWidth(fraction = p)
-                                        .background(AccentCyan)
+                                        .background(Brush.horizontalGradient(listOf(AccentCyan, AccentGold, AccentOrange)))
                                 )
                                 Box(
                                     modifier = Modifier.fillMaxSize(),
@@ -620,7 +619,7 @@ fun SettingsScreen(
                                     modifier = Modifier
                                         .fillMaxHeight()
                                         .fillMaxWidth(fraction = p)
-                                        .background(AccentCyan)
+                                        .background(Brush.horizontalGradient(listOf(AccentCyan, AccentGold, AccentOrange)))
                                 )
                                 Box(
                                     modifier = Modifier.fillMaxSize(),
@@ -648,8 +647,8 @@ fun SettingsScreen(
                                 else -> Icons.Default.Refresh
                             }
                             val statusColor = when {
-                                isEpgFresh -> Color(0xFF66BB6A)
-                                isEpgError -> Color(0xFFFF5252)
+                                isEpgFresh -> StatusSuccess
+                                isEpgError -> RedAccent
                                 iptvEpgInput.isBlank() -> TextSecondary
                                 else -> AccentCyan
                             }
@@ -660,7 +659,7 @@ fun SettingsScreen(
                                 else -> "Обновить программу"
                             }
                             val secondaryLabel = when {
-                                isEpgFresh -> "${lastEpgUpdateText.ifBlank { "Актуально" }} • Всё готово"
+                                isEpgFresh -> lastEpgUpdateText.ifBlank { "Актуально" }
                                 isEpgError -> "Нажмите для повтора"
                                 iptvEpgInput.isBlank() -> "Укажите ссылку слева"
                                 else -> "Нажмите для загрузки"
@@ -797,147 +796,138 @@ fun SettingsScreen(
 
                 Spacer(modifier = Modifier.width(16.dp))
 
-                when (val state = updateUiState) {
-                    is UpdateUiState.Checking -> {
+                // Persistent button prevents Compose from dropping focus back to NavigationRail (Home)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val availState = updateUiState as? UpdateUiState.Available
+                    if (availState != null) {
                         TvFocusCard(
-                            onClick = {},
+                            onClick = {
+                                changelogRelease = availState.release
+                                showChangelogDialog = true
+                            },
                             modifier = Modifier
-                                .width(170.dp)
+                                .width(150.dp)
                                 .height(44.dp)
-                                .focusRequester(updateActionFocusRequester)
                         ) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Text(
-                                    text = "Проверка...",
+                                    text = "Что нового",
                                     style = MaterialTheme.typography.bodyMedium,
-                                    color = AccentCyan
+                                    color = TextSecondary
                                 )
                             }
                         }
                     }
 
-                    is UpdateUiState.Available -> {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            TvFocusCard(
-                                onClick = {
-                                    changelogRelease = state.release
-                                    showChangelogDialog = true
-                                },
-                                modifier = Modifier
-                                    .width(150.dp)
-                                    .height(44.dp)
-                            ) {
-                                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    Text(
-                                        text = "Что нового",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = TextSecondary
-                                    )
-                                }
-                            }
-
-                            TvFocusCard(
-                                onClick = { startDownload(state.release) },
-                                modifier = Modifier
-                                    .width(150.dp)
-                                    .height(44.dp)
-                                    .focusRequester(updateActionFocusRequester)
-                            ) {
-                                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    Text(
-                                        text = "Загрузить",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = AccentCyan,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    is UpdateUiState.Downloading -> {
+                    key("primary_update_action_btn") {
                         TvFocusCard(
-                            onClick = {},
+                            onClick = {
+                                when (val st = updateUiState) {
+                                    is UpdateUiState.Checking, is UpdateUiState.Downloading -> Unit
+                                    is UpdateUiState.Available -> startDownload(st.release)
+                                    is UpdateUiState.ReadyToInstall -> updateManager.installApk(st.apkFile)
+                                    else -> startCheckUpdates()
+                                }
+                            },
                             modifier = Modifier
-                                .width(170.dp)
+                                .width(if (availState != null) 150.dp else 175.dp)
                                 .height(44.dp)
                                 .focusRequester(updateActionFocusRequester)
                         ) {
-                            val p = downloadProgress.coerceIn(0f, 1f)
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(DarkSurface),
-                                contentAlignment = Alignment.CenterStart
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxHeight()
-                                        .fillMaxWidth(fraction = p)
-                                        .background(AccentCyan)
-                                )
-                                Box(
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = "${(p * 100).toInt()}%",
-                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = if (p > 0.5f) DarkBackground else TextPrimary
-                                    )
+                            when (updateUiState) {
+                                is UpdateUiState.Checking -> {
+                                    Row(
+                                        modifier = Modifier.fillMaxSize(),
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        CircularProgressIndicator(
+                                            color = AccentCyan,
+                                            strokeWidth = 2.dp,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "Проверка...",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = AccentCyan
+                                        )
+                                    }
                                 }
-                            }
-                        }
-                    }
 
-                    is UpdateUiState.ReadyToInstall -> {
-                        TvFocusCard(
-                            onClick = { updateManager.installApk(state.apkFile) },
-                            modifier = Modifier
-                                .width(170.dp)
-                                .height(44.dp)
-                                .focusRequester(updateActionFocusRequester)
-                        ) {
-                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.CheckCircle,
-                                        contentDescription = null,
-                                        tint = AccentCyan,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Text(
-                                        text = "Установка",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = AccentCyan,
-                                        fontWeight = FontWeight.Bold
-                                    )
+                                is UpdateUiState.Available -> {
+                                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                        Text(
+                                            text = "Загрузить",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = AccentOrange,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
                                 }
-                            }
-                        }
-                    }
 
-                    else -> {
-                        TvFocusCard(
-                            onClick = { startCheckUpdates() },
-                            modifier = Modifier
-                                .width(170.dp)
-                                .height(44.dp)
-                                .focusRequester(updateActionFocusRequester)
-                        ) {
-                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text(
-                                    text = "Проверить сейчас",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = TextPrimary
-                                )
+                                is UpdateUiState.Downloading -> {
+                                    val p = downloadProgress.coerceIn(0f, 1f)
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(DarkSurface),
+                                        contentAlignment = Alignment.CenterStart
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxHeight()
+                                                .fillMaxWidth(fraction = p)
+                                                .background(Brush.horizontalGradient(listOf(AccentCyan, AccentGold, AccentOrange)))
+                                        )
+                                        Box(
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = "${(p * 100).toInt()}%",
+                                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                                color = if (p > 0.5f) DarkBackground else TextPrimary
+                                            )
+                                        }
+                                    }
+                                }
+
+                                is UpdateUiState.ReadyToInstall -> {
+                                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.CheckCircle,
+                                                contentDescription = null,
+                                                tint = StatusSuccess,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                            Text(
+                                                text = "Установка",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = StatusSuccess,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+                                }
+
+                                else -> {
+                                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                        Text(
+                                            text = "Проверить сейчас",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = TextPrimary
+                                        )
+                                    }
+                                }
                             }
                         }
                     }

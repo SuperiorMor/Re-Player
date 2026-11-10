@@ -74,9 +74,10 @@ fun HomeScreen(
     val connectedDevice by serverConfigManager.connectedUpnpDevice.collectAsState()
     val channels by iptvManager.channels.collectAsState()
     val favoriteChannelIds by iptvManager.favoriteChannelIds.collectAsState()
+    val watchTimes by iptvManager.watchTimes.collectAsState()
     val epgMap by iptvManager.epgMap.collectAsState()
 
-    val favoriteChannels = remember(channels, favoriteChannelIds) {
+    val favoriteChannels = remember(channels, favoriteChannelIds, watchTimes) {
         iptvManager.getFavoriteChannels()
     }
 
@@ -239,7 +240,7 @@ fun HomeScreen(
                                             overflow = TextOverflow.Ellipsis,
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .padding(horizontal = 10.dp, vertical = 8.dp)
+                                                .padding(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 5.dp)
                                                 .then(
                                                     if (isFocused) {
                                                         Modifier.basicMarquee(
@@ -252,23 +253,27 @@ fun HomeScreen(
                                                 )
                                         )
 
-                                        // Watch progress bar at bottom edge of poster
+                                        // Raised high-contrast watch progress pill (Amber-Orange vs Cyan FocusBorder)
                                         Box(
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .height(4.dp)
-                                                .background(Color(0x33FFFFFF))
+                                                .padding(start = 10.dp, end = 10.dp, bottom = 9.dp)
+                                                .height(5.dp)
+                                                .clip(RoundedCornerShape(3.dp))
+                                                .background(Color(0xD907090E))
+                                                .border(0.5.dp, Color(0x40FFFFFF), RoundedCornerShape(3.dp))
                                         ) {
                                             if (watchProgress > 0f) {
                                                 Box(
                                                     modifier = Modifier
                                                         .fillMaxHeight()
                                                         .fillMaxWidth(fraction = watchProgress)
+                                                        .clip(RoundedCornerShape(3.dp))
                                                         .background(
                                                             Brush.horizontalGradient(
                                                                 colors = listOf(
-                                                                    AccentCyan.copy(alpha = 0.75f),
-                                                                    AccentCyan
+                                                                    AccentGold,
+                                                                    AccentOrange
                                                                 )
                                                             )
                                                         )
@@ -398,7 +403,7 @@ fun HomeScreen(
                                         Icon(
                                             imageVector = Icons.Default.Star,
                                             contentDescription = "В избранном",
-                                            tint = Color(0xFFFFD54F),
+                                            tint = AccentGold,
                                             modifier = Modifier.size(18.dp)
                                         )
                                     }
@@ -642,12 +647,12 @@ private fun GoogleTvLiveGuide(
                         .fillMaxWidth()
                         .scale(rowScale)
                         .zIndex(if (isRowFocused) 1f else 0f)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(if (isRowFocused) Color(0x18FFFFFF) else Color.Transparent)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(if (isRowFocused) CardFocusedBackground else Color.Transparent)
                         .border(
                             width = if (isRowFocused) 2.dp else 1.dp,
-                            color = if (isRowFocused) Color.White else Color.Transparent,
-                            shape = RoundedCornerShape(12.dp)
+                            color = if (isRowFocused) FocusBorder else Color.Transparent,
+                            shape = RoundedCornerShape(14.dp)
                         )
                         .clickable(
                             interactionSource = rowInteractionSource,
@@ -827,13 +832,13 @@ private fun HomeShelfFocusCard(
             .padding(3.dp)
             .zIndex(if (isFocused) 10f else 1f)
             .scale(scale)
-            .clip(RoundedCornerShape(12.dp))
-            .background(CardBackground)
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (isFocused) CardFocusedBackground else CardBackground)
             .then(
                 if (isFocused) {
-                    Modifier.border(2.5.dp, FocusBorder, RoundedCornerShape(12.dp))
+                    Modifier.border(2.5.dp, FocusBorder, RoundedCornerShape(14.dp))
                 } else {
-                    Modifier.border(1.dp, Color(0x22FFFFFF), RoundedCornerShape(12.dp))
+                    Modifier.border(1.dp, BorderSubtle, RoundedCornerShape(14.dp))
                 }
             )
             .clickable(

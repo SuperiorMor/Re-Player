@@ -7,8 +7,13 @@ import androidx.compose.runtime.Composable
 private val RePlayerColorScheme = darkColorScheme(
     background = DarkBackground,
     surface = SurfaceDark,
+    surfaceVariant = CardBackground,
     primary = AccentCyan,
-    onPrimary = TextPrimary,
+    secondary = AccentOrange,
+    error = RedAccent,
+    onPrimary = DarkBackground,
+    onSecondary = DarkBackground,
+    onBackground = TextPrimary,
     onSurface = TextPrimary
 )
 

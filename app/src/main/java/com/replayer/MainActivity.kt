@@ -30,8 +30,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -93,7 +95,14 @@ class MainActivity : ComponentActivity() {
                         .background(DarkBackground)
                 ) {
                     // TV Navigation & Main UI (always kept alive so state is preserved on player close)
-                    Row(modifier = Modifier.fillMaxSize()) {
+                    @OptIn(ExperimentalComposeUiApi::class)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .focusProperties {
+                                canFocus = (activeMediaItem == null)
+                            }
+                    ) {
                         TvNavigationRail(
                             selectedItem = selectedNav,
                             onItemSelected = {

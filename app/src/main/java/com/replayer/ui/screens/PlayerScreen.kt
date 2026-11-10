@@ -46,6 +46,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.*
@@ -158,6 +159,7 @@ fun PlayerScreen(
     }
 
     val playButtonFocusRequester = remember { FocusRequester() }
+    val timelineFocusRequester = remember { FocusRequester() }
     val rootFocusRequester = remember { FocusRequester() }
 
     // Trigger playback whenever mediaItem switches (initial file, next episode, etc.)
@@ -245,6 +247,9 @@ fun PlayerScreen(
             .focusRequester(rootFocusRequester)
             .focusable(enabled = !showControls && !showAudioDialog && !showSubtitleDialog && !showEpgDialog)
             .onPreviewKeyEvent { keyEvent ->
+                if (keyEvent.type == KeyEventType.KeyDown && showControls) {
+                    lastInteractionTime = System.currentTimeMillis()
+                }
                 if (keyEvent.type == KeyEventType.KeyDown && (keyEvent.key == Key.Back || keyEvent.key == Key.Escape)) {
                     if (showEpgDialog) {
                         showEpgDialog = false
@@ -331,15 +336,15 @@ fun PlayerScreen(
         ) {
             Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xEE1A1A24))
-                    .border(1.dp, AccentCyan.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(SurfaceDark.copy(alpha = 0.94f))
+                    .border(1.5.dp, FocusBorder.copy(alpha = 0.7f), RoundedCornerShape(14.dp))
                     .padding(horizontal = 24.dp, vertical = 12.dp)
             ) {
                 Text(
                     text = osdFeedback ?: "",
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = AccentCyan
+                    color = AccentCyanBright
                 )
             }
         }
@@ -399,13 +404,34 @@ fun PlayerScreen(
                         }
                         Column(modifier = Modifier.fillMaxWidth()) {
                             if (displayProg != null) {
-                                Text(
-                                    text = displayProg.title,
-                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = TextPrimary,
-                                    maxLines = 1,
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier.padding(bottom = 8.dp)
-                                )
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(
+                                                if (playingArchiveProgram != null) AccentOrange.copy(alpha = 0.2f)
+                                                else AccentCyan.copy(alpha = 0.18f)
+                                            )
+                                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = if (playingArchiveProgram != null) "АРХИВ" else "В ЭФИРЕ",
+                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                            color = if (playingArchiveProgram != null) AccentOrange else AccentCyanBright
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Text(
+                                        text = displayProg.title,
+                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = TextPrimary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                             }
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -414,26 +440,42 @@ fun PlayerScreen(
                                 Text(
                                     text = displayProg?.formattedStartTime() ?: "В эфире",
                                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = AccentCyan
+                                    color = AccentCyanBright
                                 )
 
                                 Spacer(modifier = Modifier.width(16.dp))
 
-                                // Clean track bar without stop indicator dot at end
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(6.dp)
-                                        .clip(RoundedCornerShape(3.dp))
-                                        .background(DarkSurface)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth(fraction = progFraction)
-                                            .fillMaxHeight()
-                                            .background(AccentCyan)
-                                    )
-                                }
+                                TvIptvTimelineBar(
+                                    progress = progFraction,
+                                    isArchiveMode = playingArchiveProgram != null,
+                                    focusRequester = timelineFocusRequester,
+                                    downFocusRequester = playButtonFocusRequester,
+                                    onSeekLeft = {
+                                        if (playingArchiveProgram != null) {
+                                            engine.seekRelative(-10000)
+                                            osdFeedback = "⏪ -10 сек"
+                                        } else if (fullChannel.hasArchive && currentProgram != null) {
+                                            playArchiveProgram(currentProgram!!)
+                                        } else {
+                                            osdFeedback = "Архив недоступен в прямом эфире"
+                                        }
+                                        lastInteractionTime = System.currentTimeMillis()
+                                    },
+                                    onSeekRight = {
+                                        if (playingArchiveProgram != null) {
+                                            engine.seekRelative(10000)
+                                            osdFeedback = "⏩ +10 сек"
+                                        } else {
+                                            osdFeedback = "Сейчас прямой эфир"
+                                        }
+                                        lastInteractionTime = System.currentTimeMillis()
+                                    },
+                                    onOpenSchedule = {
+                                        showEpgDialog = true
+                                        lastInteractionTime = System.currentTimeMillis()
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                )
 
                                 Spacer(modifier = Modifier.width(16.dp))
 
@@ -461,6 +503,8 @@ fun PlayerScreen(
                             TvTimelineBar(
                                 currentPositionMs = playerState.currentPositionMs,
                                 durationMs = playerState.durationMs,
+                                focusRequester = timelineFocusRequester,
+                                downFocusRequester = playButtonFocusRequester,
                                 onSeekRelative = { delta ->
                                     engine.seekRelative(delta)
                                     lastInteractionTime = System.currentTimeMillis()
@@ -480,15 +524,13 @@ fun PlayerScreen(
 
                     Spacer(modifier = Modifier.height(20.dp))
 
-                    // Buttons Row for TV Remote
+                    // Buttons Row for TV Remote — locked vertically (timeline up, cancel down) & horizontally on edges
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .focusProperties {
-                                if (isIptv) {
-                                    up = FocusRequester.Cancel
-                                    down = FocusRequester.Cancel
-                                }
+                                up = timelineFocusRequester
+                                down = FocusRequester.Cancel
                             },
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
@@ -497,6 +539,11 @@ fun PlayerScreen(
                             TvPlayerIconButton(
                                 icon = Icons.Default.Replay10,
                                 contentDescription = "Назад на 10 сек",
+                                modifier = Modifier.focusProperties {
+                                    left = FocusRequester.Cancel
+                                    up = timelineFocusRequester
+                                    down = FocusRequester.Cancel
+                                },
                                 onClick = {
                                     engine.seekRelative(-10000)
                                     lastInteractionTime = System.currentTimeMillis()
@@ -509,6 +556,11 @@ fun PlayerScreen(
                             TvPlayerIconButton(
                                 icon = Icons.Default.SkipPrevious,
                                 contentDescription = "Предыдущая передача",
+                                modifier = Modifier.focusProperties {
+                                    left = FocusRequester.Cancel
+                                    up = timelineFocusRequester
+                                    down = FocusRequester.Cancel
+                                },
                                 onClick = {
                                     val now = System.currentTimeMillis()
                                     val anchor = playingArchiveProgram ?: currentProgram
@@ -538,6 +590,10 @@ fun PlayerScreen(
                             icon = if (playerState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                             contentDescription = if (playerState.isPlaying) "Пауза" else "Воспроизведение",
                             focusRequester = playButtonFocusRequester,
+                            modifier = Modifier.focusProperties {
+                                up = timelineFocusRequester
+                                down = FocusRequester.Cancel
+                            },
                             onClick = {
                                 engine.togglePlayPause()
                                 lastInteractionTime = System.currentTimeMillis()
@@ -550,6 +606,10 @@ fun PlayerScreen(
                             TvPlayerIconButton(
                                 icon = Icons.Default.Forward10,
                                 contentDescription = "Вперед на 10 сек",
+                                modifier = Modifier.focusProperties {
+                                    up = timelineFocusRequester
+                                    down = FocusRequester.Cancel
+                                },
                                 onClick = {
                                     engine.seekRelative(10000)
                                     lastInteractionTime = System.currentTimeMillis()
@@ -564,6 +624,10 @@ fun PlayerScreen(
                             TvPlayerIconButton(
                                 icon = Icons.Default.SkipNext,
                                 contentDescription = "Следующая серия",
+                                modifier = Modifier.focusProperties {
+                                    up = timelineFocusRequester
+                                    down = FocusRequester.Cancel
+                                },
                                 onClick = {
                                     if (nextFile != null) {
                                         osdFeedback = "Следующая серия: ${nextFile.title}"
@@ -582,6 +646,10 @@ fun PlayerScreen(
                         TvPlayerIconButton(
                             icon = Icons.Default.Audiotrack,
                             contentDescription = "Аудиодорожки",
+                            modifier = Modifier.focusProperties {
+                                up = timelineFocusRequester
+                                down = FocusRequester.Cancel
+                            },
                             onClick = {
                                 showAudioDialog = true
                                 lastInteractionTime = System.currentTimeMillis()
@@ -590,10 +658,15 @@ fun PlayerScreen(
 
                         Spacer(modifier = Modifier.width(16.dp))
 
-                        // Subtitle Track Selector Button
+                        // Subtitle Track Selector Button (rightmost edge when !isIptv)
                         TvPlayerIconButton(
                             icon = Icons.Default.ClosedCaption,
                             contentDescription = "Субтитры",
+                            modifier = Modifier.focusProperties {
+                                up = timelineFocusRequester
+                                down = FocusRequester.Cancel
+                                if (!isIptv) right = FocusRequester.Cancel
+                            },
                             onClick = {
                                 showSubtitleDialog = true
                                 lastInteractionTime = System.currentTimeMillis()
@@ -603,10 +676,15 @@ fun PlayerScreen(
                         if (isIptv) {
                             Spacer(modifier = Modifier.width(16.dp))
 
-                            // EPG Schedule Button (Accordion & Archives)
+                            // EPG Schedule Button (rightmost edge when isIptv)
                             TvPlayerIconButton(
                                 icon = Icons.Default.MenuBook,
                                 contentDescription = "Телепрограмма и архив",
+                                modifier = Modifier.focusProperties {
+                                    up = timelineFocusRequester
+                                    down = FocusRequester.Cancel
+                                    right = FocusRequester.Cancel
+                                },
                                 onClick = {
                                     showEpgDialog = true
                                     lastInteractionTime = System.currentTimeMillis()
@@ -687,31 +765,102 @@ fun TvTimelineBar(
     currentPositionMs: Long,
     durationMs: Long,
     onSeekRelative: (Long) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    focusRequester: FocusRequester? = null,
+    downFocusRequester: FocusRequester? = null
+) {
+    val progress = if (durationMs > 0) (currentPositionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) else 0f
+    TvScrubberTrack(
+        progress = progress,
+        focusRequester = focusRequester,
+        downFocusRequester = downFocusRequester,
+        onStepLeft = { onSeekRelative(-10000) },
+        onStepRight = { onSeekRelative(10000) },
+        modifier = modifier
+    )
+}
+
+@Composable
+fun TvIptvTimelineBar(
+    progress: Float,
+    isArchiveMode: Boolean,
+    onSeekLeft: () -> Unit,
+    onSeekRight: () -> Unit,
+    onOpenSchedule: () -> Unit,
+    modifier: Modifier = Modifier,
+    focusRequester: FocusRequester? = null,
+    downFocusRequester: FocusRequester? = null
+) {
+    TvScrubberTrack(
+        progress = progress.coerceIn(0f, 1f),
+        focusRequester = focusRequester,
+        downFocusRequester = downFocusRequester,
+        thumbBorderColor = if (isArchiveMode) AccentOrange else FocusBorder,
+        onStepLeft = onSeekLeft,
+        onStepRight = onSeekRight,
+        onCenterClick = onOpenSchedule,
+        modifier = modifier
+    )
+}
+
+@Composable
+private fun TvScrubberTrack(
+    progress: Float,
+    focusRequester: FocusRequester?,
+    downFocusRequester: FocusRequester?,
+    onStepLeft: () -> Unit,
+    onStepRight: () -> Unit,
+    modifier: Modifier = Modifier,
+    thumbBorderColor: Color = FocusBorder,
+    onCenterClick: (() -> Unit)? = null
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
-    val progress = if (durationMs > 0) (currentPositionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) else 0f
+    val clampedProgress = progress.coerceIn(0f, 1f)
 
     BoxWithConstraints(
         modifier = modifier
             .height(36.dp)
-            .focusable(interactionSource = interactionSource)
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+            .focusProperties {
+                up = FocusRequester.Cancel
+                left = FocusRequester.Cancel
+                right = FocusRequester.Cancel
+                if (downFocusRequester != null) {
+                    down = downFocusRequester
+                }
+            }
             .onKeyEvent { keyEvent ->
                 if (keyEvent.type == KeyEventType.KeyDown) {
                     when (keyEvent.key) {
                         Key.DirectionLeft -> {
-                            onSeekRelative(-10000)
+                            onStepLeft()
                             true
                         }
                         Key.DirectionRight -> {
-                            onSeekRelative(10000)
+                            onStepRight()
                             true
+                        }
+                        Key.DirectionCenter, Key.Enter -> {
+                            if (onCenterClick != null) {
+                                onCenterClick()
+                                true
+                            } else false
                         }
                         else -> false
                     }
                 } else false
-            },
+            }
+            .then(
+                if (onCenterClick != null) {
+                    Modifier.clickable(
+                        interactionSource = interactionSource,
+                        indication = null,
+                        onClick = onCenterClick
+                    )
+                } else Modifier
+            )
+            .focusable(interactionSource = interactionSource),
         contentAlignment = Alignment.Center
     ) {
         val totalWidth = maxWidth
@@ -721,32 +870,42 @@ fun TvTimelineBar(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(if (isFocused) 10.dp else 6.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(if (isFocused) Color(0x66FFFFFF) else Color(0x33FFFFFF))
+                .clip(RoundedCornerShape(5.dp))
+                .background(if (isFocused) Color(0x55FFFFFF) else Color(0x30FFFFFF))
+                .then(
+                    if (isFocused) Modifier.border(1.dp, thumbBorderColor.copy(alpha = 0.7f), RoundedCornerShape(5.dp))
+                    else Modifier
+                )
         ) {
-            // Played progress fill
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(fraction = progress)
-                    .fillMaxHeight()
-                    .background(AccentCyan)
-            )
+            // Played progress fill in brand gradient
+            if (clampedProgress > 0f) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(fraction = clampedProgress)
+                        .fillMaxHeight()
+                        .background(
+                            Brush.horizontalGradient(
+                                colors = listOf(AccentCyan, AccentGold, AccentOrange)
+                            )
+                        )
+                )
+            }
         }
 
         // Focused Scrubber Thumb
         if (isFocused) {
-            val thumbOffset = (totalWidth - 16.dp) * progress
+            val thumbOffset = ((totalWidth - 18.dp) * clampedProgress).coerceAtLeast(0.dp)
             Box(
                 modifier = Modifier.fillMaxWidth(),
                 contentAlignment = Alignment.CenterStart
             ) {
                 Box(
                     modifier = Modifier
-                        .padding(start = thumbOffset.coerceAtLeast(0.dp))
-                        .size(16.dp)
-                        .clip(RoundedCornerShape(8.dp))
+                        .padding(start = thumbOffset)
+                        .size(18.dp)
+                        .clip(RoundedCornerShape(9.dp))
                         .background(Color.White)
-                        .border(2.dp, AccentCyan, RoundedCornerShape(8.dp))
+                        .border(2.5.dp, thumbBorderColor, RoundedCornerShape(9.dp))
                 )
             }
         }
@@ -763,23 +922,28 @@ fun TvPlayerIconButton(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
-    val scale by animateFloatAsState(if (isFocused) 1.15f else 1.0f, label = "btn_scale")
+    val scale by animateFloatAsState(if (isFocused) 1.14f else 1.0f, label = "btn_scale")
+    val bgColor by animateColorAsState(
+        targetValue = if (isFocused) CardFocusedBackground else Color(0x40121824),
+        label = "btn_bg"
+    )
 
     Box(
-        modifier = modifier
+        modifier = Modifier
             .size(56.dp)
             .padding(4.dp)
             .scale(scale)
-            .clip(RoundedCornerShape(12.dp))
-            .background(if (isFocused) AccentCyan.copy(alpha = 0.25f) else Color(0x33FFFFFF))
+            .clip(RoundedCornerShape(14.dp))
+            .background(bgColor)
             .then(
                 if (isFocused) {
-                    Modifier.border(2.5.dp, FocusBorder, RoundedCornerShape(12.dp))
+                    Modifier.border(2.5.dp, FocusBorder, RoundedCornerShape(14.dp))
                 } else {
-                    Modifier.border(1.dp, Color(0x22FFFFFF), RoundedCornerShape(12.dp))
+                    Modifier.border(1.dp, BorderSubtle, RoundedCornerShape(14.dp))
                 }
             )
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+            .then(modifier)
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
@@ -791,7 +955,7 @@ fun TvPlayerIconButton(
         Icon(
             imageVector = icon,
             contentDescription = contentDescription,
-            tint = if (isFocused) AccentCyan else TextPrimary,
+            tint = if (isFocused) AccentCyanBright else TextPrimary,
             modifier = Modifier.size(28.dp)
         )
     }
@@ -1287,7 +1451,11 @@ fun EpgAccordionDialog(
                                                         modifier = Modifier
                                                             .fillMaxWidth(fraction = prog.progress(now).coerceIn(0f, 1f))
                                                             .fillMaxHeight()
-                                                            .background(AccentCyan)
+                                                            .background(
+                                                                Brush.horizontalGradient(
+                                                                    colors = listOf(AccentCyan, AccentGold, AccentOrange)
+                                                                )
+                                                            )
                                                     )
                                                 }
                                             }

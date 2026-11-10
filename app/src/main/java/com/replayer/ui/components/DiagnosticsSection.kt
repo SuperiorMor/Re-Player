@@ -204,10 +204,16 @@ fun DiagnosticsSection() {
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.QrCode, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
+                        val isSecondaryStyle = hasBuiltIn && !hasCustom
+                        Icon(
+                            imageVector = Icons.Default.QrCode,
+                            contentDescription = null,
+                            tint = if (isSecondaryStyle) TextSecondary else AccentCyan,
+                            modifier = Modifier.size(18.dp)
+                        )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Настроить (QR / бот)",
+                            text = if (isSecondaryStyle) "Свой бот (QR)" else "Настроить (QR / бот)",
                             style = MaterialTheme.typography.bodyMedium,
                             color = TextPrimary,
                             maxLines = 1

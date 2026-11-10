@@ -192,7 +192,8 @@ class RePlayerEngine(private val context: Context) {
                 if (isReleased) return@execute
                 try {
                     val duration = if (mediaPlayer.length > 0) mediaPlayer.length else _playerState.value.durationMs
-                    val target = (mediaPlayer.time + deltaMs).coerceIn(0L, duration.coerceAtLeast(0L))
+                    val rawTarget = (mediaPlayer.time + deltaMs).coerceAtLeast(0L)
+                    val target = if (duration > 0L) rawTarget.coerceAtMost(duration) else rawTarget
                     mediaPlayer.time = target
                     _playerState.value = _playerState.value.copy(currentPositionMs = target)
                 } catch (_: Throwable) {}
@@ -207,7 +208,8 @@ class RePlayerEngine(private val context: Context) {
                 if (isReleased) return@execute
                 try {
                     val duration = if (mediaPlayer.length > 0) mediaPlayer.length else _playerState.value.durationMs
-                    val target = positionMs.coerceIn(0L, duration.coerceAtLeast(0L))
+                    val rawTarget = positionMs.coerceAtLeast(0L)
+                    val target = if (duration > 0L) rawTarget.coerceAtMost(duration) else rawTarget
                     mediaPlayer.time = target
                     _playerState.value = _playerState.value.copy(currentPositionMs = target)
                 } catch (_: Throwable) {}

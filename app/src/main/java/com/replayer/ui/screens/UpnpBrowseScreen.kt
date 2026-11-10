@@ -1,14 +1,23 @@
 package com.replayer.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -17,22 +26,18 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AudioFile
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Sort
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.VideoFile
-import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -41,24 +46,32 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import com.replayer.data.FavoritesManager
+import com.replayer.data.MediaWatchProgress
 import com.replayer.data.RecentMediaManager
 import com.replayer.data.ServerConfigManager
 import com.replayer.diagnostics.CrashReporter
@@ -67,12 +80,18 @@ import com.replayer.model.MediaItem
 import com.replayer.model.MediaSourceType
 import com.replayer.model.MediaType
 import com.replayer.model.SortMode
-import com.replayer.model.ViewMode
 import com.replayer.network.upnp.ContentDirectoryService
 import com.replayer.ui.components.TvFocusCard
 import com.replayer.ui.theme.AccentCyan
+import com.replayer.ui.theme.AccentCyanBright
+import com.replayer.ui.theme.AccentGold
+import com.replayer.ui.theme.AccentOrange
+import com.replayer.ui.theme.BorderSubtle
+import com.replayer.ui.theme.CardBackground
 import com.replayer.ui.theme.DarkCard
 import com.replayer.ui.theme.DarkSurface
+import com.replayer.ui.theme.FocusBorder
+import com.replayer.ui.theme.StatusSuccess
 import com.replayer.ui.theme.TextPrimary
 import com.replayer.ui.theme.TextSecondary
 import kotlinx.coroutines.delay
@@ -102,33 +121,45 @@ fun UpnpBrowseScreen(
     val progressMap by recentManager.progressMap.collectAsState()
 
     var currentItems by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
+    var loadedFolderId by remember { mutableStateOf<String?>(null) }
     var folderStack by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
     var isLoadingFolder by remember { mutableStateOf(false) }
-
-    // User preferences: Default view is LIST
-    var viewMode by remember { mutableStateOf(ViewMode.LIST) }
+    var activeLoadRequestId by remember { mutableIntStateOf(0) }
     var sortMode by remember { mutableStateOf(SortMode.BY_NAME) }
 
     val listState = rememberLazyListState()
-    val gridState = rememberLazyGridState()
-
-    val firstItemFocusRequester = remember { FocusRequester() }
     val targetItemFocusRequester = remember { FocusRequester() }
+    var focusTargetIndex by remember { mutableIntStateOf(0) }
+    var focusedItem by remember { mutableStateOf<MediaItem?>(null) }
     var lastExitTimestamp by remember { mutableLongStateOf(0L) }
 
+    val currentFolderId = folderStack.lastOrNull()?.first
+
     fun loadFolder(controlUrl: String, folderId: String) {
+        val reqId = ++activeLoadRequestId
         isLoadingFolder = true
         scope.launch {
-            currentItems = contentDirectory.browse(controlUrl, folderId)
-            isLoadingFolder = false
+            val loaded = contentDirectory.browse(controlUrl, folderId)
+            if (reqId == activeLoadRequestId) {
+                currentItems = loaded
+                loadedFolderId = folderId
+                isLoadingFolder = false
+            }
         }
     }
 
-    fun openFolder(controlUrl: String, folderId: String, title: String) {
-        CrashReporter.breadcrumb("DLNA", "openFolder: $title ($folderId)")
+    fun openFolder(controlUrl: String, folderItem: MediaItem) {
+        CrashReporter.breadcrumb("DLNA", "openFolder: ${folderItem.title} (${folderItem.id})")
+        recentManager.recordFolderSelection(currentFolderId, folderItem.id, folderItem.uri)
         onConsumeLastPlayedMediaId()
-        folderStack = folderStack + Pair(folderId, title)
-        loadFolder(controlUrl, folderId)
+        folderStack = folderStack + Pair(folderItem.id, folderItem.title)
+        loadFolder(controlUrl, folderItem.id)
+    }
+
+    LaunchedEffect(isPlayerActive) {
+        if (!isPlayerActive) {
+            lastExitTimestamp = System.currentTimeMillis()
+        }
     }
 
     // Initialize or switch folder when connectedDevice or initialFolder changes
@@ -163,14 +194,12 @@ fun UpnpBrowseScreen(
     }
 
     BackHandler(enabled = !isPlayerActive) {
-        // Prevent accidental multiple back taps within 400ms after closing player from popping folders
         if (System.currentTimeMillis() - lastExitTimestamp < 400) {
             return@BackHandler
         }
         navigateBack()
     }
 
-    // Sorting
     val sortedItems = remember(currentItems, sortMode) {
         when (sortMode) {
             SortMode.BY_NAME -> {
@@ -189,8 +218,41 @@ fun UpnpBrowseScreen(
         }
     }
 
+    val latestSortedItems by rememberUpdatedState(sortedItems)
+
+    // Restore focus to the last-opened (or last-played) item inside the current folder
+    LaunchedEffect(loadedFolderId, isLoadingFolder, isPlayerActive, lastPlayedMediaId) {
+        if (isPlayerActive || isLoadingFolder || loadedFolderId == null || loadedFolderId != currentFolderId) {
+            return@LaunchedEffect
+        }
+        val items = latestSortedItems
+        if (items.isEmpty()) {
+            focusedItem = null
+            return@LaunchedEffect
+        }
+
+        val lastSaved = recentManager.getLastOpenedKeyInFolder(currentFolderId)
+        val resolvedIdx = when {
+            lastPlayedMediaId != null -> items.indexOfFirst { it.id == lastPlayedMediaId }
+            lastSaved != null -> items.indexOfFirst {
+                it.id == lastSaved.first || (lastSaved.second.isNotBlank() && it.uri == lastSaved.second)
+            }
+            else -> 0
+        }.let { if (it in items.indices) it else 0 }
+
+        focusTargetIndex = resolvedIdx
+        focusedItem = items[resolvedIdx]
+        delay(40)
+        try {
+            listState.scrollToItem(resolvedIdx)
+        } catch (_: Exception) {}
+        delay(60)
+        try {
+            targetItemFocusRequester.requestFocus()
+        } catch (_: Exception) {}
+    }
+
     if (connectedDevice == null) {
-        // Not connected state
         Box(
             modifier = modifier
                 .fillMaxSize()
@@ -201,29 +263,21 @@ fun UpnpBrowseScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(80.dp)
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(DarkCard),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Folder,
-                        contentDescription = null,
-                        tint = AccentCyan,
-                        modifier = Modifier.size(42.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.height(20.dp))
+                Icon(
+                    imageVector = Icons.Default.Folder,
+                    contentDescription = null,
+                    tint = TextSecondary,
+                    modifier = Modifier.size(64.dp)
+                )
+                Spacer(modifier = Modifier.height(16.dp))
                 Text(
-                    text = "Подключите свой сервер DLNA/UPnP в настройках",
-                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
+                    text = "Медиа-сервер UPnP / DLNA не подключён",
+                    style = MaterialTheme.typography.titleLarge,
                     color = TextPrimary
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "Выберите DLNA сервер (например Keenetic Giga или медиасервер ПК) в меню настроек.",
+                    text = "Выберите или подключите DLNA сервер в настройках",
                     style = MaterialTheme.typography.bodyMedium,
                     color = TextSecondary
                 )
@@ -231,17 +285,17 @@ fun UpnpBrowseScreen(
                 TvFocusCard(
                     onClick = onNavigateToSettings,
                     modifier = Modifier
-                        .width(220.dp)
-                        .height(48.dp)
+                        .width(240.dp)
+                        .height(52.dp)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxSize(),
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.Settings, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(20.dp))
+                        Icon(Icons.Default.Settings, contentDescription = null, tint = AccentCyanBright, modifier = Modifier.size(20.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text(text = "Перейти в настройки", color = AccentCyan, style = MaterialTheme.typography.bodyMedium)
+                        Text(text = "Перейти в настройки", color = AccentCyanBright, style = MaterialTheme.typography.bodyMedium)
                     }
                 }
             }
@@ -249,12 +303,16 @@ fun UpnpBrowseScreen(
         return
     }
 
+    val isAtRoot = folderStack.size <= 1
+    val headerTitle = if (isAtRoot) connectedDevice!!.friendlyName else folderStack.last().second
+    val parentBreadcrumb = if (isAtRoot) "" else folderStack.dropLast(1).joinToString(" › ") { it.second }
+
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 32.dp, vertical = 24.dp)
+            .padding(horizontal = 32.dp, vertical = 20.dp)
     ) {
-        // Header with Breadcrumb and Controls
+        // Header: Clean single title (no duplicate description at root) + Sort button only
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -262,84 +320,55 @@ fun UpnpBrowseScreen(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = connectedDevice!!.friendlyName,
-                    style = MaterialTheme.typography.displayLarge
-                )
-                val breadcrumb = folderStack.joinToString(" / ") { it.second }
-                Text(
-                    text = breadcrumb.ifEmpty { connectedDevice!!.friendlyName },
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = AccentCyan,
+                    text = headerTitle,
+                    style = MaterialTheme.typography.displayLarge,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                if (parentBreadcrumb.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = parentBreadcrumb,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = AccentCyanBright,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
 
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // View Switcher (List / Grid)
-                TvFocusCard(
-                    onClick = {
-                        viewMode = if (viewMode == ViewMode.LIST) ViewMode.GRID else ViewMode.LIST
-                    },
-                    modifier = Modifier
-                        .width(160.dp)
-                        .height(48.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxSize(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = if (viewMode == ViewMode.LIST) Icons.Default.ViewList else Icons.Default.GridView,
-                            contentDescription = null,
-                            tint = AccentCyan,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = if (viewMode == ViewMode.LIST) "Вид: Список" else "Вид: Плитка",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = TextPrimary
-                        )
-                    }
-                }
+            Spacer(modifier = Modifier.width(16.dp))
 
-                // Sort Switcher (Name / Date)
-                TvFocusCard(
-                    onClick = {
-                        sortMode = if (sortMode == SortMode.BY_NAME) SortMode.BY_DATE else SortMode.BY_NAME
-                    },
-                    modifier = Modifier
-                        .width(170.dp)
-                        .height(48.dp)
+            TvFocusCard(
+                onClick = {
+                    sortMode = if (sortMode == SortMode.BY_NAME) SortMode.BY_DATE else SortMode.BY_NAME
+                },
+                modifier = Modifier
+                    .width(180.dp)
+                    .height(42.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxSize(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Sort,
-                            contentDescription = null,
-                            tint = AccentCyan,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = if (sortMode == SortMode.BY_NAME) "Сорт: По имени" else "Сорт: По дате",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = TextPrimary
-                        )
-                    }
+                    Icon(
+                        imageVector = Icons.Default.Sort,
+                        contentDescription = null,
+                        tint = AccentCyanBright,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (sortMode == SortMode.BY_NAME) "Сорт: По имени" else "Сорт: По дате",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextPrimary
+                    )
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
         Box(modifier = Modifier.fillMaxSize()) {
             if (sortedItems.isEmpty() && !isLoadingFolder) {
@@ -353,274 +382,202 @@ fun UpnpBrowseScreen(
                         color = TextSecondary
                     )
                 }
-            } else if (viewMode == ViewMode.LIST) {
-                // Detailed List View
-                LazyColumn(
-                    state = listState,
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    contentPadding = PaddingValues(vertical = 8.dp),
-                    modifier = Modifier.fillMaxSize()
+            } else {
+                // Two-column TV browser layout:
+                // Left column (56%) — compact IPTV-style list of folders & files
+                // Right column (44%) — vertical movie/series poster + bottom metadata panel
+                Row(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalArrangement = Arrangement.spacedBy(20.dp)
                 ) {
-                items(sortedItems.size, key = { sortedItems[it].id }) { index ->
-                    val item = sortedItems[index]
-                    val isFirst = index == 0
-                    val isTarget = item.id == lastPlayedMediaId
-                    val isFav = favorites.any { it.id == item.id }
-
-                    val itemFocusModifier = when {
-                        isTarget -> Modifier.focusRequester(targetItemFocusRequester)
-                        isFirst -> Modifier.focusRequester(firstItemFocusRequester)
-                        else -> Modifier
-                    }
-
-                    val watchProgress = remember(item.id, item.uri, progressMap) {
-                        if (item.type != MediaType.DIRECTORY) {
-                            (progressMap[item.id]?.progress()
-                                ?: progressMap[item.uri]?.progress()
-                                ?: 0f).coerceIn(0f, 1f)
-                        } else 0f
-                    }
-
-                    TvFocusCard(
-                        onClick = {
-                            if (item.type == MediaType.DIRECTORY) {
-                                connectedDevice?.contentDirectoryControlUrl?.let { url ->
-                                    openFolder(url, item.id, item.title)
-                                }
-                            } else {
-                                if (item.type == MediaType.VIDEO || item.type == MediaType.AUDIO) {
-                                    val folderTitle = folderStack.lastOrNull()?.second
-                                    recentManager.addRecent(
-                                        id = item.id,
-                                        title = item.title,
-                                        uri = item.uri,
-                                        parentId = item.parentId ?: folderStack.lastOrNull()?.first,
-                                        folderTitle = folderTitle
-                                    )
-                                    recentManager.resolveVerticalPoster(
-                                        targetItem = item,
-                                        folderItems = currentItems,
-                                        controlUrl = connectedDevice?.contentDirectoryControlUrl,
-                                        folderTitle = folderTitle
-                                    )
-                                }
-                                val playables = currentItems.filter { it.type == MediaType.VIDEO || it.type == MediaType.AUDIO }
-                                    .ifEmpty { listOf(item) }
-                                onPlayMedia(item, playables)
-                            }
-                        },
+                    LazyColumn(
+                        state = listState,
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(top = 4.dp, bottom = 24.dp),
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .height(78.dp)
-                            .then(itemFocusModifier)
+                            .weight(0.56f)
+                            .fillMaxHeight()
                     ) {
-                        Box(modifier = Modifier.fillMaxSize()) {
-                            if (watchProgress > 0f) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxHeight()
-                                        .fillMaxWidth(fraction = watchProgress)
-                                        .background(
-                                            Brush.horizontalGradient(
-                                                colors = listOf(
-                                                    AccentCyan.copy(alpha = 0.06f),
-                                                    AccentCyan.copy(alpha = 0.22f)
-                                                )
-                                            )
-                                        )
-                                )
+                        itemsIndexed(sortedItems, key = { idx, item -> "${item.id}_$idx" }) { index, item ->
+                            val isFav = favorites.any { it.id == item.id }
+                            val watchProgress = remember(item.id, item.uri, progressMap) {
+                                if (item.type != MediaType.DIRECTORY) {
+                                    (progressMap[item.id]?.progress()
+                                        ?: progressMap[item.uri]?.progress()
+                                        ?: 0f).coerceIn(0f, 1f)
+                                } else 0f
                             }
 
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(horizontal = 20.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                val icon = when (item.type) {
-                                    MediaType.DIRECTORY -> Icons.Default.Folder
-                                    MediaType.VIDEO -> Icons.Default.VideoFile
-                                    MediaType.AUDIO -> Icons.Default.AudioFile
-                                    MediaType.IMAGE -> Icons.Default.Image
-                                    MediaType.UNKNOWN -> Icons.Default.VideoFile
-                                }
-                                Box(
-                                    modifier = Modifier
-                                        .size(44.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(AccentCyan.copy(alpha = 0.12f)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = icon,
-                                        contentDescription = null,
-                                        tint = AccentCyan,
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                }
+                            var isRowFocused by remember { mutableStateOf(false) }
+                            val starInteraction = remember { MutableInteractionSource() }
+                            val isStarFocused by starInteraction.collectIsFocusedAsState()
+                            val isAnyPartFocused = isRowFocused || isStarFocused
 
-                                Spacer(modifier = Modifier.width(16.dp))
+                            val focusModifier = if (index == focusTargetIndex) {
+                                Modifier.focusRequester(targetItemFocusRequester)
+                            } else Modifier
 
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = item.title,
-                                        style = MaterialTheme.typography.titleMedium,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        color = TextPrimary
-                                    )
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    val sizeStr = item.formattedSize()
-                                    if (sizeStr.isNotEmpty()) {
-                                        Spacer(modifier = Modifier.height(2.dp))
-                                        Text(
-                                            text = sizeStr,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = TextSecondary
-                                        )
+                            TvFocusCard(
+                                onClick = {
+                                    if (item.type == MediaType.DIRECTORY) {
+                                        connectedDevice?.contentDirectoryControlUrl?.let { url ->
+                                            openFolder(url, item)
+                                        }
+                                    } else {
+                                        recentManager.recordFolderSelection(currentFolderId, item.id, item.uri)
+                                        val folderTitle = folderStack.lastOrNull()?.second
+                                        if (item.type == MediaType.VIDEO || item.type == MediaType.AUDIO) {
+                                            recentManager.addRecent(
+                                                id = item.id,
+                                                title = item.title,
+                                                uri = item.uri,
+                                                parentId = item.parentId ?: currentFolderId,
+                                                folderTitle = folderTitle
+                                            )
+                                            recentManager.resolveVerticalPoster(
+                                                targetItem = item,
+                                                folderItems = currentItems,
+                                                controlUrl = connectedDevice?.contentDirectoryControlUrl,
+                                                folderTitle = folderTitle
+                                            )
+                                        }
+                                        val playables = sortedItems.filter {
+                                            it.type == MediaType.VIDEO || it.type == MediaType.AUDIO
+                                        }.ifEmpty { listOf(item) }
+                                        onPlayMedia(item, playables)
                                     }
-                                }
-
-                                // Favorite Star button for folders
-                                if (item.type == MediaType.DIRECTORY) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(36.dp)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(if (isFav) Color(0xFFFFD54F).copy(alpha = 0.15f) else Color.Transparent)
-                                            .clickable {
-                                                favoritesManager.toggleFavorite(
-                                                    FavoriteFolder(
-                                                        id = item.id,
-                                                        title = item.title,
-                                                        sourceType = MediaSourceType.UPNP_DLNA,
-                                                        serverControlUrl = connectedDevice?.contentDirectoryControlUrl,
-                                                        parentId = item.parentId
+                                },
+                                isSelected = isStarFocused,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(52.dp)
+                                    .then(focusModifier)
+                                    .onFocusChanged { state ->
+                                        isRowFocused = state.hasFocus
+                                        if (state.hasFocus) {
+                                            focusedItem = item
+                                        }
+                                    }
+                            ) {
+                                Box(modifier = Modifier.fillMaxSize()) {
+                                    if (watchProgress > 0f) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxHeight()
+                                                .fillMaxWidth(fraction = watchProgress)
+                                                .background(
+                                                    Brush.horizontalGradient(
+                                                        colors = listOf(
+                                                            AccentCyan.copy(alpha = 0.06f),
+                                                            AccentOrange.copy(alpha = 0.16f)
+                                                        )
                                                     )
                                                 )
-                                            },
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = if (isFav) Icons.Default.Star else Icons.Default.StarBorder,
-                                            contentDescription = "Избранное",
-                                            tint = if (isFav) Color(0xFFFFD54F) else TextSecondary,
-                                            modifier = Modifier.size(20.dp)
                                         )
                                     }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        } else {
-            // Grid View
-            LazyVerticalGrid(
-                state = gridState,
-                columns = GridCells.Adaptive(minSize = 220.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                contentPadding = PaddingValues(vertical = 8.dp)
-            ) {
-                items(sortedItems.size, key = { sortedItems[it].id }) { index ->
-                    val item = sortedItems[index]
-                    val isFirst = index == 0
-                    val isTarget = item.id == lastPlayedMediaId
-                    val isFav = favorites.any { it.id == item.id }
 
-                    val itemFocusModifier = when {
-                        isTarget -> Modifier.focusRequester(targetItemFocusRequester)
-                        isFirst -> Modifier.focusRequester(firstItemFocusRequester)
-                        else -> Modifier
-                    }
-                    val watchProgress = remember(item.id, item.uri, progressMap) {
-                        if (item.type != MediaType.DIRECTORY) {
-                            (progressMap[item.id]?.progress()
-                                ?: progressMap[item.uri]?.progress()
-                                ?: 0f).coerceIn(0f, 1f)
-                        } else 0f
-                    }
-
-                    TvFocusCard(
-                        onClick = {
-                            if (item.type == MediaType.DIRECTORY) {
-                                connectedDevice?.contentDirectoryControlUrl?.let { url ->
-                                    openFolder(url, item.id, item.title)
-                                }
-                            } else {
-                                if (item.type == MediaType.VIDEO || item.type == MediaType.AUDIO) {
-                                    val folderTitle = folderStack.lastOrNull()?.second
-                                    recentManager.addRecent(
-                                        id = item.id,
-                                        title = item.title,
-                                        uri = item.uri,
-                                        parentId = item.parentId ?: folderStack.lastOrNull()?.first,
-                                        folderTitle = folderTitle
-                                    )
-                                    recentManager.resolveVerticalPoster(
-                                        targetItem = item,
-                                        folderItems = currentItems,
-                                        controlUrl = connectedDevice?.contentDirectoryControlUrl,
-                                        folderTitle = folderTitle
-                                    )
-                                }
-                                val playables = currentItems.filter { it.type == MediaType.VIDEO || it.type == MediaType.AUDIO }
-                                    .ifEmpty { listOf(item) }
-                                onPlayMedia(item, playables)
-                            }
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(130.dp)
-                            .then(itemFocusModifier)
-                    ) {
-                        Box(modifier = Modifier.fillMaxSize()) {
-                            if (watchProgress > 0f) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxHeight()
-                                        .fillMaxWidth(fraction = watchProgress)
-                                        .background(
-                                            Brush.horizontalGradient(
-                                                colors = listOf(
-                                                    AccentCyan.copy(alpha = 0.06f),
-                                                    AccentCyan.copy(alpha = 0.22f)
-                                                )
-                                            )
-                                        )
-                                )
-                            }
-
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(16.dp),
-                                verticalArrangement = Arrangement.Center
-                            ) {
-                                val icon = when (item.type) {
-                                    MediaType.DIRECTORY -> Icons.Default.Folder
-                                    MediaType.VIDEO -> Icons.Default.VideoFile
-                                    MediaType.AUDIO -> Icons.Default.AudioFile
-                                    MediaType.IMAGE -> Icons.Default.Image
-                                    MediaType.UNKNOWN -> Icons.Default.VideoFile
-                                }
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(icon, contentDescription = null, tint = AccentCyan)
-
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        if (item.type == MediaType.DIRECTORY) {
-                                            Icon(
-                                                imageVector = if (isFav) Icons.Default.Star else Icons.Default.StarBorder,
-                                                contentDescription = null,
-                                                tint = if (isFav) Color(0xFFFFD54F) else TextSecondary,
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .padding(horizontal = 10.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.weight(1f),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            val icon = mediaTypeIcon(item.type)
+                                            val iconTint = mediaTypeTint(item.type)
+                                            Box(
                                                 modifier = Modifier
-                                                    .size(20.dp)
-                                                    .clickable {
+                                                    .size(32.dp)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(DarkSurface.copy(alpha = 0.85f)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = icon,
+                                                    contentDescription = null,
+                                                    tint = iconTint,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+
+                                            Spacer(modifier = Modifier.width(10.dp))
+
+                                            Column(
+                                                modifier = Modifier.weight(1f),
+                                                verticalArrangement = Arrangement.Center
+                                            ) {
+                                                Text(
+                                                    text = item.title,
+                                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                                        fontSize = 13.5.sp,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        lineHeight = 16.sp
+                                                    ),
+                                                    color = TextPrimary,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.then(
+                                                        if (isAnyPartFocused) {
+                                                            Modifier.basicMarquee(
+                                                                iterations = Int.MAX_VALUE,
+                                                                initialDelayMillis = 250,
+                                                                repeatDelayMillis = 800,
+                                                                velocity = 40.dp
+                                                            )
+                                                        } else Modifier
+                                                    )
+                                                )
+                                                val secondaryLine = buildListSecondaryText(item, watchProgress)
+                                                Text(
+                                                    text = secondaryLine,
+                                                    style = MaterialTheme.typography.bodySmall.copy(
+                                                        fontSize = 11.sp,
+                                                        lineHeight = 13.sp
+                                                    ),
+                                                    color = if (watchProgress > 0.01f) AccentGold else TextSecondary,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+
+                                        if (item.type == MediaType.DIRECTORY) {
+                                            val starScale by animateFloatAsState(if (isStarFocused) 1.12f else 1.0f, label = "dlna_star_scale")
+                                            val starBg by animateColorAsState(
+                                                targetValue = when {
+                                                    isStarFocused && isFav -> AccentGold.copy(alpha = 0.24f)
+                                                    isStarFocused -> AccentCyan.copy(alpha = 0.22f)
+                                                    isFav -> AccentGold.copy(alpha = 0.12f)
+                                                    else -> Color.Transparent
+                                                },
+                                                label = "dlna_star_bg"
+                                            )
+                                            val starBorder = when {
+                                                isStarFocused && isFav -> AccentGold
+                                                isStarFocused -> FocusBorder
+                                                isFav -> AccentGold.copy(alpha = 0.45f)
+                                                else -> Color.Transparent
+                                            }
+                                            Box(
+                                                modifier = Modifier
+                                                    .padding(start = 6.dp)
+                                                    .size(30.dp)
+                                                    .scale(starScale)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(starBg)
+                                                    .then(
+                                                        if (starBorder != Color.Transparent) {
+                                                            Modifier.border(if (isStarFocused) 2.dp else 1.dp, starBorder, RoundedCornerShape(8.dp))
+                                                        } else Modifier
+                                                    )
+                                                    .clickable(
+                                                        interactionSource = starInteraction,
+                                                        indication = null
+                                                    ) {
                                                         favoritesManager.toggleFavorite(
                                                             FavoriteFolder(
                                                                 id = item.id,
@@ -630,90 +587,348 @@ fun UpnpBrowseScreen(
                                                                 parentId = item.parentId
                                                             )
                                                         )
-                                                    }
-                                            )
-                                            Spacer(modifier = Modifier.width(8.dp))
+                                                    },
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = if (isFav) Icons.Default.Star else Icons.Default.StarBorder,
+                                                    contentDescription = "Избранное",
+                                                    tint = when {
+                                                        isFav -> AccentGold
+                                                        isStarFocused -> AccentCyanBright
+                                                        else -> TextSecondary
+                                                    },
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
                                         }
                                     }
-                                }
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Text(
-                                    text = item.title,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                val sizeStr = item.formattedSize()
-                                if (sizeStr.isNotEmpty()) {
-                                    Text(
-                                        text = sizeStr,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = TextSecondary
-                                    )
                                 }
                             }
                         }
                     }
+
+                    // Right column: Movie/Series Poster Preview + Full Metadata at the bottom
+                    val displayItem = focusedItem ?: sortedItems.firstOrNull()
+                    DlnaDetailPreviewPanel(
+                        item = displayItem,
+                        folderItems = currentItems,
+                        folderTitle = folderStack.lastOrNull()?.second,
+                        controlUrl = connectedDevice?.contentDirectoryControlUrl,
+                        progressMap = progressMap,
+                        recentManager = recentManager,
+                        modifier = Modifier
+                            .weight(0.44f)
+                            .fillMaxHeight()
+                            .padding(bottom = 16.dp)
+                    )
                 }
             }
-        }
 
-        if (isLoadingFolder) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.45f)),
-                contentAlignment = Alignment.Center
-            ) {
-                CircularProgressIndicator(color = AccentCyan)
+            if (isLoadingFolder) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.48f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(DarkCard)
+                            .border(1.dp, BorderSubtle, RoundedCornerShape(14.dp))
+                            .padding(horizontal = 24.dp, vertical = 16.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            color = AccentCyan,
+                            strokeWidth = 2.5.dp,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Spacer(modifier = Modifier.width(14.dp))
+                        Text(
+                            text = "Загрузка содержимого...",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = TextPrimary
+                        )
+                    }
+                }
             }
         }
     }
 }
 
-// 1. Returning from player: focus the played video item and keep focus on it!
-    LaunchedEffect(isPlayerActive) {
-        if (!isPlayerActive && lastPlayedMediaId != null) {
-            val targetIndex = sortedItems.indexOfFirst { it.id == lastPlayedMediaId }
-            if (targetIndex >= 0) {
-                delay(60)
-                try {
-                    if (viewMode == ViewMode.LIST) {
-                        listState.scrollToItem(maxOf(0, targetIndex))
+@Composable
+private fun DlnaDetailPreviewPanel(
+    item: MediaItem?,
+    folderItems: List<MediaItem>,
+    folderTitle: String?,
+    controlUrl: String?,
+    progressMap: Map<String, MediaWatchProgress>,
+    recentManager: RecentMediaManager,
+    modifier: Modifier = Modifier
+) {
+    if (item == null) {
+        Box(modifier = modifier)
+        return
+    }
+
+    var posterUrl by remember(item.id) {
+        mutableStateOf(recentManager.getCachedPreviewPoster(item.id))
+    }
+    var isResolvingPoster by remember(item.id) { mutableStateOf(false) }
+
+    LaunchedEffect(item.id, item.uri, controlUrl) {
+        if (recentManager.hasCachedPreviewPoster(item.id)) {
+            posterUrl = recentManager.getCachedPreviewPoster(item.id)
+            isResolvingPoster = false
+            return@LaunchedEffect
+        }
+        posterUrl = null
+        delay(160)
+        isResolvingPoster = true
+        val resolved = try {
+            recentManager.resolvePreviewPosterForItem(
+                item = item,
+                folderItems = folderItems,
+                controlUrl = controlUrl,
+                folderTitle = folderTitle
+            )
+        } catch (_: Throwable) {
+            null
+        }
+        posterUrl = resolved
+        isResolvingPoster = false
+    }
+
+    val watchEntry = remember(item.id, item.uri, progressMap) {
+        if (item.type != MediaType.DIRECTORY) {
+            progressMap[item.id] ?: progressMap[item.uri]
+        } else null
+    }
+    val watchProgress = watchEntry?.progress()?.coerceIn(0f, 1f) ?: 0f
+
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(DarkCard)
+            .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp))
+            .padding(18.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        // Poster preview area matching vertical Home poster cards (2:3 ratio)
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .aspectRatio(2f / 3f, matchHeightConstraintsFirst = true)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(CardBackground, DarkSurface)
+                        )
+                    )
+                    .border(1.dp, BorderSubtle, RoundedCornerShape(14.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Crossfade(
+                    targetState = posterUrl,
+                    animationSpec = tween(220),
+                    label = "dlna_poster_fade"
+                ) { url ->
+                    if (!url.isNullOrBlank()) {
+                        AsyncImage(
+                            model = url,
+                            contentDescription = item.title,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
                     } else {
-                        gridState.scrollToItem(maxOf(0, targetIndex))
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = mediaTypeIcon(item.type),
+                                contentDescription = null,
+                                tint = mediaTypeTint(item.type).copy(alpha = 0.55f),
+                                modifier = Modifier.size(64.dp)
+                            )
+                        }
                     }
-                } catch (_: Exception) {}
-                delay(80)
-                try {
-                    targetItemFocusRequester.requestFocus()
-                } catch (_: Exception) {}
+                }
+
+                if (isResolvingPoster && posterUrl.isNullOrBlank()) {
+                    CircularProgressIndicator(
+                        color = AccentCyan,
+                        strokeWidth = 2.dp,
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(10.dp)
+                            .size(18.dp)
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Bottom info section: Full title, format/size/resolution/date chips, watch bar
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Text(
+                text = item.title,
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    lineHeight = 20.sp
+                ),
+                color = TextPrimary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            val metaParts = buildList {
+                add(item.fileFormat())
+                val sizeStr = item.formattedSize()
+                if (sizeStr.isNotEmpty()) add(sizeStr)
+                val resStr = item.resolution?.trim()
+                if (!resStr.isNullOrEmpty() && !resStr.equals("null", ignoreCase = true)) {
+                    add(resStr)
+                }
+                if (item.durationMs > 0L) {
+                    add(formatShortDuration(item.durationMs))
+                }
+                val dateStr = item.formattedDate()
+                if (dateStr.isNotEmpty()) add(dateStr)
+            }
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                metaParts.take(4).forEachIndexed { idx, label ->
+                    val isFormatChip = idx == 0
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(
+                                if (isFormatChip) AccentCyan.copy(alpha = 0.16f) else DarkSurface
+                            )
+                            .border(
+                                width = 1.dp,
+                                color = if (isFormatChip) AccentCyan.copy(alpha = 0.35f) else BorderSubtle,
+                                shape = RoundedCornerShape(6.dp)
+                            )
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = if (isFormatChip) AccentCyanBright else TextSecondary,
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
+
+            if (metaParts.size > 4) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = metaParts.drop(4).joinToString(" • "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            if (watchProgress > 0.005f && watchEntry != null) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Просмотрено: ${(watchProgress * 100).toInt().coerceIn(1, 100)}%",
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                        color = AccentGold
+                    )
+                    Text(
+                        text = "${formatShortDuration(watchEntry.positionMs)} / ${formatShortDuration(watchEntry.durationMs)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextSecondary
+                    )
+                }
+                Spacer(modifier = Modifier.height(5.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(5.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(DarkSurface)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .fillMaxWidth(fraction = watchProgress)
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(
+                                Brush.horizontalGradient(
+                                    colors = listOf(AccentGold, AccentOrange)
+                                )
+                            )
+                    )
+                }
             }
         }
     }
+}
 
-    // 2. Folder navigation (entering folder or pressing Back): focus first item
-    LaunchedEffect(folderStack) {
-        if (folderStack.isNotEmpty() && !isPlayerActive) {
-            delay(60)
-            try {
-                if (viewMode == ViewMode.LIST) {
-                    listState.scrollToItem(0)
-                } else {
-                    gridState.scrollToItem(0)
-                }
-                firstItemFocusRequester.requestFocus()
-            } catch (_: Exception) {}
+private fun mediaTypeIcon(type: MediaType): ImageVector = when (type) {
+    MediaType.DIRECTORY -> Icons.Default.Folder
+    MediaType.VIDEO -> Icons.Default.VideoFile
+    MediaType.AUDIO -> Icons.Default.AudioFile
+    MediaType.IMAGE -> Icons.Default.Image
+    MediaType.UNKNOWN -> Icons.Default.VideoFile
+}
+
+private fun mediaTypeTint(type: MediaType): Color = when (type) {
+    MediaType.DIRECTORY -> AccentCyan
+    MediaType.VIDEO -> AccentCyanBright
+    MediaType.AUDIO -> AccentGold
+    MediaType.IMAGE -> StatusSuccess
+    MediaType.UNKNOWN -> AccentCyan
+}
+
+private fun buildListSecondaryText(item: MediaItem, watchProgress: Float): String {
+    if (item.type == MediaType.DIRECTORY) return "Папка"
+    val parts = buildList {
+        add(item.fileFormat())
+        val sizeStr = item.formattedSize()
+        if (sizeStr.isNotEmpty()) add(sizeStr)
+        if (watchProgress > 0.01f) {
+            add("Просмотрено ${(watchProgress * 100).toInt().coerceIn(1, 100)}%")
         }
     }
+    return parts.joinToString(" • ")
+}
 
-    // 3. Initial folder items loaded
-    LaunchedEffect(currentItems) {
-        if (!isPlayerActive && lastPlayedMediaId == null && currentItems.isNotEmpty()) {
-            delay(50)
-            try {
-                firstItemFocusRequester.requestFocus()
-            } catch (_: Exception) {}
-        }
+private fun formatShortDuration(ms: Long): String {
+    val totalSeconds = (ms / 1000L).coerceAtLeast(0L)
+    val seconds = totalSeconds % 60L
+    val minutes = (totalSeconds / 60L) % 60L
+    val hours = totalSeconds / 3600L
+    return if (hours > 0L) {
+        String.format("%d:%02d:%02d", hours, minutes, seconds)
+    } else {
+        String.format("%02d:%02d", minutes, seconds)
     }
 }

@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -21,6 +22,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
 import java.net.URLEncoder
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 @Serializable
@@ -68,6 +70,51 @@ class RecentMediaManager private constructor(context: Context) {
     private val listLock = Any()
     private val attemptedPosterKeys = HashSet<String>()
     private val scanningKeys = HashSet<String>()
+    private val previewPosterCache = ConcurrentHashMap<String, String>()
+    private val folderLastOpened: MutableMap<String, String> = loadFolderLastOpened()
+
+    private fun loadFolderLastOpened(): MutableMap<String, String> {
+        val raw = prefs.getString("folder_last_opened_json", null) ?: return mutableMapOf()
+        return try {
+            json.decodeFromString<Map<String, String>>(raw).toMutableMap()
+        } catch (_: Exception) {
+            mutableMapOf()
+        }
+    }
+
+    private fun saveFolderLastOpenedLocked() {
+        try {
+            if (folderLastOpened.size > 400) {
+                val keysToDrop = folderLastOpened.keys.take(folderLastOpened.size - 400)
+                keysToDrop.forEach { folderLastOpened.remove(it) }
+            }
+            prefs.edit().putString("folder_last_opened_json", json.encodeToString(folderLastOpened.toMap())).apply()
+        } catch (_: Exception) {}
+    }
+
+    private fun recordFolderSelectionLocked(folderId: String?, itemId: String, itemUri: String) {
+        val cleanFolder = folderId?.ifBlank { null } ?: return
+        if (itemId.isBlank()) return
+        // Re-insert so LinkedHashMap preserves most-recently-used ordering at the tail
+        folderLastOpened.remove(cleanFolder)
+        folderLastOpened[cleanFolder] = "$itemId\n$itemUri"
+        saveFolderLastOpenedLocked()
+    }
+
+    fun recordFolderSelection(folderId: String?, itemId: String, itemUri: String) {
+        synchronized(listLock) {
+            recordFolderSelectionLocked(folderId, itemId, itemUri)
+        }
+    }
+
+    fun getLastOpenedKeyInFolder(folderId: String?): Pair<String, String>? {
+        val cleanFolder = folderId?.ifBlank { null } ?: return null
+        val stored = synchronized(listLock) { folderLastOpened[cleanFolder] } ?: return null
+        val parts = stored.split('\n', limit = 2)
+        val id = parts.getOrNull(0)?.ifBlank { null } ?: return null
+        val uri = parts.getOrNull(1) ?: ""
+        return Pair(id, uri)
+    }
 
     private fun loadRecent(): List<RecentMedia> {
         val raw = prefs.getString("recent_media_json", null) ?: return emptyList()
@@ -156,6 +203,10 @@ class RecentMediaManager private constructor(context: Context) {
                     folderTitle = folderTitle ?: sameFolder?.folderTitle
                 )
             )
+            // Remember last played file inside its DLNA folder for smart cursor restoration
+            if (cleanParent != null) {
+                recordFolderSelectionLocked(cleanParent, id, uri)
+            }
             // Limit section strictly to 2 folders
             saveRecent(current.take(2))
         }
@@ -179,6 +230,96 @@ class RecentMediaManager private constructor(context: Context) {
                 saveRecent(current)
             }
         }
+    }
+
+    fun getCachedPreviewPoster(itemId: String): String? =
+        previewPosterCache[itemId]?.ifBlank { null }
+
+    fun hasCachedPreviewPoster(itemId: String): Boolean =
+        previewPosterCache.containsKey(itemId)
+
+    /**
+     * Resolves a vertical poster preview for DLNA list/folder inspection with memory caching.
+     * Generic top-level category folders (e.g. "Видео", "Фильмы") skip online lookups to avoid false hits.
+     */
+    suspend fun resolvePreviewPosterForItem(
+        item: MediaItem,
+        folderItems: List<MediaItem>,
+        controlUrl: String? = null,
+        folderTitle: String? = null
+    ): String? {
+        previewPosterCache[item.id]?.let { return it.ifBlank { null } }
+
+        return withContext(Dispatchers.IO) {
+            previewPosterCache[item.id]?.let { return@withContext it.ifBlank { null } }
+
+            val resolved: String? = when (item.type) {
+                MediaType.IMAGE -> item.uri.ifBlank { item.thumbnailUrl?.ifBlank { null } }
+                MediaType.AUDIO -> item.thumbnailUrl?.ifBlank { null }
+                MediaType.DIRECTORY -> {
+                    val lower = item.title.trim().lowercase()
+                    if (isGenericCategoryFolder(lower)) {
+                        item.thumbnailUrl?.ifBlank { null }
+                    } else {
+                        val isSeasonSub = Regex("^(season|sezon|сезон|s\\d+|part|часть)\\s*\\d*$", RegexOption.IGNORE_CASE)
+                            .matches(item.title.trim())
+                        val effectiveTitle = if (isSeasonSub && !folderTitle.isNullOrBlank() && !isGenericCategoryFolder(folderTitle.trim().lowercase())) {
+                            folderTitle
+                        } else {
+                            item.title
+                        }
+                        val subItems = if (!controlUrl.isNullOrBlank()) {
+                            try {
+                                ContentDirectoryService().browse(controlUrl, item.id)
+                            } catch (_: Throwable) {
+                                emptyList()
+                            }
+                        } else emptyList()
+
+                        findVerticalPosterCascade(
+                            targetItem = item,
+                            folderItems = subItems,
+                            controlUrl = controlUrl,
+                            folderTitle = effectiveTitle
+                        )
+                    }
+                }
+                MediaType.VIDEO, MediaType.UNKNOWN -> {
+                    // Instant reuse if already resolved for Continue Watching
+                    val fromRecent = _recentList.value.firstOrNull {
+                        (it.id == item.id || it.uri == item.uri || (!item.parentId.isNullOrBlank() && it.parentId == item.parentId)) &&
+                            !it.thumbnailUrl.isNullOrBlank()
+                    }?.thumbnailUrl
+                    if (!fromRecent.isNullOrBlank()) {
+                        fromRecent
+                    } else {
+                        val effectiveFolder = folderTitle?.takeIf { !isGenericCategoryFolder(it.trim().lowercase()) }
+                        findVerticalPosterCascade(
+                            targetItem = item,
+                            folderItems = folderItems,
+                            controlUrl = controlUrl,
+                            folderTitle = effectiveFolder
+                        )
+                    }
+                }
+            }
+
+            previewPosterCache[item.id] = resolved ?: ""
+            resolved
+        }
+    }
+
+    private fun isGenericCategoryFolder(lowerTitle: String): Boolean {
+        if (lowerTitle.length <= 2) return true
+        val generic = setOf(
+            "видео", "фильмы", "сериалы", "папки", "фото", "изображения", "картинки",
+            "музыка", "аудио", "все видео", "все файлы", "все фото", "недавнее", "недавние",
+            "новые", "добавленные", "избранное", "загрузки", "торренты", "downloads",
+            "video", "videos", "movies", "films", "tv", "series", "folders", "by folder",
+            "all video", "all files", "all", "photos", "pictures", "images", "music", "audio",
+            "recent", "recently added", "favorites"
+        )
+        return generic.contains(lowerTitle)
     }
 
     /**
