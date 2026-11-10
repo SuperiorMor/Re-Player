@@ -14,14 +14,27 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.io.BufferedInputStream
+import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.io.InputStream
+import java.util.IdentityHashMap
 import java.util.concurrent.TimeUnit
+import java.util.zip.GZIPInputStream
+import java.util.zip.GZIPOutputStream
+
+@Serializable
+private data class CachedEpgData(
+    val lists: Map<String, List<EpgProgram>>,
+    val aliases: Map<String, String>
+)
 
 enum class ChannelSortMode(val label: String) {
     BY_WATCH_TIME("По просмотру (А-Я)"),
@@ -180,7 +193,7 @@ class IptvManager private constructor(private val context: Context) {
     fun getLastEpgUpdateTime(): Long = prefs.getLong("iptv_epg_last_updated", 0L)
 
     fun saveLastEpgUpdateTime(time: Long) {
-        prefs.edit().putLong("iptv_epg_last_updated", time).apply()
+        prefs.edit().putLong("iptv_epg_last_updated", time).commit()
         _lastEpgUpdateTime.value = time
         _lastEpgUpdateText.value = getEpgLastUpdatedText()
     }
@@ -847,29 +860,51 @@ class IptvManager private constructor(private val context: Context) {
     }
 
     private fun loadCachedEpg(): Map<String, List<EpgProgram>> {
-        val file = File(context.filesDir, "iptv_epg.json")
-        return try {
-            if (file.exists()) {
-                // Protect against OutOfMemoryError if file is oversized
-                if (file.length() > 1_500_000L) {
-                    file.delete()
-                    emptyMap()
-                } else {
-                    json.decodeFromString<Map<String, List<EpgProgram>>>(file.readText())
+        val gzFile = File(context.filesDir, "iptv_epg_v2.json.gz")
+        if (gzFile.exists() && gzFile.length() in 1L..25_000_000L) {
+            try {
+                val rawText = GZIPInputStream(BufferedInputStream(FileInputStream(gzFile), 65536)).use { gz ->
+                    gz.bufferedReader(Charsets.UTF_8).readText()
                 }
+                val cached = json.decodeFromString<CachedEpgData>(rawText)
+                val result = HashMap<String, List<EpgProgram>>(cached.aliases.size + 16)
+                for ((alias, groupId) in cached.aliases) {
+                    val progs = cached.lists[groupId] ?: continue
+                    if (progs.isNotEmpty()) {
+                        result[alias] = progs
+                    }
+                }
+                if (result.isNotEmpty()) {
+                    return result
+                }
+            } catch (_: Throwable) {
+                try { gzFile.delete() } catch (_: Throwable) {}
+            }
+        }
+
+        // Legacy fallback from old uncompressed cache
+        val legacyFile = File(context.filesDir, "iptv_epg.json")
+        return try {
+            if (legacyFile.exists() && legacyFile.length() in 1L..12_000_000L) {
+                val loaded = json.decodeFromString<Map<String, List<EpgProgram>>>(legacyFile.readText())
+                if (loaded.isNotEmpty()) {
+                    saveCachedEpg(loaded)
+                }
+                loaded
             } else emptyMap()
         } catch (_: Throwable) {
-            try { file.delete() } catch (_: Throwable) {}
+            try { legacyFile.delete() } catch (_: Throwable) {}
             emptyMap()
         }
     }
 
     private fun saveCachedEpg(map: Map<String, List<EpgProgram>>) {
         try {
-            // Cache current/upcoming programs [-4h .. +14h] prioritizing favorite channels first, keeping file < 600KB
             val now = System.currentTimeMillis()
-            val minT = now - 4 * 3600 * 1000L
-            val maxT = now + 14 * 3600 * 1000L
+            val favMinT = now - 72L * 3600 * 1000L
+            val favMaxT = now + 36L * 3600 * 1000L
+            val genMinT = now - 3L * 3600 * 1000L
+            val genMaxT = now + 18L * 3600 * 1000L
 
             val favChannels = getFavoriteChannels()
             val priorityKeys = mutableSetOf<String>()
@@ -890,25 +925,66 @@ class IptvManager private constructor(private val context: Context) {
                 if (clean.isNotEmpty()) priorityKeys.add(clean)
             }
 
-            val trimmed = mutableMapOf<String, List<EpgProgram>>()
-            // 1. Add priority (favorite) keys first
-            for (key in priorityKeys) {
-                val progs = map[key] ?: continue
-                val filtered = progs.filter { it.endTime >= minT && it.startTime <= maxT }.take(12)
-                if (filtered.isNotEmpty()) trimmed[key] = filtered
-            }
-            // 2. Fill remaining slots up to 800 keys
-            for ((key, progs) in map) {
-                if (trimmed.containsKey(key)) continue
-                val filtered = progs.filter { it.endTime >= minT && it.startTime <= maxT }.take(10)
-                if (filtered.isNotEmpty()) {
-                    trimmed[key] = filtered
+            fun buildCachedPayload(stripNonFavDescriptions: Boolean): CachedEpgData {
+                val lists = LinkedHashMap<String, List<EpgProgram>>()
+                val aliases = LinkedHashMap<String, String>()
+                val listToGroupId = IdentityHashMap<List<EpgProgram>, String>()
+                val listIsFav = IdentityHashMap<List<EpgProgram>, Boolean>()
+
+                for ((key, rawList) in map) {
+                    if (rawList.isEmpty()) continue
+                    if (priorityKeys.contains(key)) {
+                        listIsFav[rawList] = true
+                    }
                 }
-                if (trimmed.size >= 800) break
+
+                var counter = 0
+                for ((key, rawList) in map) {
+                    if (rawList.isEmpty()) continue
+                    var groupId = listToGroupId[rawList]
+                    if (groupId == null) {
+                        val isFav = listIsFav[rawList] == true || priorityKeys.contains(key)
+                        val minT = if (isFav) favMinT else genMinT
+                        val maxT = if (isFav) favMaxT else genMaxT
+                        val filtered = rawList
+                            .filter { it.endTime >= minT && it.startTime <= maxT }
+                            .let { list ->
+                                if (stripNonFavDescriptions && !isFav) {
+                                    list.map { if (it.description != null) it.copy(description = null) else it }
+                                } else list
+                            }
+                        if (filtered.isEmpty()) continue
+                        groupId = "g$counter"
+                        counter++
+                        listToGroupId[rawList] = groupId
+                        lists[groupId] = filtered
+                    }
+                    aliases[key] = groupId
+                }
+                return CachedEpgData(lists = lists, aliases = aliases)
             }
 
-            val file = File(context.filesDir, "iptv_epg.json")
-            file.writeText(json.encodeToString(trimmed))
+            fun writeGzip(payload: CachedEpgData, targetFile: File): Long {
+                val tmpFile = File(targetFile.parentFile, "${targetFile.name}.tmp")
+                GZIPOutputStream(BufferedOutputStream(FileOutputStream(tmpFile), 65536)).use { gz ->
+                    gz.write(json.encodeToString(payload).toByteArray(Charsets.UTF_8))
+                }
+                if (targetFile.exists()) targetFile.delete()
+                tmpFile.renameTo(targetFile)
+                return targetFile.length()
+            }
+
+            val gzFile = File(context.filesDir, "iptv_epg_v2.json.gz")
+            val writtenBytes = writeGzip(buildCachedPayload(stripNonFavDescriptions = false), gzFile)
+            if (writtenBytes > 10_000_000L) {
+                writeGzip(buildCachedPayload(stripNonFavDescriptions = true), gzFile)
+            }
+
+            // Clean up legacy uncompressed cache if present
+            val legacyFile = File(context.filesDir, "iptv_epg.json")
+            if (legacyFile.exists()) {
+                try { legacyFile.delete() } catch (_: Throwable) {}
+            }
         } catch (_: Throwable) {}
     }
 

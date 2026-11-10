@@ -387,14 +387,20 @@ fun UpnpBrowseScreen(
                                 }
                             } else {
                                 if (item.type == MediaType.VIDEO || item.type == MediaType.AUDIO) {
+                                    val folderTitle = folderStack.lastOrNull()?.second
                                     recentManager.addRecent(
                                         id = item.id,
                                         title = item.title,
                                         uri = item.uri,
                                         parentId = item.parentId ?: folderStack.lastOrNull()?.first,
-                                        folderTitle = folderStack.lastOrNull()?.second
+                                        folderTitle = folderTitle
                                     )
-                                    recentManager.resolveVerticalPoster(item, currentItems)
+                                    recentManager.resolveVerticalPoster(
+                                        targetItem = item,
+                                        folderItems = currentItems,
+                                        controlUrl = connectedDevice?.contentDirectoryControlUrl,
+                                        folderTitle = folderTitle
+                                    )
                                 }
                                 val playables = currentItems.filter { it.type == MediaType.VIDEO || it.type == MediaType.AUDIO }
                                     .ifEmpty { listOf(item) }
@@ -542,14 +548,20 @@ fun UpnpBrowseScreen(
                                 }
                             } else {
                                 if (item.type == MediaType.VIDEO || item.type == MediaType.AUDIO) {
+                                    val folderTitle = folderStack.lastOrNull()?.second
                                     recentManager.addRecent(
                                         id = item.id,
                                         title = item.title,
                                         uri = item.uri,
                                         parentId = item.parentId ?: folderStack.lastOrNull()?.first,
-                                        folderTitle = folderStack.lastOrNull()?.second
+                                        folderTitle = folderTitle
                                     )
-                                    recentManager.resolveVerticalPoster(item, currentItems)
+                                    recentManager.resolveVerticalPoster(
+                                        targetItem = item,
+                                        folderItems = currentItems,
+                                        controlUrl = connectedDevice?.contentDirectoryControlUrl,
+                                        folderTitle = folderTitle
+                                    )
                                 }
                                 val playables = currentItems.filter { it.type == MediaType.VIDEO || it.type == MediaType.AUDIO }
                                     .ifEmpty { listOf(item) }

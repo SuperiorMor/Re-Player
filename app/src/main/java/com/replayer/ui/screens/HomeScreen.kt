@@ -81,9 +81,8 @@ fun HomeScreen(
     }
 
     LaunchedEffect(connectedDevice?.contentDirectoryControlUrl, recentList) {
-        val controlUrl = connectedDevice?.contentDirectoryControlUrl ?: return@LaunchedEffect
-        if (recentList.any { it.thumbnailUrl.isNullOrBlank() && !it.parentId.isNullOrBlank() }) {
-            recentManager.resolveMissingPosters(controlUrl)
+        if (recentList.any { it.thumbnailUrl.isNullOrBlank() }) {
+            recentManager.resolveMissingPosters(connectedDevice?.contentDirectoryControlUrl)
         }
     }
 
