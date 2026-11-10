@@ -114,6 +114,12 @@ class IptvManager private constructor(private val context: Context) {
     private val _lastEpgUpdateText = MutableStateFlow(getEpgLastUpdatedText())
     val lastEpgUpdateText: StateFlow<String> = _lastEpgUpdateText.asStateFlow()
 
+    private val _lastEpgUpdateTime = MutableStateFlow(getLastEpgUpdateTime())
+    val lastEpgUpdateTime: StateFlow<Long> = _lastEpgUpdateTime.asStateFlow()
+
+    @Volatile
+    private var cachedLogosMap: Map<String, String> = emptyMap()
+
     private var isFetchingEpg = false
 
     init {
@@ -125,14 +131,35 @@ class IptvManager private constructor(private val context: Context) {
             val cachedEpg = loadCachedEpg()
             _epgMap.value = cachedEpg
 
+            cachedLogosMap = loadCachedLogos()
+
             // 2. Wait 3 seconds so Compose UI renders frame 1 smoothly
             delay(3000)
 
             val savedPlaylist = getSavedPlaylistUrl()
+            val savedLocalPath = prefs.getString("iptv_local_playlist_path", null)
             val savedEpg = getSavedEpgUrl()
             val lastUpdate = getLastEpgUpdateTime()
             val now = System.currentTimeMillis()
             val isEpgStale = lastUpdate > 0L && (now - lastUpdate) > 24 * 3600 * 1000L
+
+            // Migration to M3U Parser v2 (#EXTGRP folders + single quotes + icons)
+            val parserVersion = prefs.getInt("m3u_parser_version", 1)
+            val needsParserUpgrade = parserVersion < 2
+
+            if (needsParserUpgrade) {
+                prefs.edit().putInt("m3u_parser_version", 2).apply()
+                if (!savedPlaylist.isNullOrBlank()) {
+                    loadPlaylist(savedPlaylist, savedEpg)
+                    return@launch
+                } else if (!savedLocalPath.isNullOrBlank() && File(savedLocalPath).exists()) {
+                    loadFromLocalFile(File(savedLocalPath))
+                    return@launch
+                } else if (!savedEpg.isNullOrBlank()) {
+                    fetchEpg(savedEpg)
+                    return@launch
+                }
+            }
 
             if (_channels.value.isEmpty() && !savedPlaylist.isNullOrBlank()) {
                 loadPlaylist(savedPlaylist, savedEpg)
@@ -146,21 +173,22 @@ class IptvManager private constructor(private val context: Context) {
 
     fun saveLastEpgUpdateTime(time: Long) {
         prefs.edit().putLong("iptv_epg_last_updated", time).apply()
+        _lastEpgUpdateTime.value = time
         _lastEpgUpdateText.value = getEpgLastUpdatedText()
     }
 
     fun getEpgLastUpdatedText(): String {
         val last = prefs.getLong("iptv_epg_last_updated", 0L)
-        if (last <= 0L) return "Обновить EPG"
+        if (last <= 0L) return ""
         val diffMs = System.currentTimeMillis() - last
-        if (diffMs < 0) return "Обновлено: только что"
+        if (diffMs < 0) return "только что"
         val mins = diffMs / (60 * 1000L)
-        if (mins < 1) return "Обновлено: только что"
-        if (mins < 60) return "Обновлено: $mins мин. назад"
+        if (mins < 1) return "только что"
+        if (mins < 60) return "$mins мин. назад"
         val hours = mins / 60
-        if (hours < 24) return "Обновлено: $hours ч. назад"
+        if (hours < 24) return "$hours ч. назад"
         val days = hours / 24
-        return "Обновлено: $days дн. назад"
+        return "$days дн. назад"
     }
 
     fun getSavedPlaylistUrl(): String? = prefs.getString("iptv_playlist_url", null)
@@ -177,14 +205,14 @@ class IptvManager private constructor(private val context: Context) {
     /**
      * Category folders (Requirement 5 & 8):
      * Excludes artificial "Все" and "Избранное" (favorites are on Home screen).
-     * Replaces blank or "Общие" with "Другие".
+     * Puts generic "Общие"/"Другие" at the end.
      */
     fun getCategoryFolders(): List<String> {
         val groups = _channels.value
             .map { it.group }
             .distinct()
             .filter { it != "Все" && it != "Избранное" }
-            .sorted()
+            .sortedWith(compareBy<String> { it == "Общие" || it == "Другие" }.thenBy { it.lowercase() })
         return groups.ifEmpty { listOf("Все каналы") }
     }
 
@@ -374,18 +402,61 @@ class IptvManager private constructor(private val context: Context) {
         }
     }
 
+    private fun lookupLogo(channel: IptvChannel, logos: Map<String, String>): String? {
+        if (logos.isEmpty()) return null
+        channel.tvgId?.let { id ->
+            logos[id]?.let { return it }
+            logos[id.lowercase()]?.let { return it }
+            val cleanId = XmlTvParser.normalizeChannelName(id)
+            if (cleanId.isNotEmpty()) logos[cleanId]?.let { return it }
+        }
+        channel.tvgName?.let { name ->
+            logos[name]?.let { return it }
+            logos[name.lowercase()]?.let { return it }
+            val cleanName = XmlTvParser.normalizeChannelName(name)
+            if (cleanName.isNotEmpty()) logos[cleanName]?.let { return it }
+        }
+        logos[channel.name]?.let { return it }
+        logos[channel.name.lowercase()]?.let { return it }
+        val clean = XmlTvParser.normalizeChannelName(channel.name)
+        if (clean.isNotEmpty()) {
+            logos[clean]?.let { return it }
+            val noDigits = clean.replace(Regex("\\d+$"), "")
+            if (noDigits.isNotEmpty() && noDigits != clean) {
+                logos[noDigits]?.let { return it }
+            }
+        }
+        return null
+    }
+
+    private fun applyLogosToChannels(channels: List<IptvChannel>, logos: Map<String, String>): List<IptvChannel> {
+        if (logos.isEmpty()) return channels
+        return channels.map { ch ->
+            if (ch.logoUrl.isNullOrBlank()) {
+                val found = lookupLogo(ch, logos)
+                if (!found.isNullOrBlank()) ch.copy(logoUrl = found) else ch
+            } else ch
+        }
+    }
+
     suspend fun loadFromLocalFile(file: File) = withContext(Dispatchers.IO) {
         if (!file.exists()) return@withContext
         _isLoading.value = true
         _statusMessage.value = "Чтение файла ${file.name}..."
         try {
+            prefs.edit()
+                .putString("iptv_local_playlist_path", file.absolutePath)
+                .putInt("m3u_parser_version", 2)
+                .apply()
+
             val parseResult = FileInputStream(file).use { M3uParser.parse(it) }
             if (parseResult.channels.isNotEmpty()) {
-                _channels.value = parseResult.channels
-                saveCachedChannels(parseResult.channels)
+                val withLogos = applyLogosToChannels(parseResult.channels, cachedLogosMap)
+                _channels.value = withLogos
+                saveCachedChannels(withLogos)
 
                 val detectedEpg = parseResult.epgUrl ?: getSavedEpgUrl()
-                _statusMessage.value = "Каналов загружено: ${parseResult.channels.size}"
+                _statusMessage.value = "Каналов загружено: ${withLogos.size}"
 
                 if (!detectedEpg.isNullOrBlank()) {
                     fetchEpg(detectedEpg)
@@ -413,6 +484,7 @@ class IptvManager private constructor(private val context: Context) {
         _statusMessage.value = "Загрузка плейлиста..."
 
         try {
+            prefs.edit().putInt("m3u_parser_version", 2).apply()
             val req = Request.Builder()
                 .url(url)
                 .header("User-Agent", "Mozilla/5.0 (Linux; Android 11; TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
@@ -482,16 +554,17 @@ class IptvManager private constructor(private val context: Context) {
                 return@withContext
             }
 
-            _channels.value = parseResult.channels
-            saveCachedChannels(parseResult.channels)
+            val withLogos = applyLogosToChannels(parseResult.channels, cachedLogosMap)
+            _channels.value = withLogos
+            saveCachedChannels(withLogos)
 
             val detectedOrManualEpg = manualEpgUrl ?: parseResult.epgUrl
             if (!detectedOrManualEpg.isNullOrBlank()) {
                 prefs.edit().putString("iptv_epg_url", detectedOrManualEpg).apply()
-                _statusMessage.value = "Каналов: ${parseResult.channels.size}. Загрузка программы передач..."
+                _statusMessage.value = "Каналов: ${withLogos.size}. Загрузка программы передач..."
                 fetchEpg(detectedOrManualEpg)
             } else {
-                _statusMessage.value = "Каналов загружено: ${parseResult.channels.size}"
+                _statusMessage.value = "Каналов загружено: ${withLogos.size}"
             }
         } catch (e: Exception) {
             _statusMessage.value = "Ошибка: ${e.localizedMessage ?: "Сбой соединения"}"
@@ -558,6 +631,8 @@ class IptvManager private constructor(private val context: Context) {
                     ch.tvgId?.let {
                         set.add(it)
                         set.add(it.lowercase())
+                        val cleanId = XmlTvParser.normalizeChannelName(it)
+                        if (cleanId.isNotEmpty()) set.add(cleanId)
                     }
                     ch.tvgName?.let {
                         set.add(it)
@@ -571,16 +646,31 @@ class IptvManager private constructor(private val context: Context) {
                 set
             } else null
 
-            val parsed = tempFile.inputStream().use { stream ->
+            val parseResult = tempFile.inputStream().use { stream ->
                 XmlTvParser.parse(stream, targetChannels = targetSet) { status ->
                     _statusMessage.value = status
                 }
             }
             try { tempFile.delete() } catch (_: Exception) {}
-            _epgMap.value = parsed
-            saveCachedEpg(parsed)
+
+            _epgMap.value = parseResult.programs
+            saveCachedEpg(parseResult.programs)
+
+            if (parseResult.logos.isNotEmpty()) {
+                cachedLogosMap = parseResult.logos
+                saveCachedLogos(parseResult.logos)
+                val currentList = _channels.value
+                if (currentList.isNotEmpty()) {
+                    val updatedList = applyLogosToChannels(currentList, parseResult.logos)
+                    if (updatedList != currentList) {
+                        _channels.value = updatedList
+                        saveCachedChannels(updatedList)
+                    }
+                }
+            }
+
             saveLastEpgUpdateTime(System.currentTimeMillis())
-            val totalProgs = parsed.values.sumOf { it.size }
+            val totalProgs = parseResult.programs.values.sumOf { it.size }
             _statusMessage.value = "Телепрограмма обновлена: $totalProgs передач для ${_channels.value.size} каналов"
         } catch (e: Exception) {
             _statusMessage.value = "Сбой EPG: ${e.localizedMessage ?: "Сбой соединения"}"
@@ -654,21 +744,67 @@ class IptvManager private constructor(private val context: Context) {
 
     private fun saveCachedEpg(map: Map<String, List<EpgProgram>>) {
         try {
-            // Cache only current/upcoming programs around now: [-6h .. +18h] to keep cache < 300KB
+            // Cache current/upcoming programs [-4h .. +14h] prioritizing favorite channels first, keeping file < 600KB
             val now = System.currentTimeMillis()
-            val minT = now - 6 * 3600 * 1000L
-            val maxT = now + 18 * 3600 * 1000L
+            val minT = now - 4 * 3600 * 1000L
+            val maxT = now + 14 * 3600 * 1000L
+
+            val favChannels = getFavoriteChannels()
+            val priorityKeys = mutableSetOf<String>()
+            for (ch in favChannels) {
+                priorityKeys.add(ch.id)
+                priorityKeys.add(ch.id.lowercase())
+                priorityKeys.add(ch.name)
+                priorityKeys.add(ch.name.lowercase())
+                ch.tvgId?.let {
+                    priorityKeys.add(it)
+                    priorityKeys.add(it.lowercase())
+                }
+                ch.tvgName?.let {
+                    priorityKeys.add(it)
+                    priorityKeys.add(it.lowercase())
+                }
+                val clean = XmlTvParser.normalizeChannelName(ch.name)
+                if (clean.isNotEmpty()) priorityKeys.add(clean)
+            }
 
             val trimmed = mutableMapOf<String, List<EpgProgram>>()
+            // 1. Add priority (favorite) keys first
+            for (key in priorityKeys) {
+                val progs = map[key] ?: continue
+                val filtered = progs.filter { it.endTime >= minT && it.startTime <= maxT }.take(12)
+                if (filtered.isNotEmpty()) trimmed[key] = filtered
+            }
+            // 2. Fill remaining slots up to 800 keys
             for ((key, progs) in map) {
-                val filtered = progs.filter { it.endTime >= minT && it.startTime <= maxT }.take(15)
+                if (trimmed.containsKey(key)) continue
+                val filtered = progs.filter { it.endTime >= minT && it.startTime <= maxT }.take(10)
                 if (filtered.isNotEmpty()) {
                     trimmed[key] = filtered
                 }
-                if (trimmed.size >= 400) break
+                if (trimmed.size >= 800) break
             }
 
             val file = File(context.filesDir, "iptv_epg.json")
+            file.writeText(json.encodeToString(trimmed))
+        } catch (_: Throwable) {}
+    }
+
+    private fun loadCachedLogos(): Map<String, String> {
+        val file = File(context.filesDir, "iptv_epg_logos.json")
+        return try {
+            if (file.exists() && file.length() <= 1_500_000L) {
+                json.decodeFromString<Map<String, String>>(file.readText())
+            } else emptyMap()
+        } catch (_: Throwable) {
+            emptyMap()
+        }
+    }
+
+    private fun saveCachedLogos(logos: Map<String, String>) {
+        try {
+            val trimmed = logos.entries.take(4000).associate { it.key to it.value }
+            val file = File(context.filesDir, "iptv_epg_logos.json")
             file.writeText(json.encodeToString(trimmed))
         } catch (_: Throwable) {}
     }

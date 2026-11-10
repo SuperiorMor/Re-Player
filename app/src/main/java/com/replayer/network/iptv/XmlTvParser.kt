@@ -9,13 +9,18 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.zip.GZIPInputStream
 
+data class XmlTvParseResult(
+    val programs: Map<String, List<EpgProgram>>,
+    val logos: Map<String, String>
+)
+
 object XmlTvParser {
 
     fun parse(
         rawInputStream: InputStream,
         targetChannels: Set<String>? = null,
         onProgress: ((String) -> Unit)? = null
-    ): Map<String, List<EpgProgram>> {
+    ): XmlTvParseResult {
         // Detect GZIP by magic bytes (0x1f, 0x8b)
         val buffered = BufferedInputStream(rawInputStream, 65536)
         buffered.mark(4)
@@ -33,6 +38,8 @@ object XmlTvParser {
         val aliasToChannelId = mutableMapOf<String, String>()
         // All XML IDs that matched the user's target channels (or all channels if targetChannels is null)
         val relevantXmlChannelIds = mutableSetOf<String>()
+        // Channel logos from <icon src="..."> inside <channel>
+        val channelIcons = mutableMapOf<String, String>()
         // Canonical channel programs: channelId -> list of programs
         val channelPrograms = mutableMapOf<String, MutableList<EpgProgram>>()
 
@@ -85,6 +92,14 @@ object XmlTvParser {
                                             relevantXmlChannelIds.add(currentChannelId)
                                         }
                                     }
+                                }
+                            }
+                        }
+                        "icon" -> {
+                            if (!currentChannelId.isNullOrBlank()) {
+                                val src = parser.getAttributeValue(null, "src")?.trim()
+                                if (!src.isNullOrBlank() && !channelIcons.containsKey(currentChannelId)) {
+                                    channelIcons[currentChannelId] = src
                                 }
                             }
                         }
@@ -187,7 +202,31 @@ object XmlTvParser {
             }
         }
 
-        return finalMap
+        val finalLogos = mutableMapOf<String, String>()
+        for ((chId, logo) in channelIcons) {
+            if (targetChannels == null || relevantXmlChannelIds.contains(chId)) {
+                finalLogos[chId] = logo
+                finalLogos[chId.lowercase()] = logo
+                val cleanId = normalizeChannelName(chId)
+                if (cleanId.isNotEmpty()) {
+                    finalLogos[cleanId] = logo
+                }
+            }
+        }
+        for ((alias, chId) in aliasToChannelId) {
+            if (targetChannels == null || relevantXmlChannelIds.contains(chId)) {
+                val logo = channelIcons[chId]
+                if (!logo.isNullOrBlank()) {
+                    finalLogos.putIfAbsent(alias, logo)
+                    val clean = normalizeChannelName(alias)
+                    if (clean.isNotEmpty()) {
+                        finalLogos.putIfAbsent(clean, logo)
+                    }
+                }
+            }
+        }
+
+        return XmlTvParseResult(programs = finalMap, logos = finalLogos)
     }
 
     private fun skipTag(parser: XmlPullParser) {

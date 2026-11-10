@@ -89,6 +89,8 @@ fun SettingsScreen(
     val iptvEpgProgress by iptvManager.epgProgress.collectAsState()
     val iptvStatusMessage by iptvManager.statusMessage.collectAsState()
     val lastEpgUpdateText by iptvManager.lastEpgUpdateText.collectAsState()
+    val lastEpgUpdateTime by iptvManager.lastEpgUpdateTime.collectAsState()
+    val epgMap by iptvManager.epgMap.collectAsState()
 
     var showLocalFileDialog by remember { mutableStateOf(false) }
     var localFiles by remember { mutableStateOf<List<File>>(emptyList()) }
@@ -432,24 +434,7 @@ fun SettingsScreen(
                 .padding(20.dp)
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Добавьте ссылку на плейлист каналов (M3U / M3U8) и программу передач EPG (XMLTV).",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TextSecondary
-                    )
-                    Text(
-                        text = "✓ Сохраняется автоматически",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = AccentCyan
-                    )
-                }
-
-                // Row 1: Playlist URL + "Выбрать файл с флешки"
+                // Row 1: Playlist URL + "Выбрать с флешки"
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -648,6 +633,38 @@ fun SettingsScreen(
                                 }
                             }
                         } else {
+                            val isEpgError = iptvStatusMessage?.let {
+                                it.contains("Ошибка", ignoreCase = true) || it.contains("Сбой", ignoreCase = true)
+                            } == true
+                            val isEpgFresh = epgMap.isNotEmpty() &&
+                                lastEpgUpdateTime > 0L &&
+                                (System.currentTimeMillis() - lastEpgUpdateTime) < 24 * 3600 * 1000L &&
+                                !isEpgError
+
+                            val statusIcon = when {
+                                isEpgFresh -> Icons.Default.CheckCircle
+                                isEpgError -> Icons.Default.Warning
+                                else -> Icons.Default.Refresh
+                            }
+                            val statusColor = when {
+                                isEpgFresh -> Color(0xFF66BB6A)
+                                isEpgError -> Color(0xFFFF5252)
+                                iptvEpgInput.isBlank() -> TextSecondary
+                                else -> AccentCyan
+                            }
+                            val primaryLabel = when {
+                                isEpgFresh -> "Программа обновлена"
+                                isEpgError -> "Ошибка EPG"
+                                iptvEpgInput.isBlank() -> "Нет ссылки EPG"
+                                else -> "Обновить программу"
+                            }
+                            val secondaryLabel = when {
+                                isEpgFresh -> "${lastEpgUpdateText.ifBlank { "Актуально" }} • Всё готово"
+                                isEpgError -> "Нажмите для повтора"
+                                iptvEpgInput.isBlank() -> "Укажите ссылку слева"
+                                else -> "Нажмите для загрузки"
+                            }
+
                             Row(
                                 modifier = Modifier
                                     .fillMaxSize()
@@ -656,23 +673,26 @@ fun SettingsScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.Refresh,
+                                    imageVector = statusIcon,
                                     contentDescription = null,
-                                    tint = AccentCyan,
+                                    tint = statusColor,
                                     modifier = Modifier.size(22.dp)
                                 )
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Column {
                                     Text(
-                                        text = lastEpgUpdateText,
+                                        text = primaryLabel,
                                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = AccentCyan,
-                                        maxLines = 1
+                                        color = statusColor,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
-                                        text = "Нажмите для обновления",
+                                        text = secondaryLabel,
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = TextSecondary
+                                        color = TextSecondary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
                             }
@@ -680,16 +700,19 @@ fun SettingsScreen(
                     }
                 }
 
-                // Status message under the IPTV rows
-                if (!iptvStatusMessage.isNullOrBlank()) {
+                // Show bottom status ONLY on errors/warnings to keep settings clean
+                val isCriticalMsg = iptvStatusMessage?.let {
+                    it.contains("Ошибка", ignoreCase = true) ||
+                        it.contains("Сбой", ignoreCase = true) ||
+                        it.contains("не найдено", ignoreCase = true)
+                } == true
+                if (isCriticalMsg && !iptvStatusMessage.isNullOrBlank()) {
                     Text(
                         text = iptvStatusMessage ?: "",
                         style = MaterialTheme.typography.bodySmall,
-                        color = if (iptvStatusMessage?.contains("Ошибка", ignoreCase = true) == true || iptvStatusMessage?.contains("Сбой", ignoreCase = true) == true) {
-                            Color(0xFFFF5252)
-                        } else {
-                            AccentCyan
-                        },
+                        color = Color(0xFFFF5252),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(top = 2.dp)
                     )
                 }

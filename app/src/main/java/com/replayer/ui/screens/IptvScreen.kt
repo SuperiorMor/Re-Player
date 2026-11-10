@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -27,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -111,13 +113,14 @@ fun IptvScreen(
         }
     }
 
+    val isInsideFolder = selectedFolder != null || (folders.size <= 1 && channels.isNotEmpty())
+
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 32.dp, vertical = 24.dp)
+            .padding(horizontal = 28.dp, vertical = if (isInsideFolder) 14.dp else 20.dp)
     ) {
         // TOP BAR
-        val isInsideFolder = selectedFolder != null || (folders.size <= 1 && channels.isNotEmpty())
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -125,44 +128,46 @@ fun IptvScreen(
         ) {
             if (isInsideFolder) {
                 val currentFolder = selectedFolder ?: folders.firstOrNull() ?: "Все каналы"
-                // Inside Folder Header
+                // Inside Folder Header (Compact so 8+ channels fit)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (folders.size > 1 && selectedFolder != null) {
                         TvFocusCard(
                             onClick = { selectedFolder = null },
                             modifier = Modifier
-                                .width(130.dp)
-                                .height(44.dp)
+                                .width(116.dp)
+                                .height(38.dp)
                         ) {
                             Row(
                                 modifier = Modifier.fillMaxSize(),
                                 horizontalArrangement = Arrangement.Center,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(Icons.Default.ArrowBack, contentDescription = "Назад", tint = AccentCyan, modifier = Modifier.size(18.dp))
+                                Icon(Icons.Default.ArrowBack, contentDescription = "Назад", tint = AccentCyan, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text("Папки", style = MaterialTheme.typography.bodyMedium, color = AccentCyan)
+                                Text("Папки", style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold), color = AccentCyan)
                             }
                         }
-                        Spacer(Modifier.width(16.dp))
+                        Spacer(Modifier.width(14.dp))
                     }
-                    Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             text = if (folders.size <= 1) "ТВ каналы" else currentFolder,
-                            style = MaterialTheme.typography.displayLarge
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                            color = TextPrimary
                         )
                         val folderChannels = remember(channels, currentFolder) {
                             iptvManager.getChannelsInFolder(currentFolder)
                         }
+                        Spacer(Modifier.width(12.dp))
                         Text(
-                            text = "Каналов: ${folderChannels.size} • Сортировка: ${sortMode.label}",
+                            text = "• ${folderChannels.size} каналов",
                             style = MaterialTheme.typography.bodySmall,
                             color = TextSecondary
                         )
                     }
                 }
 
-                // Sort toggle button inside folder (Requirement 9)
+                // Sort toggle button inside folder
                 TvFocusCard(
                     onClick = {
                         sortMode = when (sortMode) {
@@ -172,17 +177,17 @@ fun IptvScreen(
                         }
                     },
                     modifier = Modifier
-                        .width(230.dp)
-                        .height(44.dp)
+                        .width(210.dp)
+                        .height(38.dp)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxSize(),
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.Sort, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text(text = sortMode.label, style = MaterialTheme.typography.bodyMedium, color = AccentCyan)
+                        Icon(Icons.Default.Sort, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(text = sortMode.label, style = MaterialTheme.typography.bodySmall, color = AccentCyan)
                     }
                 }
             } else {
@@ -262,7 +267,7 @@ fun IptvScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(if (isInsideFolder) 10.dp else 16.dp))
 
         // MAIN CONTENT
         if (channels.isEmpty()) {
@@ -382,12 +387,12 @@ fun IptvScreen(
                         onClick = { selectedFolder = folder },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(110.dp)
+                            .height(84.dp)
                     ) {
                         Row(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .padding(20.dp),
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -450,115 +455,121 @@ fun IptvScreen(
                 }
             } else {
                 LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    contentPadding = PaddingValues(bottom = 32.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp),
+                    contentPadding = PaddingValues(bottom = 24.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    items(sortedList, key = { it.id }) { channel ->
+                    itemsIndexed(sortedList, key = { idx, ch -> "${ch.id}_$idx" }) { _, channel ->
                         val isFav = favoriteIds.contains(channel.id)
                         val currentProg = remember(channel, epgMap) {
                             iptvManager.getCurrentProgram(channel)
                         }
+                        val progress = currentProg?.progress()?.coerceIn(0f, 1f) ?: 0f
 
                         TvFocusCard(
                             onClick = { onPlayChannel(channel) },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(78.dp)
+                                .height(48.dp)
                         ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(horizontal = 20.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
+                            Box(modifier = Modifier.fillMaxSize()) {
+                                // Subtle full-card gradient timebar fill on background
+                                if (currentProg != null && progress > 0f) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxHeight()
+                                            .fillMaxWidth(fraction = progress)
+                                            .background(
+                                                Brush.horizontalGradient(
+                                                    colors = listOf(
+                                                        AccentCyan.copy(alpha = 0.05f),
+                                                        AccentCyan.copy(alpha = 0.19f)
+                                                    )
+                                                )
+                                            )
+                                    )
+                                }
+
                                 Row(
-                                    modifier = Modifier.weight(1f),
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(horizontal = 14.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    if (!channel.logoUrl.isNullOrBlank()) {
-                                        AsyncImage(
-                                            model = channel.logoUrl,
-                                            contentDescription = channel.name,
-                                            modifier = Modifier
-                                                .size(48.dp)
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(Color.White.copy(alpha = 0.08f)),
-                                            contentScale = ContentScale.Fit
-                                        )
-                                    } else {
+                                    Row(
+                                        modifier = Modifier.weight(1f),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
                                         Box(
                                             modifier = Modifier
-                                                .size(48.dp)
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(DarkSurface),
+                                                .size(32.dp)
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .background(DarkSurface.copy(alpha = 0.8f)),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Default.Tv,
                                                 contentDescription = null,
-                                                tint = AccentCyan,
-                                                modifier = Modifier.size(24.dp)
+                                                tint = AccentCyan.copy(alpha = 0.65f),
+                                                modifier = Modifier.size(18.dp)
                                             )
-                                        }
-                                    }
-
-                                    Spacer(modifier = Modifier.width(16.dp))
-
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = channel.name,
-                                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                            color = TextPrimary,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                        Spacer(modifier = Modifier.height(2.dp))
-
-                                        // Subtitle: Shows CURRENT PROGRAM instead of "Общие" (Requirement 7)
-                                        if (currentProg != null) {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Text(
-                                                    text = "${currentProg.formattedTimeRange()}  ${currentProg.title}",
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = TextSecondary,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis,
-                                                    modifier = Modifier.weight(1f, fill = false)
-                                                )
-                                                Spacer(modifier = Modifier.width(8.dp))
-                                                LinearProgressIndicator(
-                                                    progress = { currentProg.progress() },
+                                            if (!channel.logoUrl.isNullOrBlank()) {
+                                                AsyncImage(
+                                                    model = channel.logoUrl,
+                                                    contentDescription = channel.name,
                                                     modifier = Modifier
-                                                        .width(44.dp)
-                                                        .height(4.dp)
-                                                        .clip(RoundedCornerShape(2.dp)),
-                                                    color = AccentCyan,
-                                                    trackColor = DarkSurface
+                                                        .fillMaxSize()
+                                                        .padding(2.dp),
+                                                    contentScale = ContentScale.Fit
                                                 )
                                             }
-                                        } else {
+                                        }
+
+                                        Spacer(modifier = Modifier.width(12.dp))
+
+                                        Column(
+                                            modifier = Modifier.weight(1f),
+                                            verticalArrangement = Arrangement.Center
+                                        ) {
                                             Text(
-                                                text = "Прямой эфир",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = TextSecondary
+                                                text = channel.name,
+                                                style = MaterialTheme.typography.bodyMedium.copy(
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    lineHeight = 16.sp
+                                                ),
+                                                color = TextPrimary,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = currentProg?.title ?: "Прямой эфир",
+                                                style = MaterialTheme.typography.bodySmall.copy(
+                                                    fontSize = 11.sp,
+                                                    lineHeight = 13.sp
+                                                ),
+                                                color = if (currentProg != null) TextSecondary else TextSecondary.copy(alpha = 0.65f),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
                                             )
                                         }
                                     }
-                                }
 
-                                // Favorite Toggle Button
-                                IconButton(
-                                    onClick = { iptvManager.toggleFavorite(channel.id) },
-                                    modifier = Modifier.padding(start = 12.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                        contentDescription = if (isFav) "В избранном" else "Добавить в избранное",
-                                        tint = if (isFav) Color(0xFFFF4081) else TextSecondary,
-                                        modifier = Modifier.size(24.dp)
-                                    )
+                                    // Compact Favorite Toggle Button
+                                    IconButton(
+                                        onClick = { iptvManager.toggleFavorite(channel.id) },
+                                        modifier = Modifier
+                                            .padding(start = 8.dp)
+                                            .size(34.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                            contentDescription = if (isFav) "В избранном" else "Добавить в избранное",
+                                            tint = if (isFav) Color(0xFFFF4081) else TextSecondary,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
                                 }
                             }
                         }

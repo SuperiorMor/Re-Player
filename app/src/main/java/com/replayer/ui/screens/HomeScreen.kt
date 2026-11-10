@@ -1,27 +1,36 @@
 package com.replayer.ui.screens
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material.icons.filled.VideoFile
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -33,11 +42,18 @@ import coil.compose.AsyncImage
 import com.replayer.data.FavoritesManager
 import com.replayer.data.IptvManager
 import com.replayer.data.RecentMediaManager
+import com.replayer.model.EpgProgram
 import com.replayer.model.FavoriteFolder
 import com.replayer.model.IptvChannel
 import com.replayer.model.MediaItem
 import com.replayer.ui.components.TvFocusCard
 import com.replayer.ui.theme.*
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import kotlin.math.abs
 
 @Composable
 fun HomeScreen(
@@ -59,6 +75,14 @@ fun HomeScreen(
 
     val favoriteChannels = remember(channels, favoriteChannelIds) {
         iptvManager.getFavoriteChannels()
+    }
+
+    var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (isActive) {
+            delay(30_000L)
+            nowMs = System.currentTimeMillis()
+        }
     }
 
     Column(
@@ -210,7 +234,7 @@ fun HomeScreen(
                 }
 
                 // 2. Favorite IPTV channel cards
-                items(favoriteChannels, key = { "iptv_${it.id}" }) { channel ->
+                itemsIndexed(favoriteChannels, key = { idx, ch -> "iptv_${ch.id}_$idx" }) { _, channel ->
                     val currentProg = remember(channel, epgMap) {
                         iptvManager.getCurrentProgram(channel)
                     }
@@ -232,29 +256,28 @@ fun HomeScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                if (!channel.logoUrl.isNullOrBlank()) {
-                                    AsyncImage(
-                                        model = channel.logoUrl,
+                                Box(
+                                    modifier = Modifier
+                                        .size(34.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color(0xFFFF4081).copy(alpha = 0.15f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Tv,
                                         contentDescription = null,
-                                        modifier = Modifier
-                                            .size(34.dp)
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .background(Color.White.copy(alpha = 0.08f)),
-                                        contentScale = ContentScale.Fit
+                                        tint = Color(0xFFFF4081),
+                                        modifier = Modifier.size(20.dp)
                                     )
-                                } else {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(34.dp)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(Color(0xFFFF4081).copy(alpha = 0.15f)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Tv,
+                                    if (!channel.logoUrl.isNullOrBlank()) {
+                                        AsyncImage(
+                                            model = channel.logoUrl,
                                             contentDescription = null,
-                                            tint = Color(0xFFFF4081),
-                                            modifier = Modifier.size(20.dp)
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .background(Color(0xFF191C22))
+                                                .padding(2.dp),
+                                            contentScale = ContentScale.Fit
                                         )
                                     }
                                 }
@@ -412,24 +435,13 @@ fun HomeScreen(
         Spacer(modifier = Modifier.height(34.dp))
 
         // -------------------------------------------------------------
-        // СТРОКА 3: ТЕЛЕПРОГРАММА ИЗБРАННЫХ КАНАЛОВ (Google TV Live Guide, Requirement 12)
+        // СТРОКА 3: ТЕЛЕПРОГРАММА ИЗБРАННЫХ КАНАЛОВ (Google TV Live Guide)
         // -------------------------------------------------------------
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Телепрограмма избранных каналов",
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                color = TextPrimary
-            )
-            Text(
-                text = "Прямой эфир",
-                style = MaterialTheme.typography.bodySmall,
-                color = AccentCyan
-            )
-        }
+        Text(
+            text = "Телепрограмма избранных каналов",
+            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+            color = TextPrimary
+        )
 
         Spacer(modifier = Modifier.height(14.dp))
 
@@ -458,137 +470,346 @@ fun HomeScreen(
                 }
             }
         } else {
-            LazyRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                contentPadding = PaddingValues(vertical = 4.dp)
+            GoogleTvLiveGuide(
+                favoriteChannels = favoriteChannels,
+                epgMap = epgMap,
+                iptvManager = iptvManager,
+                nowMs = nowMs,
+                onPlayChannel = onPlayChannel
+            )
+        }
+    }
+}
+
+private data class TimelineSlot(
+    val program: EpgProgram?,
+    val startMs: Long,
+    val endMs: Long,
+    val startedBeforeWindow: Boolean
+)
+
+private fun buildTimelineSlots(
+    programs: List<EpgProgram>,
+    windowStart: Long,
+    windowEnd: Long
+): List<TimelineSlot> {
+    val overlapping = programs
+        .filter { it.endTime > windowStart && it.startTime < windowEnd }
+        .sortedBy { it.startTime }
+
+    if (overlapping.isEmpty()) {
+        return listOf(TimelineSlot(null, windowStart, windowEnd, false))
+    }
+
+    val rawSlots = mutableListOf<TimelineSlot>()
+    var cursor = windowStart
+    val minGapMs = 4 * 60_000L
+
+    for (prog in overlapping) {
+        val clippedStart = maxOf(prog.startTime, windowStart)
+        val clippedEnd = minOf(prog.endTime, windowEnd)
+        if (clippedEnd <= clippedStart) continue
+
+        if (clippedStart - cursor >= minGapMs) {
+            rawSlots.add(TimelineSlot(null, cursor, clippedStart, false))
+        }
+        val actualStart = if (clippedStart - cursor < minGapMs && rawSlots.isEmpty()) windowStart else clippedStart
+        rawSlots.add(
+            TimelineSlot(
+                program = prog,
+                startMs = actualStart,
+                endMs = clippedEnd,
+                startedBeforeWindow = prog.startTime < windowStart
+            )
+        )
+        cursor = maxOf(cursor, clippedEnd)
+    }
+
+    if (windowEnd - cursor >= minGapMs) {
+        rawSlots.add(TimelineSlot(null, cursor, windowEnd, false))
+    } else if (rawSlots.isNotEmpty()) {
+        val last = rawSlots.removeAt(rawSlots.lastIndex)
+        rawSlots.add(last.copy(endMs = windowEnd))
+    }
+
+    return if (rawSlots.isEmpty()) {
+        listOf(TimelineSlot(null, windowStart, windowEnd, false))
+    } else {
+        rawSlots
+    }
+}
+
+@Composable
+private fun GoogleTvLiveGuide(
+    favoriteChannels: List<IptvChannel>,
+    epgMap: Map<String, List<EpgProgram>>,
+    iptvManager: IptvManager,
+    nowMs: Long,
+    onPlayChannel: (IptvChannel) -> Unit
+) {
+    val totalWindowMs = 75 * 60_000L // 1h 15m visible window matching Google TV
+    val windowStart = nowMs - 15 * 60_000L // NOW sits cleanly at 20%
+    val windowEnd = windowStart + totalWindowMs
+    val nowFraction = 0.20f
+
+    val dateStr = remember(nowMs) {
+        SimpleDateFormat("EE, dd.MM", Locale("ru")).format(Date(nowMs)).uppercase()
+    }
+    val nowTimeStr = remember(nowMs) {
+        SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(nowMs))
+    }
+    val halfHourTicks = remember(nowMs) {
+        val step = 30 * 60_000L
+        val firstTick = ((windowStart / step) + 1) * step
+        val ticks = mutableListOf<Pair<Float, String>>()
+        val fmt = SimpleDateFormat("HH:mm", Locale.getDefault())
+        var t = firstTick
+        while (t < windowEnd - 6 * 60_000L) {
+            if (abs(t - nowMs) >= 7 * 60_000L && (t - windowStart) >= 5 * 60_000L) {
+                val frac = (t - windowStart).toFloat() / totalWindowMs.toFloat()
+                ticks.add(frac to fmt.format(Date(t)))
+            }
+            t += step
+        }
+        ticks
+    }
+
+    val logoColWidth = 112.dp
+    val colGap = 10.dp
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // Timeline Ruler Header
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(26.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                items(favoriteChannels, key = { "guide_${it.id}" }) { channel ->
-                    val currentProg = remember(channel, epgMap) {
-                        iptvManager.getCurrentProgram(channel)
-                    }
-                    val nextProg = remember(channel, epgMap) {
-                        iptvManager.getNextProgram(channel)
-                    }
+                Row(
+                    modifier = Modifier.width(logoColWidth),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = dateStr,
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp, fontWeight = FontWeight.Medium),
+                        color = TextSecondary,
+                        maxLines = 1
+                    )
+                    Text(
+                        text = "В ЭФИРЕ",
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
+                        color = TextSecondary,
+                        maxLines = 1
+                    )
+                }
 
-                    TvFocusCard(
-                        onClick = { onPlayChannel(channel) },
+                Spacer(modifier = Modifier.width(colGap))
+
+                BoxWithConstraints(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                ) {
+                    val widthDp = maxWidth
+                    // Current RED time label right next to the red dot
+                    Text(
+                        text = nowTimeStr,
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold),
+                        color = Color(0xFFFF3D57),
                         modifier = Modifier
-                            .width(320.dp)
-                            .height(170.dp)
-                    ) {
-                        Column(
+                            .offset(x = widthDp * nowFraction + 8.dp)
+                            .align(Alignment.CenterStart)
+                    )
+
+                    // 30-min grid markers (16:00, 16:30, ...)
+                    halfHourTicks.forEach { (frac, label) ->
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp, fontWeight = FontWeight.Medium),
+                            color = TextSecondary,
                             modifier = Modifier
-                                .fillMaxSize()
-                                .padding(16.dp),
-                            verticalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            // Header: Logo + Channel Name + LIVE indicator
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(
-                                    modifier = Modifier.weight(1f),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    if (!channel.logoUrl.isNullOrBlank()) {
-                                        AsyncImage(
-                                            model = channel.logoUrl,
-                                            contentDescription = null,
-                                            modifier = Modifier
-                                                .size(28.dp)
-                                                .clip(RoundedCornerShape(6.dp))
-                                                .background(Color.White.copy(alpha = 0.08f)),
-                                            contentScale = ContentScale.Fit
-                                        )
-                                        Spacer(modifier = Modifier.width(10.dp))
-                                    }
-                                    Text(
-                                        text = channel.name,
-                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                        color = TextPrimary,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
+                                .offset(x = widthDp * frac)
+                                .align(Alignment.CenterStart)
+                        )
+                    }
+                }
+            }
 
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(7.dp)
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(Color(0xFFFF1744))
-                                    )
-                                    Text(
-                                        text = "В ЭФИРЕ",
-                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                        color = Color(0xFFFF1744),
-                                        fontSize = 10.sp
-                                    )
-                                }
-                            }
+            // Channel Rows
+            favoriteChannels.forEach { channel ->
+                val progs = remember(channel, epgMap) {
+                    iptvManager.getProgramsForChannel(channel)
+                }
+                val slots = remember(progs, windowStart, windowEnd) {
+                    buildTimelineSlots(progs, windowStart, windowEnd)
+                }
 
-                            // Middle: Current Show Title & Progress Bar
-                            Column {
-                                Text(
-                                    text = currentProg?.title ?: "Прямой эфир",
-                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = AccentCyan,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Spacer(modifier = Modifier.height(6.dp))
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = currentProg?.formattedStartTime() ?: "--:--",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = TextSecondary
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    LinearProgressIndicator(
-                                        progress = { currentProg?.progress() ?: 0.5f },
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .height(5.dp)
-                                            .clip(RoundedCornerShape(3.dp)),
-                                        color = AccentCyan,
-                                        trackColor = DarkSurface
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = currentProg?.formattedEndTime() ?: "--:--",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = TextSecondary
-                                    )
-                                }
-                            }
-
-                            // Bottom: Next Show Preview
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Left Channel Logo Box with tiny star badge
+                    Box(
+                        modifier = Modifier
+                            .width(logoColWidth)
+                            .fillMaxHeight()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFF191C22))
+                            .border(1.dp, Color(0xFF262B35), RoundedCornerShape(10.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (!channel.logoUrl.isNullOrBlank()) {
+                            AsyncImage(
+                                model = channel.logoUrl,
+                                contentDescription = channel.name,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                contentScale = ContentScale.Fit
+                            )
+                        } else {
                             Text(
-                                text = if (nextProg != null) {
-                                    "Далее в ${nextProg.formattedStartTime()}: ${nextProg.title}"
-                                } else {
-                                    "Нажмите OK для запуска"
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = TextSecondary,
-                                maxLines = 1,
+                                text = channel.name,
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, fontSize = 11.sp),
+                                color = TextPrimary,
+                                maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
-                                fontSize = 11.sp
+                                modifier = Modifier.padding(horizontal = 8.dp)
+                            )
+                        }
+
+                        Icon(
+                            imageVector = Icons.Default.Star,
+                            contentDescription = null,
+                            tint = Color(0xCCFFFFFF),
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(4.dp)
+                                .size(11.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(colGap))
+
+                    // Right Timeline Slots
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        slots.forEach { slot ->
+                            val durationMs = (slot.endMs - slot.startMs).coerceAtLeast(60_000L)
+                            val weight = (durationMs.toFloat() / totalWindowMs.toFloat()).coerceAtLeast(0.05f)
+                            val isTooNarrowForText = durationMs < 6 * 60_000L
+                            val title = if (slot.program != null) {
+                                if (slot.startedBeforeWindow) "‹  ${slot.program.title}" else slot.program.title
+                            } else {
+                                "Прямой эфир"
+                            }
+
+                            GoogleTvProgramTile(
+                                title = if (isTooNarrowForText) "" else title,
+                                onClick = { onPlayChannel(channel) },
+                                modifier = Modifier
+                                    .weight(weight)
+                                    .fillMaxHeight()
                             )
                         }
                     }
                 }
             }
+        }
+
+        // Red vertical NOW indicator line across the entire timeline
+        Row(
+            modifier = Modifier
+                .matchParentSize()
+                .padding(top = 9.dp)
+        ) {
+            Spacer(modifier = Modifier.width(logoColWidth + colGap))
+            BoxWithConstraints(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+            ) {
+                val nowX = maxWidth * nowFraction
+                // Top Red Circle Dot
+                Box(
+                    modifier = Modifier
+                        .offset(x = nowX - 3.5.dp, y = 0.dp)
+                        .size(7.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFFF3D57))
+                )
+                // Continuous Vertical Red Line
+                Box(
+                    modifier = Modifier
+                        .offset(x = nowX - 0.75.dp, y = 4.dp)
+                        .width(1.5.dp)
+                        .fillMaxHeight()
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color(0xFFFF3D57),
+                                    Color(0xEEFF3D57),
+                                    Color(0x33FF3D57)
+                                )
+                            )
+                        )
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun GoogleTvProgramTile(
+    title: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+    val scale by animateFloatAsState(if (isFocused) 1.02f else 1.0f, label = "gtv_tile_scale")
+
+    val bgColor = if (isFocused) Color(0xFFE8EAED) else Color(0xFF1A1D24)
+    val borderColor = if (isFocused) Color.White else Color(0xFF282C36)
+    val textColor = if (isFocused) Color(0xFF111318) else TextPrimary
+
+    Box(
+        modifier = modifier
+            .scale(scale)
+            .clip(RoundedCornerShape(10.dp))
+            .background(bgColor)
+            .border(if (isFocused) 2.dp else 1.dp, borderColor, RoundedCornerShape(10.dp))
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick
+            )
+            .focusable(interactionSource = interactionSource)
+            .padding(horizontal = 14.dp),
+        contentAlignment = Alignment.CenterStart
+    ) {
+        if (title.isNotEmpty()) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = 14.sp,
+                    fontWeight = if (isFocused) FontWeight.Bold else FontWeight.Medium
+                ),
+                color = textColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }
