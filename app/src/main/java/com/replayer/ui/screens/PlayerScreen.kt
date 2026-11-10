@@ -386,11 +386,11 @@ fun PlayerScreen(
                         val displayProg = playingArchiveProgram ?: currentProgram
                         val progFraction = if (playingArchiveProgram != null) {
                             val arch = playingArchiveProgram!!
-                            val archDurMs = (arch.endTimeMs - arch.startTimeMs).coerceAtLeast(1L)
+                            val archDurMs = (arch.endTime - arch.startTime).coerceAtLeast(1L)
                             if (playerState.currentPositionMs in 1L..(archDurMs + 60_000L)) {
                                 (playerState.currentPositionMs.toFloat() / archDurMs.toFloat()).coerceIn(0f, 1f)
-                            } else if (playerState.position > 0f && playerState.durationMs > 0L) {
-                                playerState.position.coerceIn(0f, 1f)
+                            } else if (playerState.durationMs > 0L && playerState.currentPositionMs > 0L) {
+                                (playerState.currentPositionMs.toFloat() / playerState.durationMs.toFloat()).coerceIn(0f, 1f)
                             } else {
                                 0f
                             }
@@ -485,10 +485,8 @@ fun PlayerScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .focusProperties {
-                                if (isIptv && !isArchiveScrubbable) {
+                                if (isIptv) {
                                     up = FocusRequester.Cancel
-                                    down = FocusRequester.Cancel
-                                } else if (isIptv) {
                                     down = FocusRequester.Cancel
                                 }
                             },

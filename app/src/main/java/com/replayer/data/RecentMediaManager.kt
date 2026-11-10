@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.graphics.BitmapFactory
 import com.replayer.model.MediaItem
+import com.replayer.model.MediaSourceType
 import com.replayer.model.MediaType
 import com.replayer.model.RecentMedia
 import com.replayer.network.upnp.ContentDirectoryService
@@ -223,6 +224,7 @@ class RecentMediaManager private constructor(context: Context) {
                         title = recent.title,
                         uri = recent.uri,
                         type = MediaType.VIDEO,
+                        sourceType = MediaSourceType.UPNP_DLNA,
                         parentId = pId
                     )
                     val posterUrl = findVerticalPosterUrl(targetAsMedia, items)
