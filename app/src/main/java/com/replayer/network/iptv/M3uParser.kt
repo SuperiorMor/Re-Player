@@ -54,6 +54,10 @@ object M3uParser {
         val usedIds = mutableSetOf<String>()
         var detectedEpgUrl: String? = null
 
+        var globalCatchupType: String? = null
+        var globalCatchupDays: Int? = null
+        var globalCatchupSource: String? = null
+
         var currentExtInf: String? = null
         var perItemGroup: String? = null
         var perItemLogo: String? = null
@@ -73,7 +77,11 @@ object M3uParser {
                             detectedEpgUrl = firstUrl
                         }
                     }
-                    // Also check if #EXTGRP appears before any #EXTINF
+                    extractAttr(line, "catchup", "catchup-type")?.let { globalCatchupType = it.lowercase() }
+                    extractAttr(line, "tvg-rec", "catchup-days", "timeshift")?.toIntOrNull()?.let {
+                        globalCatchupDays = it.coerceAtLeast(0)
+                    }
+                    extractAttr(line, "catchup-source")?.let { globalCatchupSource = it }
                 }
                 line.startsWith("#EXTINF:", ignoreCase = true) || line.equals("#EXTINF", ignoreCase = true) -> {
                     currentExtInf = line
@@ -104,6 +112,21 @@ object M3uParser {
                     val extInfLogo = extInf?.let { extractAttr(it, "tvg-logo", "tvg-icon", "logo") }
                     val extInfGroup = extInf?.let { extractAttr(it, "group-title", "tvg-group", "group") }
 
+                    val itemCatchupType = extInf?.let { extractAttr(it, "catchup", "catchup-type") }?.lowercase()
+                    val itemDays = extInf?.let { extractAttr(it, "tvg-rec", "catchup-days", "timeshift") }?.toIntOrNull()
+                    val itemCatchupSource = extInf?.let { extractAttr(it, "catchup-source") }
+
+                    val (finalCatchupType, finalCatchupDays, finalCatchupSource) = when {
+                        itemDays == 0 || itemCatchupType == "none" -> Triple(null, 0, null)
+                        else -> {
+                            val type = itemCatchupType ?: globalCatchupType
+                            val src = itemCatchupSource ?: globalCatchupSource
+                            val days = (itemDays ?: globalCatchupDays ?: if (type != null || src != null) 3 else 0)
+                                .coerceIn(0, 14)
+                            Triple(type, days, src)
+                        }
+                    }
+
                     val title = extInf?.let { extractTitle(it) } ?: tvgName ?: "Канал ${index + 1}"
                     val groupTitle = (extInfGroup ?: perItemGroup ?: sectionGroup)?.trim()?.ifBlank { null } ?: "Общие"
                     val finalLogo = (extInfLogo ?: perItemLogo)?.trim()?.ifBlank { null }
@@ -127,7 +150,10 @@ object M3uParser {
                                 logoUrl = finalLogo,
                                 group = groupTitle,
                                 tvgId = tvgId,
-                                tvgName = tvgName
+                                tvgName = tvgName,
+                                catchupType = finalCatchupType,
+                                catchupDays = finalCatchupDays,
+                                catchupSource = finalCatchupSource
                             )
                         )
                     }

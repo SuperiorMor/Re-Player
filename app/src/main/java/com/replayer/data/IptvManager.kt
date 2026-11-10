@@ -24,9 +24,9 @@ import java.io.InputStream
 import java.util.concurrent.TimeUnit
 
 enum class ChannelSortMode(val label: String) {
-    DEFAULT("По умолчанию"),
+    BY_WATCH_TIME("По просмотру (А-Я)"),
     BY_NAME("По названию (А-Я)"),
-    BY_WATCH_TIME("По времени просмотра")
+    DEFAULT("Как в плейлисте")
 }
 
 class IptvManager private constructor(private val context: Context) {
@@ -143,12 +143,12 @@ class IptvManager private constructor(private val context: Context) {
             val now = System.currentTimeMillis()
             val isEpgStale = lastUpdate > 0L && (now - lastUpdate) > 24 * 3600 * 1000L
 
-            // Migration to M3U Parser v2 (#EXTGRP folders + single quotes + icons)
+            // Migration to M3U Parser v3 (#EXTGRP + catchup/tvg-rec archives)
             val parserVersion = prefs.getInt("m3u_parser_version", 1)
-            val needsParserUpgrade = parserVersion < 2
+            val needsParserUpgrade = parserVersion < 3
 
             if (needsParserUpgrade) {
-                prefs.edit().putInt("m3u_parser_version", 2).apply()
+                prefs.edit().putInt("m3u_parser_version", 3).apply()
                 if (!savedPlaylist.isNullOrBlank()) {
                     loadPlaylist(savedPlaylist, savedEpg)
                     return@launch
@@ -224,15 +224,120 @@ class IptvManager private constructor(private val context: Context) {
         }
     }
 
+    fun findChannelById(channelId: String): IptvChannel? {
+        return _channels.value.find { it.id == channelId }
+    }
+
     fun getSortedChannels(channels: List<IptvChannel>, sortMode: ChannelSortMode): List<IptvChannel> {
         return when (sortMode) {
             ChannelSortMode.DEFAULT -> channels
             ChannelSortMode.BY_NAME -> channels.sortedBy { it.name.lowercase() }
             ChannelSortMode.BY_WATCH_TIME -> {
                 val times = _watchTimes.value
-                channels.sortedByDescending { times[it.id] ?: 0L }
+                channels.sortedWith(
+                    compareByDescending<IptvChannel> { times[it.id] ?: 0L }
+                        .thenBy { it.name.lowercase() }
+                )
             }
         }
+    }
+
+    /**
+     * Resolves playback URL for an archived/past EPG program based on M3U catchup tags
+     * (catchup-source, flussonic, shift, append, or default tvg-rec -> ?utc=&lutc=).
+     */
+    fun buildArchiveUrl(channel: IptvChannel, program: EpgProgram): String? {
+        if (!channel.hasArchive) return null
+
+        val startSec = program.startTime / 1000L
+        val endSec = program.endTime / 1000L
+        val durationSec = ((program.endTime - program.startTime) / 1000L).coerceAtLeast(60L)
+        val nowSec = System.currentTimeMillis() / 1000L
+        val offsetSec = (nowSec - startSec).coerceAtLeast(0L)
+        val base = channel.streamUrl.trim()
+
+        val srcTemplate = channel.catchupSource
+        if (!srcTemplate.isNullOrBlank()) {
+            val cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply {
+                timeInMillis = program.startTime
+            }
+            val year = String.format(java.util.Locale.US, "%04d", cal.get(java.util.Calendar.YEAR))
+            val month = String.format(java.util.Locale.US, "%02d", cal.get(java.util.Calendar.MONTH) + 1)
+            val day = String.format(java.util.Locale.US, "%02d", cal.get(java.util.Calendar.DAY_OF_MONTH))
+            val hour = String.format(java.util.Locale.US, "%02d", cal.get(java.util.Calendar.HOUR_OF_DAY))
+            val minute = String.format(java.util.Locale.US, "%02d", cal.get(java.util.Calendar.MINUTE))
+            val second = String.format(java.util.Locale.US, "%02d", cal.get(java.util.Calendar.SECOND))
+
+            val resolved = srcTemplate
+                .replace("{utc}", startSec.toString())
+                .replace("\${start}", startSec.toString())
+                .replace("{start}", startSec.toString())
+                .replace("{lutc}", nowSec.toString())
+                .replace("{now}", nowSec.toString())
+                .replace("\${timestamp}", nowSec.toString())
+                .replace("{utcend}", endSec.toString())
+                .replace("\${end}", endSec.toString())
+                .replace("{end}", endSec.toString())
+                .replace("{duration}", durationSec.toString())
+                .replace("\${duration}", durationSec.toString())
+                .replace("{offset}", offsetSec.toString())
+                .replace("\${offset}", offsetSec.toString())
+                .replace("{Y}", year)
+                .replace("{m}", month)
+                .replace("{d}", day)
+                .replace("{H}", hour)
+                .replace("{M}", minute)
+                .replace("{S}", second)
+
+            if (resolved.startsWith("http://", ignoreCase = true) || resolved.startsWith("https://", ignoreCase = true)) {
+                return resolved
+            }
+            return appendQueryOrPath(base, resolved)
+        }
+
+        val type = channel.catchupType?.lowercase()
+        if (type == "flussonic" || type == "fs") {
+            val qIdx = base.indexOf('?')
+            val pathPart = if (qIdx != -1) base.substring(0, qIdx) else base
+            val queryPart = if (qIdx != -1) base.substring(qIdx) else ""
+            val flussonicArchiveName = if (program.isPast()) {
+                "archive-$startSec-$durationSec.m3u8"
+            } else {
+                "timeshift_abs-$startSec.m3u8"
+            }
+            when {
+                pathPart.endsWith("/index.m3u8", ignoreCase = true) ->
+                    return pathPart.dropLast("index.m3u8".length) + flussonicArchiveName + queryPart
+                pathPart.endsWith("/video.m3u8", ignoreCase = true) ->
+                    return pathPart.dropLast("video.m3u8".length) + flussonicArchiveName + queryPart
+                pathPart.endsWith("/mono.m3u8", ignoreCase = true) ->
+                    return pathPart.dropLast("mono.m3u8".length) + flussonicArchiveName + queryPart
+                pathPart.endsWith("/mpegts", ignoreCase = true) ->
+                    return pathPart.dropLast("mpegts".length) + "timeshift_abs-$startSec.ts" + queryPart
+            }
+        }
+
+        // Standard shift / default / tvg-rec catchup format
+        return appendQueryOrPath(base, "?utc=$startSec&lutc=$nowSec")
+    }
+
+    private fun appendQueryOrPath(baseUrl: String, addition: String): String {
+        val cleanAdd = addition.trim()
+        if (cleanAdd.startsWith("?")) {
+            return if (baseUrl.contains("?")) {
+                "$baseUrl&${cleanAdd.removePrefix("?")}"
+            } else {
+                "$baseUrl$cleanAdd"
+            }
+        }
+        if (cleanAdd.startsWith("&")) {
+            return if (baseUrl.contains("?")) {
+                "$baseUrl$cleanAdd"
+            } else {
+                "$baseUrl?${cleanAdd.removePrefix("&")}"
+            }
+        }
+        return if (baseUrl.endsWith("/")) "$baseUrl$cleanAdd" else "$baseUrl/$cleanAdd"
     }
 
     fun isFavorite(channelId: String): Boolean = _favoriteChannelIds.value.contains(channelId)
@@ -439,6 +544,30 @@ class IptvManager private constructor(private val context: Context) {
         }
     }
 
+    private fun buildMatchKeys(channels: List<IptvChannel>): Set<String> {
+        val set = mutableSetOf<String>()
+        for (ch in channels) {
+            set.add(ch.id)
+            set.add(ch.id.lowercase())
+            set.add(ch.name.lowercase())
+            ch.tvgId?.let {
+                set.add(it)
+                set.add(it.lowercase())
+                val cleanId = XmlTvParser.normalizeChannelName(it)
+                if (cleanId.isNotEmpty()) set.add(cleanId)
+            }
+            ch.tvgName?.let {
+                set.add(it)
+                set.add(it.lowercase())
+                val cleanTvg = XmlTvParser.normalizeChannelName(it)
+                if (cleanTvg.isNotEmpty()) set.add(cleanTvg)
+            }
+            val clean = XmlTvParser.normalizeChannelName(ch.name)
+            if (clean.isNotEmpty()) set.add(clean)
+        }
+        return set
+    }
+
     suspend fun loadFromLocalFile(file: File) = withContext(Dispatchers.IO) {
         if (!file.exists()) return@withContext
         _isLoading.value = true
@@ -446,7 +575,7 @@ class IptvManager private constructor(private val context: Context) {
         try {
             prefs.edit()
                 .putString("iptv_local_playlist_path", file.absolutePath)
-                .putInt("m3u_parser_version", 2)
+                .putInt("m3u_parser_version", 3)
                 .apply()
 
             val parseResult = FileInputStream(file).use { M3uParser.parse(it) }
@@ -484,7 +613,7 @@ class IptvManager private constructor(private val context: Context) {
         _statusMessage.value = "Загрузка плейлиста..."
 
         try {
-            prefs.edit().putInt("m3u_parser_version", 2).apply()
+            prefs.edit().putInt("m3u_parser_version", 3).apply()
             val req = Request.Builder()
                 .url(url)
                 .header("User-Agent", "Mozilla/5.0 (Linux; Android 11; TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
@@ -622,32 +751,17 @@ class IptvManager private constructor(private val context: Context) {
             _statusMessage.value = "Распаковка и индексация телепрограммы..."
 
             val currentChannels = _channels.value
-            val targetSet = if (currentChannels.isNotEmpty()) {
-                val set = mutableSetOf<String>()
-                for (ch in currentChannels) {
-                    set.add(ch.id)
-                    set.add(ch.id.lowercase())
-                    set.add(ch.name.lowercase())
-                    ch.tvgId?.let {
-                        set.add(it)
-                        set.add(it.lowercase())
-                        val cleanId = XmlTvParser.normalizeChannelName(it)
-                        if (cleanId.isNotEmpty()) set.add(cleanId)
-                    }
-                    ch.tvgName?.let {
-                        set.add(it)
-                        set.add(it.lowercase())
-                        val cleanTvg = XmlTvParser.normalizeChannelName(it)
-                        if (cleanTvg.isNotEmpty()) set.add(cleanTvg)
-                    }
-                    val clean = XmlTvParser.normalizeChannelName(ch.name)
-                    if (clean.isNotEmpty()) set.add(clean)
-                }
-                set
+            val targetSet = if (currentChannels.isNotEmpty()) buildMatchKeys(currentChannels) else null
+            val archiveSet = if (currentChannels.isNotEmpty()) {
+                buildMatchKeys(currentChannels.filter { it.hasArchive })
             } else null
 
             val parseResult = tempFile.inputStream().use { stream ->
-                XmlTvParser.parse(stream, targetChannels = targetSet) { status ->
+                XmlTvParser.parse(
+                    rawInputStream = stream,
+                    targetChannels = targetSet,
+                    archiveChannels = archiveSet
+                ) { status ->
                     _statusMessage.value = status
                 }
             }

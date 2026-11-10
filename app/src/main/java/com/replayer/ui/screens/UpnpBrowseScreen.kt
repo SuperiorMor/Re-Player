@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -50,6 +51,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -91,11 +93,12 @@ fun UpnpBrowseScreen(
     val scope = rememberCoroutineScope()
     val serverConfigManager = remember { ServerConfigManager(context) }
     val favoritesManager = remember { FavoritesManager(context) }
-    val recentManager = remember { RecentMediaManager(context) }
+    val recentManager = remember { RecentMediaManager.getInstance(context) }
     val contentDirectory = remember { ContentDirectoryService() }
 
     val connectedDevice by serverConfigManager.connectedUpnpDevice.collectAsState()
     val favorites by favoritesManager.favorites.collectAsState()
+    val progressMap by recentManager.progressMap.collectAsState()
 
     var currentItems by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     var folderStack by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
@@ -368,6 +371,14 @@ fun UpnpBrowseScreen(
                         else -> Modifier
                     }
 
+                    val watchProgress = remember(item.id, item.uri, progressMap) {
+                        if (item.type != MediaType.DIRECTORY) {
+                            (progressMap[item.id]?.progress()
+                                ?: progressMap[item.uri]?.progress()
+                                ?: 0f).coerceIn(0f, 1f)
+                        } else 0f
+                    }
+
                     TvFocusCard(
                         onClick = {
                             if (item.type == MediaType.DIRECTORY) {
@@ -385,82 +396,100 @@ fun UpnpBrowseScreen(
                             .height(78.dp)
                             .then(itemFocusModifier)
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 20.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            val icon = when (item.type) {
-                                MediaType.DIRECTORY -> Icons.Default.Folder
-                                MediaType.VIDEO -> Icons.Default.VideoFile
-                                MediaType.AUDIO -> Icons.Default.AudioFile
-                                MediaType.IMAGE -> Icons.Default.Image
-                                MediaType.UNKNOWN -> Icons.Default.VideoFile
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(AccentCyan.copy(alpha = 0.12f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = icon,
-                                    contentDescription = null,
-                                    tint = AccentCyan,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.width(16.dp))
-
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = item.title,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    color = TextPrimary
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                val sizeStr = item.formattedSize()
-                                if (sizeStr.isNotEmpty()) {
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(
-                                        text = sizeStr,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = TextSecondary
-                                    )
-                                }
-                            }
-
-                            // Favorite Heart button for folders
-                            if (item.type == MediaType.DIRECTORY) {
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            if (watchProgress > 0f) {
                                 Box(
                                     modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(if (isFav) Color(0xFFFF4081).copy(alpha = 0.15f) else Color.Transparent)
-                                        .clickable {
-                                            favoritesManager.toggleFavorite(
-                                                FavoriteFolder(
-                                                    id = item.id,
-                                                    title = item.title,
-                                                    sourceType = MediaSourceType.UPNP_DLNA,
-                                                    serverControlUrl = connectedDevice?.contentDirectoryControlUrl,
-                                                    parentId = item.parentId
+                                        .fillMaxHeight()
+                                        .fillMaxWidth(fraction = watchProgress)
+                                        .background(
+                                            Brush.horizontalGradient(
+                                                colors = listOf(
+                                                    AccentCyan.copy(alpha = 0.06f),
+                                                    AccentCyan.copy(alpha = 0.22f)
                                                 )
                                             )
-                                        },
+                                        )
+                                )
+                            }
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 20.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                val icon = when (item.type) {
+                                    MediaType.DIRECTORY -> Icons.Default.Folder
+                                    MediaType.VIDEO -> Icons.Default.VideoFile
+                                    MediaType.AUDIO -> Icons.Default.AudioFile
+                                    MediaType.IMAGE -> Icons.Default.Image
+                                    MediaType.UNKNOWN -> Icons.Default.VideoFile
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .size(44.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(AccentCyan.copy(alpha = 0.12f)),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
-                                        imageVector = if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                        contentDescription = "Избранное",
-                                        tint = if (isFav) Color(0xFFFF4081) else TextSecondary,
-                                        modifier = Modifier.size(20.dp)
+                                        imageVector = icon,
+                                        contentDescription = null,
+                                        tint = AccentCyan,
+                                        modifier = Modifier.size(24.dp)
                                     )
+                                }
+
+                                Spacer(modifier = Modifier.width(16.dp))
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = item.title,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        color = TextPrimary
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    val sizeStr = item.formattedSize()
+                                    if (sizeStr.isNotEmpty()) {
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = sizeStr,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = TextSecondary
+                                        )
+                                    }
+                                }
+
+                                // Favorite Heart button for folders
+                                if (item.type == MediaType.DIRECTORY) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(if (isFav) Color(0xFFFF4081).copy(alpha = 0.15f) else Color.Transparent)
+                                            .clickable {
+                                                favoritesManager.toggleFavorite(
+                                                    FavoriteFolder(
+                                                        id = item.id,
+                                                        title = item.title,
+                                                        sourceType = MediaSourceType.UPNP_DLNA,
+                                                        serverControlUrl = connectedDevice?.contentDirectoryControlUrl,
+                                                        parentId = item.parentId
+                                                    )
+                                                )
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                            contentDescription = "Избранное",
+                                            tint = if (isFav) Color(0xFFFF4081) else TextSecondary,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -487,6 +516,13 @@ fun UpnpBrowseScreen(
                         isFirst -> Modifier.focusRequester(firstItemFocusRequester)
                         else -> Modifier
                     }
+                    val watchProgress = remember(item.id, item.uri, progressMap) {
+                        if (item.type != MediaType.DIRECTORY) {
+                            (progressMap[item.id]?.progress()
+                                ?: progressMap[item.uri]?.progress()
+                                ?: 0f).coerceIn(0f, 1f)
+                        } else 0f
+                    }
 
                     TvFocusCard(
                         onClick = {
@@ -505,63 +541,82 @@ fun UpnpBrowseScreen(
                             .height(130.dp)
                             .then(itemFocusModifier)
                     ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(16.dp),
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            val icon = when (item.type) {
-                                MediaType.DIRECTORY -> Icons.Default.Folder
-                                MediaType.VIDEO -> Icons.Default.VideoFile
-                                MediaType.AUDIO -> Icons.Default.AudioFile
-                                MediaType.IMAGE -> Icons.Default.Image
-                                MediaType.UNKNOWN -> Icons.Default.VideoFile
-                            }
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(icon, contentDescription = null, tint = AccentCyan)
-
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    if (item.type == MediaType.DIRECTORY) {
-                                        Icon(
-                                            imageVector = if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                            contentDescription = null,
-                                            tint = if (isFav) Color(0xFFFF4081) else TextSecondary,
-                                            modifier = Modifier
-                                                .size(20.dp)
-                                                .clickable {
-                                                    favoritesManager.toggleFavorite(
-                                                        FavoriteFolder(
-                                                            id = item.id,
-                                                            title = item.title,
-                                                            sourceType = MediaSourceType.UPNP_DLNA,
-                                                            serverControlUrl = connectedDevice?.contentDirectoryControlUrl,
-                                                            parentId = item.parentId
-                                                        )
-                                                    )
-                                                }
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            if (watchProgress > 0f) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxHeight()
+                                        .fillMaxWidth(fraction = watchProgress)
+                                        .background(
+                                            Brush.horizontalGradient(
+                                                colors = listOf(
+                                                    AccentCyan.copy(alpha = 0.06f),
+                                                    AccentCyan.copy(alpha = 0.22f)
+                                                )
+                                            )
                                         )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text(
-                                text = item.title,
-                                style = MaterialTheme.typography.titleMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            val sizeStr = item.formattedSize()
-                            if (sizeStr.isNotEmpty()) {
-                                Text(
-                                    text = sizeStr,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = TextSecondary
                                 )
+                            }
+
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(16.dp),
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                val icon = when (item.type) {
+                                    MediaType.DIRECTORY -> Icons.Default.Folder
+                                    MediaType.VIDEO -> Icons.Default.VideoFile
+                                    MediaType.AUDIO -> Icons.Default.AudioFile
+                                    MediaType.IMAGE -> Icons.Default.Image
+                                    MediaType.UNKNOWN -> Icons.Default.VideoFile
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(icon, contentDescription = null, tint = AccentCyan)
+
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        if (item.type == MediaType.DIRECTORY) {
+                                            Icon(
+                                                imageVector = if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                                contentDescription = null,
+                                                tint = if (isFav) Color(0xFFFF4081) else TextSecondary,
+                                                modifier = Modifier
+                                                    .size(20.dp)
+                                                    .clickable {
+                                                        favoritesManager.toggleFavorite(
+                                                            FavoriteFolder(
+                                                                id = item.id,
+                                                                title = item.title,
+                                                                sourceType = MediaSourceType.UPNP_DLNA,
+                                                                serverControlUrl = connectedDevice?.contentDirectoryControlUrl,
+                                                                parentId = item.parentId
+                                                            )
+                                                        )
+                                                    }
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                        }
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text(
+                                    text = item.title,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                val sizeStr = item.formattedSize()
+                                if (sizeStr.isNotEmpty()) {
+                                    Text(
+                                        text = sizeStr,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TextSecondary
+                                    )
+                                }
                             }
                         }
                     }
@@ -580,7 +635,6 @@ fun UpnpBrowseScreen(
             }
         }
     }
-}
 }
 
 // 1. Returning from player: focus the played video item and keep focus on it!

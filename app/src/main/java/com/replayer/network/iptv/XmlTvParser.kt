@@ -19,6 +19,7 @@ object XmlTvParser {
     fun parse(
         rawInputStream: InputStream,
         targetChannels: Set<String>? = null,
+        archiveChannels: Set<String>? = null,
         onProgress: ((String) -> Unit)? = null
     ): XmlTvParseResult {
         // Detect GZIP by magic bytes (0x1f, 0x8b)
@@ -38,14 +39,17 @@ object XmlTvParser {
         val aliasToChannelId = mutableMapOf<String, String>()
         // All XML IDs that matched the user's target channels (or all channels if targetChannels is null)
         val relevantXmlChannelIds = mutableSetOf<String>()
+        // XML IDs that support catchup archive (load -3 days only for these channels!)
+        val archiveXmlChannelIds = mutableSetOf<String>()
         // Channel logos from <icon src="..."> inside <channel>
         val channelIcons = mutableMapOf<String, String>()
         // Canonical channel programs: channelId -> list of programs
         val channelPrograms = mutableMapOf<String, MutableList<EpgProgram>>()
 
         val now = System.currentTimeMillis()
-        val minTime = now - 3 * 24 * 3600 * 1000L // last 3 days for archive catchup
-        val maxTime = now + 36 * 3600 * 1000L // next 36h
+        val archiveMinTime = now - 3L * 24 * 3600 * 1000L // last 3 days ONLY for archive channels
+        val liveMinTime = now - 2L * 3600 * 1000L // last 2h for non-archive channels
+        val maxTime = now + 36L * 3600 * 1000L // next 36h
 
         var currentChannelId: String? = null
         var totalProgrammesCount = 0
@@ -58,17 +62,23 @@ object XmlTvParser {
                         "channel" -> {
                             currentChannelId = parser.getAttributeValue(null, "id")?.trim()
                             if (!currentChannelId.isNullOrBlank()) {
+                                val idLower = currentChannelId.lowercase()
+                                val idClean = normalizeChannelName(currentChannelId)
                                 if (targetChannels == null) {
                                     relevantXmlChannelIds.add(currentChannelId)
-                                } else {
-                                    val idLower = currentChannelId.lowercase()
-                                    val idClean = normalizeChannelName(currentChannelId)
-                                    if (targetChannels.contains(currentChannelId) ||
-                                        targetChannels.contains(idLower) ||
-                                        (idClean.isNotEmpty() && targetChannels.contains(idClean))
-                                    ) {
-                                        relevantXmlChannelIds.add(currentChannelId)
-                                    }
+                                } else if (targetChannels.contains(currentChannelId) ||
+                                    targetChannels.contains(idLower) ||
+                                    (idClean.isNotEmpty() && targetChannels.contains(idClean))
+                                ) {
+                                    relevantXmlChannelIds.add(currentChannelId)
+                                }
+
+                                if (archiveChannels == null ||
+                                    archiveChannels.contains(currentChannelId) ||
+                                    archiveChannels.contains(idLower) ||
+                                    (idClean.isNotEmpty() && archiveChannels.contains(idClean))
+                                ) {
+                                    archiveXmlChannelIds.add(currentChannelId)
                                 }
                             }
                         }
@@ -90,6 +100,15 @@ object XmlTvParser {
                                             (clean.isNotEmpty() && targetChannels.contains(clean))
                                         ) {
                                             relevantXmlChannelIds.add(currentChannelId)
+                                        }
+                                    }
+                                    // Check if this display-name matches an archive-capable channel
+                                    if (archiveChannels != null) {
+                                        if (archiveChannels.contains(lower) ||
+                                            archiveChannels.contains(name) ||
+                                            (clean.isNotEmpty() && archiveChannels.contains(clean))
+                                        ) {
+                                            archiveXmlChannelIds.add(currentChannelId)
                                         }
                                     }
                                 }
@@ -120,8 +139,13 @@ object XmlTvParser {
                             } else {
                                 val start = parseXmlDate(startStr)
                                 val stop = parseXmlDate(stopStr)
+                                val effectiveMinTime = if (archiveChannels == null || archiveXmlChannelIds.contains(channel)) {
+                                    archiveMinTime
+                                } else {
+                                    liveMinTime
+                                }
 
-                                if (start != null && stop != null && stop >= minTime && start <= maxTime) {
+                                if (start != null && stop != null && stop >= effectiveMinTime && start <= maxTime) {
                                     var title: String? = null
                                     var desc: String? = null
 

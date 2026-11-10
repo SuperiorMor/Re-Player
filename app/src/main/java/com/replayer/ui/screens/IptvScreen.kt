@@ -9,8 +9,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -62,13 +62,14 @@ fun IptvScreen(
     val channels by iptvManager.channels.collectAsState()
     val favoriteIds by iptvManager.favoriteChannelIds.collectAsState()
     val epgMap by iptvManager.epgMap.collectAsState()
+    val watchTimes by iptvManager.watchTimes.collectAsState()
     val isLoading by iptvManager.isLoading.collectAsState()
     val epgProgress by iptvManager.epgProgress.collectAsState()
     val statusMsg by iptvManager.statusMessage.collectAsState()
 
     // Level 1: Category folder selection. Level 2: Inside folder
     var selectedFolder by remember { mutableStateOf<String?>(null) }
-    var sortMode by remember { mutableStateOf(ChannelSortMode.DEFAULT) }
+    var sortMode by remember { mutableStateOf(ChannelSortMode.BY_WATCH_TIME) }
 
     val folders = remember(channels) { iptvManager.getCategoryFolders() }
 
@@ -171,9 +172,9 @@ fun IptvScreen(
                 TvFocusCard(
                     onClick = {
                         sortMode = when (sortMode) {
-                            ChannelSortMode.DEFAULT -> ChannelSortMode.BY_NAME
-                            ChannelSortMode.BY_NAME -> ChannelSortMode.BY_WATCH_TIME
-                            ChannelSortMode.BY_WATCH_TIME -> ChannelSortMode.DEFAULT
+                            ChannelSortMode.BY_WATCH_TIME -> ChannelSortMode.BY_NAME
+                            ChannelSortMode.BY_NAME -> ChannelSortMode.DEFAULT
+                            ChannelSortMode.DEFAULT -> ChannelSortMode.BY_WATCH_TIME
                         }
                     },
                     modifier = Modifier
@@ -438,7 +439,7 @@ fun IptvScreen(
             val folderChannels = remember(channels, currentFolder) {
                 iptvManager.getChannelsInFolder(currentFolder)
             }
-            val sortedList = remember(folderChannels, sortMode) {
+            val sortedList = remember(folderChannels, sortMode, watchTimes) {
                 iptvManager.getSortedChannels(folderChannels, sortMode)
             }
 
@@ -454,7 +455,9 @@ fun IptvScreen(
                     )
                 }
             } else {
-                LazyColumn(
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(2),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(5.dp),
                     contentPadding = PaddingValues(bottom = 24.dp),
                     modifier = Modifier.fillMaxSize()
@@ -493,7 +496,7 @@ fun IptvScreen(
                                 Row(
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .padding(horizontal = 14.dp),
+                                        .padding(horizontal = 10.dp),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
@@ -503,7 +506,7 @@ fun IptvScreen(
                                     ) {
                                         Box(
                                             modifier = Modifier
-                                                .size(32.dp)
+                                                .size(30.dp)
                                                 .clip(RoundedCornerShape(6.dp))
                                                 .background(DarkSurface.copy(alpha = 0.8f)),
                                             contentAlignment = Alignment.Center
@@ -512,7 +515,7 @@ fun IptvScreen(
                                                 imageVector = Icons.Default.Tv,
                                                 contentDescription = null,
                                                 tint = AccentCyan.copy(alpha = 0.65f),
-                                                modifier = Modifier.size(18.dp)
+                                                modifier = Modifier.size(16.dp)
                                             )
                                             if (!channel.logoUrl.isNullOrBlank()) {
                                                 AsyncImage(
@@ -526,23 +529,42 @@ fun IptvScreen(
                                             }
                                         }
 
-                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Spacer(modifier = Modifier.width(10.dp))
 
                                         Column(
                                             modifier = Modifier.weight(1f),
                                             verticalArrangement = Arrangement.Center
                                         ) {
-                                            Text(
-                                                text = channel.name,
-                                                style = MaterialTheme.typography.bodyMedium.copy(
-                                                    fontSize = 14.sp,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    lineHeight = 16.sp
-                                                ),
-                                                color = TextPrimary,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(
+                                                    text = channel.name,
+                                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                                        fontSize = 13.5.sp,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        lineHeight = 15.sp
+                                                    ),
+                                                    color = TextPrimary,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.weight(1f, fill = false)
+                                                )
+                                                if (channel.hasArchive) {
+                                                    Spacer(modifier = Modifier.width(5.dp))
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .clip(RoundedCornerShape(4.dp))
+                                                            .background(Color(0xFF66BB6A).copy(alpha = 0.16f))
+                                                            .padding(horizontal = 4.dp, vertical = 1.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = if (channel.catchupDays > 0) "↺ ${channel.catchupDays}д" else "↺",
+                                                            fontSize = 9.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = Color(0xFF81C784)
+                                                        )
+                                                    }
+                                                }
+                                            }
                                             Text(
                                                 text = currentProg?.title ?: "Прямой эфир",
                                                 style = MaterialTheme.typography.bodySmall.copy(
@@ -560,14 +582,14 @@ fun IptvScreen(
                                     IconButton(
                                         onClick = { iptvManager.toggleFavorite(channel.id) },
                                         modifier = Modifier
-                                            .padding(start = 8.dp)
-                                            .size(34.dp)
+                                            .padding(start = 4.dp)
+                                            .size(30.dp)
                                     ) {
                                         Icon(
                                             imageVector = if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                                             contentDescription = if (isFav) "В избранном" else "Добавить в избранное",
                                             tint = if (isFav) Color(0xFFFF4081) else TextSecondary,
-                                            modifier = Modifier.size(18.dp)
+                                            modifier = Modifier.size(16.dp)
                                         )
                                     }
                                 }

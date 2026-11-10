@@ -2,6 +2,7 @@ package com.replayer.ui.screens
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
@@ -38,6 +39,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
 import com.replayer.data.FavoritesManager
 import com.replayer.data.IptvManager
@@ -64,11 +66,12 @@ fun HomeScreen(
 ) {
     val context = LocalContext.current
     val favoritesManager = remember { FavoritesManager(context) }
-    val recentManager = remember { RecentMediaManager(context) }
+    val recentManager = remember { RecentMediaManager.getInstance(context) }
     val iptvManager = remember { IptvManager.getInstance(context) }
 
     val favorites by favoritesManager.favorites.collectAsState()
     val recentList by recentManager.recentList.collectAsState()
+    val progressMap by recentManager.progressMap.collectAsState()
     val channels by iptvManager.channels.collectAsState()
     val favoriteChannelIds by iptvManager.favoriteChannelIds.collectAsState()
     val epgMap by iptvManager.epgMap.collectAsState()
@@ -165,68 +168,98 @@ fun HomeScreen(
                 contentPadding = PaddingValues(vertical = 4.dp)
             ) {
                 // 1. Recent DLNA media cards
-                items(recentList, key = { "recent_${it.id}" }) { recent ->
-                    TvFocusCard(
+                itemsIndexed(recentList, key = { idx, item -> "recent_${item.id}_$idx" }) { _, recent ->
+                    val watchProgress = remember(recent, progressMap) {
+                        (progressMap[recent.id]?.progress()
+                            ?: progressMap[recent.uri]?.progress()
+                            ?: recent.progress()).coerceIn(0f, 1f)
+                    }
+
+                    HomeShelfFocusCard(
                         onClick = { onPlayMedia(recent.toMediaItem()) },
                         modifier = Modifier
-                            .width(240.dp)
-                            .height(138.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(14.dp),
-                            verticalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
+                            .width(232.dp)
+                            .height(106.dp)
+                    ) { isFocused ->
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            // Subtle gradient watch progress fill across entire background
+                            if (watchProgress > 0f) {
                                 Box(
                                     modifier = Modifier
-                                        .size(34.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(AccentCyan.copy(alpha = 0.15f)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.VideoFile,
-                                        contentDescription = null,
-                                        tint = AccentCyan,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .background(AccentCyan.copy(alpha = 0.18f))
-                                        .padding(horizontal = 7.dp, vertical = 3.dp)
-                                ) {
-                                    Text(
-                                        text = "DLNA",
-                                        color = AccentCyan,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
+                                        .fillMaxHeight()
+                                        .fillMaxWidth(fraction = watchProgress)
+                                        .background(
+                                            Brush.horizontalGradient(
+                                                colors = listOf(
+                                                    AccentCyan.copy(alpha = 0.06f),
+                                                    AccentCyan.copy(alpha = 0.22f)
+                                                )
+                                            )
+                                        )
+                                )
                             }
 
-                            Column {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(14.dp),
+                                verticalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(AccentCyan.copy(alpha = 0.15f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.VideoFile,
+                                            contentDescription = null,
+                                            tint = AccentCyan,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(AccentCyan.copy(alpha = 0.18f))
+                                            .padding(horizontal = 7.dp, vertical = 3.dp)
+                                    ) {
+                                        Text(
+                                            text = "DLNA",
+                                            color = AccentCyan,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+
                                 Text(
                                     text = recent.title,
-                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        fontSize = 13.5.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    ),
                                     color = TextPrimary,
-                                    maxLines = 2,
+                                    maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
-                                    lineHeight = 18.sp
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = "Продолжить просмотр",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = TextSecondary,
-                                    fontSize = 11.sp
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .then(
+                                            if (isFocused) {
+                                                Modifier.basicMarquee(
+                                                    iterations = Int.MAX_VALUE,
+                                                    initialDelayMillis = 250,
+                                                    repeatDelayMillis = 800,
+                                                    velocity = 45.dp
+                                                )
+                                            } else Modifier
+                                        )
                                 )
                             }
                         }
@@ -238,102 +271,135 @@ fun HomeScreen(
                     val currentProg = remember(channel, epgMap) {
                         iptvManager.getCurrentProgram(channel)
                     }
+                    val progFraction = currentProg?.progress()?.coerceIn(0f, 1f) ?: 0f
 
-                    TvFocusCard(
+                    HomeShelfFocusCard(
                         onClick = { onPlayChannel(channel) },
                         modifier = Modifier
-                            .width(240.dp)
-                            .height(138.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(14.dp),
-                            verticalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
+                            .width(232.dp)
+                            .height(106.dp)
+                    ) { isFocused ->
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            if (currentProg != null && progFraction > 0f) {
                                 Box(
                                     modifier = Modifier
-                                        .size(34.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(Color(0xFFFF4081).copy(alpha = 0.15f)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Tv,
-                                        contentDescription = null,
-                                        tint = Color(0xFFFF4081),
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    if (!channel.logoUrl.isNullOrBlank()) {
-                                        AsyncImage(
-                                            model = channel.logoUrl,
-                                            contentDescription = null,
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .background(Color(0xFF191C22))
-                                                .padding(2.dp),
-                                            contentScale = ContentScale.Fit
+                                        .fillMaxHeight()
+                                        .fillMaxWidth(fraction = progFraction)
+                                        .background(
+                                            Brush.horizontalGradient(
+                                                colors = listOf(
+                                                    AccentCyan.copy(alpha = 0.05f),
+                                                    AccentCyan.copy(alpha = 0.18f)
+                                                )
+                                            )
                                         )
-                                    }
-                                }
+                                )
+                            }
 
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(14.dp),
+                                verticalArrangement = Arrangement.SpaceBetween
+                            ) {
                                 Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Box(
                                         modifier = Modifier
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(Color(0xFFFF4081).copy(alpha = 0.18f))
-                                            .padding(horizontal = 7.dp, vertical = 3.dp)
+                                            .size(32.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(Color(0xFFFF4081).copy(alpha = 0.15f)),
+                                        contentAlignment = Alignment.Center
                                     ) {
-                                        Text(
-                                            text = "ТВ КАНАЛ",
-                                            color = Color(0xFFFF4081),
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.Bold
+                                        Icon(
+                                            imageVector = Icons.Default.Tv,
+                                            contentDescription = null,
+                                            tint = Color(0xFFFF4081),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        if (!channel.logoUrl.isNullOrBlank()) {
+                                            AsyncImage(
+                                                model = channel.logoUrl,
+                                                contentDescription = null,
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .background(Color(0xFF191C22))
+                                                    .padding(2.dp),
+                                                contentScale = ContentScale.Fit
+                                            )
+                                        }
+                                    }
+
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(4.dp))
+                                                .background(Color(0xFFFF4081).copy(alpha = 0.18f))
+                                                .padding(horizontal = 7.dp, vertical = 3.dp)
+                                        ) {
+                                            Text(
+                                                text = "ТВ КАНАЛ",
+                                                color = Color(0xFFFF4081),
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                        Icon(
+                                            imageVector = Icons.Default.Favorite,
+                                            contentDescription = null,
+                                            tint = Color(0xFFFF4081),
+                                            modifier = Modifier.size(16.dp)
                                         )
                                     }
-                                    Icon(
-                                        imageVector = Icons.Default.Favorite,
-                                        contentDescription = null,
-                                        tint = Color(0xFFFF4081),
-                                        modifier = Modifier.size(16.dp)
-                                    )
                                 }
-                            }
 
-                            Column {
-                                Text(
-                                    text = channel.name,
-                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = TextPrimary,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                if (currentProg != null) {
+                                Column(modifier = Modifier.fillMaxWidth()) {
                                     Text(
-                                        text = currentProg.title,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = TextSecondary,
+                                        text = channel.name,
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            fontSize = 13.5.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        ),
+                                        color = TextPrimary,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
-                                        fontSize = 11.sp
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .then(
+                                                if (isFocused) {
+                                                    Modifier.basicMarquee(
+                                                        iterations = Int.MAX_VALUE,
+                                                        initialDelayMillis = 250,
+                                                        repeatDelayMillis = 800,
+                                                        velocity = 45.dp
+                                                    )
+                                                } else Modifier
+                                            )
                                     )
-                                } else {
                                     Text(
-                                        text = channel.group,
-                                        style = MaterialTheme.typography.bodySmall,
+                                        text = currentProg?.title ?: channel.group,
+                                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
                                         color = TextSecondary,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
-                                        fontSize = 11.sp
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .then(
+                                                if (isFocused) {
+                                                    Modifier.basicMarquee(
+                                                        iterations = Int.MAX_VALUE,
+                                                        initialDelayMillis = 250,
+                                                        repeatDelayMillis = 800,
+                                                        velocity = 45.dp
+                                                    )
+                                                } else Modifier
+                                            )
                                     )
                                 }
                             }
@@ -811,5 +877,40 @@ private fun GoogleTvProgramTile(
                 overflow = TextOverflow.Ellipsis
             )
         }
+    }
+}
+
+@Composable
+private fun HomeShelfFocusCard(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable BoxScope.(isFocused: Boolean) -> Unit
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+    val scale by animateFloatAsState(if (isFocused) 1.03f else 1.0f, label = "shelf_card_scale")
+
+    Box(
+        modifier = modifier
+            .padding(3.dp)
+            .zIndex(if (isFocused) 10f else 1f)
+            .scale(scale)
+            .clip(RoundedCornerShape(12.dp))
+            .background(CardBackground)
+            .then(
+                if (isFocused) {
+                    Modifier.border(2.5.dp, FocusBorder, RoundedCornerShape(12.dp))
+                } else {
+                    Modifier.border(1.dp, Color(0x22FFFFFF), RoundedCornerShape(12.dp))
+                }
+            )
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick
+            )
+            .focusable(interactionSource = interactionSource)
+    ) {
+        content(isFocused)
     }
 }
