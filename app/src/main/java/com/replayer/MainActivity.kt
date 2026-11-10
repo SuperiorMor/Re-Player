@@ -19,13 +19,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ExitToApp
+import androidx.compose.material.icons.outlined.ExitToApp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -52,6 +53,7 @@ import com.replayer.ui.screens.PlayerScreen
 import com.replayer.ui.screens.SettingsScreen
 import com.replayer.ui.screens.UpnpBrowseScreen
 import com.replayer.ui.theme.AccentCyan
+import com.replayer.ui.theme.AccentOrange
 import com.replayer.ui.theme.DarkBackground
 import com.replayer.ui.theme.DarkCard
 import com.replayer.ui.theme.RePlayerTheme
@@ -69,6 +71,8 @@ class MainActivity : ComponentActivity() {
                 var showExitDialog by remember { mutableStateOf(false) }
                 var initialUpnpFolder by remember { mutableStateOf<Pair<String, String>?>(null) }
                 var lastPlayedMediaId by remember { mutableStateOf<String?>(null) }
+                var isRailFocused by remember { mutableStateOf(false) }
+                var sectionFocusTrigger by remember { mutableIntStateOf(0) }
 
                 LaunchedEffect(selectedNav) {
                     CrashReporter.breadcrumb("Nav", "Tab=$selectedNav")
@@ -106,9 +110,17 @@ class MainActivity : ComponentActivity() {
                         TvNavigationRail(
                             selectedItem = selectedNav,
                             onItemSelected = {
+                                if (selectedNav != it) {
+                                    selectedNav = it
+                                    initialUpnpFolder = null
+                                }
+                            },
+                            onEnterSection = {
                                 selectedNav = it
                                 initialUpnpFolder = null
-                            }
+                                sectionFocusTrigger++
+                            },
+                            onRailFocusChanged = { isRailFocused = it }
                         )
 
                         Box(modifier = Modifier.weight(1f).fillMaxSize()) {
@@ -118,6 +130,7 @@ class MainActivity : ComponentActivity() {
                                         if (fav.sourceType == MediaSourceType.UPNP_DLNA) {
                                             initialUpnpFolder = Pair(fav.id, fav.title)
                                             selectedNav = NavItem.UPNP
+                                            sectionFocusTrigger++
                                         }
                                     },
                                     onPlayMedia = { mediaItem ->
@@ -126,7 +139,8 @@ class MainActivity : ComponentActivity() {
                                     },
                                     onPlayChannel = { channel ->
                                         activeMediaItem = channel.toMediaItem()
-                                    }
+                                    },
+                                    enterSectionTrigger = sectionFocusTrigger
                                 )
                                 NavItem.UPNP -> UpnpBrowseScreen(
                                     onPlayMedia = { item, playlist ->
@@ -134,11 +148,19 @@ class MainActivity : ComponentActivity() {
                                         activeMediaItem = item
                                         activePlaylist = playlist
                                     },
-                                    onNavigateToSettings = { selectedNav = NavItem.SETTINGS },
-                                    onBackToHome = { selectedNav = NavItem.HOME },
+                                    onNavigateToSettings = {
+                                        selectedNav = NavItem.SETTINGS
+                                        sectionFocusTrigger++
+                                    },
+                                    onBackToHome = {
+                                        selectedNav = NavItem.HOME
+                                        sectionFocusTrigger++
+                                    },
                                     initialFolder = initialUpnpFolder,
                                     lastPlayedMediaId = lastPlayedMediaId,
                                     isPlayerActive = (activeMediaItem != null),
+                                    isRailFocused = isRailFocused,
+                                    enterSectionTrigger = sectionFocusTrigger,
                                     onFolderLoaded = { initialUpnpFolder = null },
                                     onConsumeLastPlayedMediaId = { lastPlayedMediaId = null }
                                 )
@@ -146,11 +168,22 @@ class MainActivity : ComponentActivity() {
                                     onPlayChannel = { channel ->
                                         activeMediaItem = channel.toMediaItem()
                                     },
-                                    onNavigateToSettings = { selectedNav = NavItem.SETTINGS },
-                                    onBackToHome = { selectedNav = NavItem.HOME }
+                                    onNavigateToSettings = {
+                                        selectedNav = NavItem.SETTINGS
+                                        sectionFocusTrigger++
+                                    },
+                                    onBackToHome = {
+                                        selectedNav = NavItem.HOME
+                                        sectionFocusTrigger++
+                                    },
+                                    enterSectionTrigger = sectionFocusTrigger
                                 )
                                 NavItem.SETTINGS -> SettingsScreen(
-                                    onBack = { selectedNav = NavItem.HOME }
+                                    onBack = {
+                                        selectedNav = NavItem.HOME
+                                        sectionFocusTrigger++
+                                    },
+                                    enterSectionTrigger = sectionFocusTrigger
                                 )
                             }
                         }
@@ -186,10 +219,10 @@ class MainActivity : ComponentActivity() {
                                     verticalArrangement = Arrangement.Center
                                 ) {
                                     Icon(
-                                        Icons.Default.ExitToApp,
+                                        Icons.Outlined.ExitToApp,
                                         contentDescription = null,
                                         tint = AccentCyan,
-                                        modifier = Modifier.size(44.dp)
+                                        modifier = Modifier.size(40.dp)
                                     )
                                     Spacer(modifier = Modifier.height(16.dp))
                                     Text(
@@ -225,7 +258,7 @@ class MainActivity : ComponentActivity() {
                                                 Text(
                                                     text = "Да, выйти",
                                                     style = MaterialTheme.typography.titleMedium,
-                                                    color = Color(0xFFFF5252)
+                                                    color = AccentOrange
                                                 )
                                             }
                                         }

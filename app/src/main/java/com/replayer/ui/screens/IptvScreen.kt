@@ -18,14 +18,14 @@ import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.StarBorder
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Sort
-import androidx.compose.material.icons.filled.Tv
+import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.LiveTv
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.StarOutline
+import androidx.compose.material.icons.outlined.SwapVert
+import androidx.compose.material.icons.rounded.ArrowBackIosNew
+import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -51,6 +51,7 @@ import com.replayer.model.IptvChannel
 import com.replayer.ui.components.TvFocusCard
 import com.replayer.ui.theme.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -59,6 +60,7 @@ fun IptvScreen(
     onPlayChannel: (IptvChannel) -> Unit,
     onNavigateToSettings: () -> Unit,
     onBackToHome: () -> Unit = {},
+    enterSectionTrigger: Int = 0,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -76,6 +78,16 @@ fun IptvScreen(
     // Level 1: Category folder selection. Level 2: Inside folder
     var selectedFolder by remember { mutableStateOf<String?>(null) }
     var sortMode by remember { mutableStateOf(ChannelSortMode.BY_WATCH_TIME) }
+    val entryFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(enterSectionTrigger) {
+        if (enterSectionTrigger > 0) {
+            delay(50)
+            try {
+                entryFocusRequester.requestFocus()
+            } catch (_: Exception) {}
+        }
+    }
 
     val folders = remember(channels) { iptvManager.getCategoryFolders() }
 
@@ -125,11 +137,13 @@ fun IptvScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 28.dp, vertical = if (isInsideFolder) 14.dp else 20.dp)
+            .padding(start = 28.dp, end = 28.dp, top = 24.dp, bottom = 16.dp)
     ) {
-        // TOP BAR
+        // TOP BAR — vertically aligned with the left 64dp Logo
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 64.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -149,7 +163,7 @@ fun IptvScreen(
                                 horizontalArrangement = Arrangement.Center,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(Icons.Default.ArrowBack, contentDescription = "Назад", tint = AccentCyan, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Rounded.ArrowBackIosNew, contentDescription = "Назад", tint = AccentCyan, modifier = Modifier.size(14.dp))
                                 Spacer(Modifier.width(6.dp))
                                 Text("Папки", style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold), color = AccentCyan)
                             }
@@ -192,7 +206,7 @@ fun IptvScreen(
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.Sort, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Outlined.SwapVert, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
                         Text(text = sortMode.label, style = MaterialTheme.typography.bodySmall, color = AccentCyan)
                     }
@@ -225,7 +239,7 @@ fun IptvScreen(
                                 horizontalArrangement = Arrangement.Center,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(Icons.Default.Refresh, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
+                                Icon(Icons.Outlined.Refresh, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text("Обновить", style = MaterialTheme.typography.bodyMedium)
                             }
@@ -243,7 +257,7 @@ fun IptvScreen(
                             horizontalArrangement = Arrangement.Center,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Default.Settings, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Outlined.Settings, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("Настройки ТВ", style = MaterialTheme.typography.bodyMedium)
                         }
@@ -341,7 +355,7 @@ fun IptvScreen(
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Tv,
+                                imageVector = Icons.Outlined.LiveTv,
                                 contentDescription = null,
                                 tint = AccentCyan.copy(alpha = 0.7f),
                                 modifier = Modifier.size(38.dp)
@@ -372,13 +386,14 @@ fun IptvScreen(
                                 modifier = Modifier
                                     .width(240.dp)
                                     .height(48.dp)
+                                    .focusRequester(entryFocusRequester)
                             ) {
                                 Row(
                                     modifier = Modifier.fillMaxSize(),
                                     horizontalArrangement = Arrangement.Center,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(Icons.Default.Folder, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(20.dp))
+                                    Icon(Icons.Outlined.FolderOpen, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(20.dp))
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
                                         text = if (isScanningLocalFiles) "Поиск файлов..." else "Плейлист с флешки",
@@ -398,7 +413,7 @@ fun IptvScreen(
                                     horizontalArrangement = Arrangement.Center,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(Icons.Default.Settings, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(20.dp))
+                                    Icon(Icons.Outlined.Settings, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(20.dp))
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text("Настройки ТВ", color = TextPrimary, style = MaterialTheme.typography.bodyMedium)
                                 }
@@ -415,7 +430,7 @@ fun IptvScreen(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 contentPadding = PaddingValues(bottom = 32.dp)
             ) {
-                items(folders) { folder ->
+                itemsIndexed(folders) { folderIdx, folder ->
                     val count = remember(channels, folder) {
                         iptvManager.getChannelsInFolder(folder).size
                     }
@@ -425,6 +440,7 @@ fun IptvScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(84.dp)
+                            .then(if (folderIdx == 0) Modifier.focusRequester(entryFocusRequester) else Modifier)
                     ) {
                         Row(
                             modifier = Modifier
@@ -442,7 +458,7 @@ fun IptvScreen(
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Default.Folder,
+                                        imageVector = Icons.Outlined.FolderOpen,
                                         contentDescription = null,
                                         tint = AccentCyan,
                                         modifier = Modifier.size(26.dp)
@@ -498,7 +514,7 @@ fun IptvScreen(
                     contentPadding = PaddingValues(bottom = 24.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    itemsIndexed(sortedList, key = { idx, ch -> "${ch.id}_$idx" }) { _, channel ->
+                    itemsIndexed(sortedList, key = { idx, ch -> "${ch.id}_$idx" }) { idx, channel ->
                         val isFav = favoriteIds.contains(channel.id)
                         val currentProg = remember(channel, epgMap) {
                             iptvManager.getCurrentProgram(channel)
@@ -513,6 +529,7 @@ fun IptvScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(48.dp)
+                                .then(if (idx == 0) Modifier.focusRequester(entryFocusRequester) else Modifier)
                         ) {
                             Box(modifier = Modifier.fillMaxSize()) {
                                 // Subtle full-card gradient timebar fill on background
@@ -551,7 +568,7 @@ fun IptvScreen(
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Icon(
-                                                imageVector = Icons.Default.Tv,
+                                                imageVector = Icons.Outlined.LiveTv,
                                                 contentDescription = null,
                                                 tint = AccentCyan.copy(alpha = 0.65f),
                                                 modifier = Modifier.size(16.dp)
@@ -588,18 +605,19 @@ fun IptvScreen(
                                                     modifier = Modifier.weight(1f, fill = false)
                                                 )
                                                 if (channel.hasArchive) {
-                                                    Spacer(modifier = Modifier.width(5.dp))
+                                                    Spacer(modifier = Modifier.width(6.dp))
                                                     Box(
                                                         modifier = Modifier
                                                             .clip(RoundedCornerShape(4.dp))
-                                                            .background(StatusSuccess.copy(alpha = 0.16f))
-                                                            .padding(horizontal = 4.dp, vertical = 1.dp)
+                                                            .background(AccentOrange.copy(alpha = 0.08f))
+                                                            .border(0.75.dp, AccentOrange.copy(alpha = 0.50f), RoundedCornerShape(4.dp))
+                                                            .padding(horizontal = 5.dp, vertical = 1.dp)
                                                     ) {
                                                         Text(
                                                             text = if (channel.catchupDays > 0) "↺ ${channel.catchupDays}д" else "↺",
                                                             fontSize = 9.sp,
-                                                            fontWeight = FontWeight.Bold,
-                                                            color = StatusSuccess
+                                                            fontWeight = FontWeight.Medium,
+                                                            color = AccentOrange
                                                         )
                                                     }
                                                 }
@@ -655,7 +673,7 @@ fun IptvScreen(
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Icon(
-                                            imageVector = if (isFav) Icons.Default.Star else Icons.Default.StarBorder,
+                                            imageVector = if (isFav) Icons.Rounded.Star else Icons.Outlined.StarOutline,
                                             contentDescription = if (isFav) "В избранном" else "Добавить в избранное",
                                             tint = when {
                                                 isFav -> AccentGold
@@ -745,7 +763,7 @@ fun IptvScreen(
                                             modifier = Modifier.weight(1f),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Icon(Icons.Default.Folder, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(24.dp))
+                                            Icon(Icons.Outlined.FolderOpen, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(24.dp))
                                             Spacer(Modifier.width(12.dp))
                                             Column {
                                                 Text(

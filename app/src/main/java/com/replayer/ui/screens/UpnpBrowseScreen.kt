@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -30,14 +31,14 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AudioFile
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Sort
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.StarBorder
-import androidx.compose.material.icons.filled.VideoFile
+import androidx.compose.material.icons.outlined.AudioFile
+import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.StarOutline
+import androidx.compose.material.icons.outlined.SwapVert
+import androidx.compose.material.icons.outlined.VideoFile
+import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -91,7 +92,6 @@ import com.replayer.ui.theme.CardBackground
 import com.replayer.ui.theme.DarkCard
 import com.replayer.ui.theme.DarkSurface
 import com.replayer.ui.theme.FocusBorder
-import com.replayer.ui.theme.StatusSuccess
 import com.replayer.ui.theme.TextPrimary
 import com.replayer.ui.theme.TextSecondary
 import kotlinx.coroutines.delay
@@ -106,6 +106,8 @@ fun UpnpBrowseScreen(
     initialFolder: Pair<String, String>? = null,
     lastPlayedMediaId: String? = null,
     isPlayerActive: Boolean = false,
+    isRailFocused: Boolean = false,
+    enterSectionTrigger: Int = 0,
     onFolderLoaded: () -> Unit = {},
     onConsumeLastPlayedMediaId: () -> Unit = {}
 ) {
@@ -129,9 +131,11 @@ fun UpnpBrowseScreen(
 
     val listState = rememberLazyListState()
     val targetItemFocusRequester = remember { FocusRequester() }
+    val settingsCtaFocusRequester = remember { FocusRequester() }
     var focusTargetIndex by remember { mutableIntStateOf(0) }
     var focusedItem by remember { mutableStateOf<MediaItem?>(null) }
     var lastExitTimestamp by remember { mutableLongStateOf(0L) }
+    var lastHandledEnterTrigger by remember { mutableIntStateOf(0) }
 
     val currentFolderId = folderStack.lastOrNull()?.first
 
@@ -221,7 +225,17 @@ fun UpnpBrowseScreen(
     val latestSortedItems by rememberUpdatedState(sortedItems)
 
     // Restore focus to the last-opened (or last-played) item inside the current folder
-    LaunchedEffect(loadedFolderId, isLoadingFolder, isPlayerActive, lastPlayedMediaId) {
+    LaunchedEffect(loadedFolderId, isLoadingFolder, isPlayerActive, lastPlayedMediaId, enterSectionTrigger) {
+        if (connectedDevice == null) {
+            if (enterSectionTrigger != lastHandledEnterTrigger && enterSectionTrigger > 0) {
+                lastHandledEnterTrigger = enterSectionTrigger
+                delay(50)
+                try {
+                    settingsCtaFocusRequester.requestFocus()
+                } catch (_: Exception) {}
+            }
+            return@LaunchedEffect
+        }
         if (isPlayerActive || isLoadingFolder || loadedFolderId == null || loadedFolderId != currentFolderId) {
             return@LaunchedEffect
         }
@@ -246,10 +260,15 @@ fun UpnpBrowseScreen(
         try {
             listState.scrollToItem(resolvedIdx)
         } catch (_: Exception) {}
-        delay(60)
-        try {
-            targetItemFocusRequester.requestFocus()
-        } catch (_: Exception) {}
+
+        val explicitEnter = enterSectionTrigger != lastHandledEnterTrigger
+        if (explicitEnter || !isRailFocused) {
+            if (explicitEnter) lastHandledEnterTrigger = enterSectionTrigger
+            delay(50)
+            try {
+                targetItemFocusRequester.requestFocus()
+            } catch (_: Exception) {}
+        }
     }
 
     if (connectedDevice == null) {
@@ -264,7 +283,7 @@ fun UpnpBrowseScreen(
                 verticalArrangement = Arrangement.Center
             ) {
                 Icon(
-                    imageVector = Icons.Default.Folder,
+                    imageVector = Icons.Outlined.FolderOpen,
                     contentDescription = null,
                     tint = TextSecondary,
                     modifier = Modifier.size(64.dp)
@@ -287,13 +306,14 @@ fun UpnpBrowseScreen(
                     modifier = Modifier
                         .width(240.dp)
                         .height(52.dp)
+                        .focusRequester(settingsCtaFocusRequester)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxSize(),
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.Settings, contentDescription = null, tint = AccentCyanBright, modifier = Modifier.size(20.dp))
+                        Icon(Icons.Outlined.Settings, contentDescription = null, tint = AccentCyanBright, modifier = Modifier.size(20.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(text = "Перейти в настройки", color = AccentCyanBright, style = MaterialTheme.typography.bodyMedium)
                     }
@@ -310,11 +330,13 @@ fun UpnpBrowseScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 32.dp, vertical = 20.dp)
+            .padding(start = 32.dp, end = 32.dp, top = 24.dp, bottom = 18.dp)
     ) {
-        // Header: Clean single title (no duplicate description at root) + Sort button only
+        // Header: Aligned vertically with the 64dp left Logo (y = 24..88dp)
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 64.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -353,7 +375,7 @@ fun UpnpBrowseScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Sort,
+                        imageVector = Icons.Outlined.SwapVert,
                         contentDescription = null,
                         tint = AccentCyanBright,
                         modifier = Modifier.size(18.dp)
@@ -591,7 +613,7 @@ fun UpnpBrowseScreen(
                                                 contentAlignment = Alignment.Center
                                             ) {
                                                 Icon(
-                                                    imageVector = if (isFav) Icons.Default.Star else Icons.Default.StarBorder,
+                                                    imageVector = if (isFav) Icons.Rounded.Star else Icons.Outlined.StarOutline,
                                                     contentDescription = "Избранное",
                                                     tint = when {
                                                         isFav -> AccentGold
@@ -893,18 +915,18 @@ private fun DlnaDetailPreviewPanel(
 }
 
 private fun mediaTypeIcon(type: MediaType): ImageVector = when (type) {
-    MediaType.DIRECTORY -> Icons.Default.Folder
-    MediaType.VIDEO -> Icons.Default.VideoFile
-    MediaType.AUDIO -> Icons.Default.AudioFile
-    MediaType.IMAGE -> Icons.Default.Image
-    MediaType.UNKNOWN -> Icons.Default.VideoFile
+    MediaType.DIRECTORY -> Icons.Outlined.FolderOpen
+    MediaType.VIDEO -> Icons.Outlined.VideoFile
+    MediaType.AUDIO -> Icons.Outlined.AudioFile
+    MediaType.IMAGE -> Icons.Outlined.Image
+    MediaType.UNKNOWN -> Icons.Outlined.VideoFile
 }
 
 private fun mediaTypeTint(type: MediaType): Color = when (type) {
     MediaType.DIRECTORY -> AccentCyan
     MediaType.VIDEO -> AccentCyanBright
     MediaType.AUDIO -> AccentGold
-    MediaType.IMAGE -> StatusSuccess
+    MediaType.IMAGE -> AccentGold
     MediaType.UNKNOWN -> AccentCyan
 }
 

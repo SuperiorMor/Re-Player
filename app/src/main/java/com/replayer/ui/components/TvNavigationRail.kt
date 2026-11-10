@@ -5,94 +5,129 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Tv
+import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.LiveTv
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
-import com.replayer.ui.theme.AccentCyan
-import com.replayer.ui.theme.AccentOrange
+import com.replayer.ui.theme.AccentCyanBright
 import com.replayer.ui.theme.SurfaceDark
 import com.replayer.ui.theme.TextSecondary
+import kotlinx.coroutines.delay
 
 enum class NavItem(val label: String, val icon: ImageVector) {
-    HOME("Главная", Icons.Default.Home),
-    UPNP("UPnP / DLNA", Icons.Default.Folder),
-    IPTV("ТВ каналы", Icons.Default.Tv),
-    SETTINGS("Настройки", Icons.Default.Settings)
+    HOME("Главная", Icons.Outlined.Home),
+    UPNP("UPnP / DLNA", Icons.Outlined.FolderOpen),
+    IPTV("ТВ каналы", Icons.Outlined.LiveTv),
+    SETTINGS("Настройки", Icons.Outlined.Settings)
 }
 
 @Composable
 fun TvNavigationRail(
     selectedItem: NavItem,
     onItemSelected: (NavItem) -> Unit,
+    onEnterSection: (NavItem) -> Unit = onItemSelected,
+    onRailFocusChanged: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    var pendingFocusedItem by remember { mutableStateOf<NavItem?>(null) }
+
+    // Switch active tab automatically as the user highlights items in the menu (with short debounce)
+    // while keeping focus inside the navigation rail until Right or OK is pressed.
+    LaunchedEffect(pendingFocusedItem) {
+        val target = pendingFocusedItem ?: return@LaunchedEffect
+        if (target != selectedItem) {
+            delay(110)
+            onItemSelected(target)
+        }
+    }
+
     Column(
         modifier = modifier
             .fillMaxHeight()
-            .width(96.dp)
+            .width(92.dp)
             .background(SurfaceDark)
-            .padding(vertical = 24.dp),
+            .padding(top = 24.dp, bottom = 24.dp)
+            .onFocusChanged { state ->
+                val hasFocus = state.hasFocus
+                onRailFocusChanged(hasFocus)
+                if (!hasFocus) {
+                    pendingFocusedItem = null
+                }
+            },
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Top
     ) {
-        // Official App Logo
+        // Official App Logo (y = 24dp .. 88dp)
         Image(
             painter = painterResource(id = com.replayer.R.drawable.app_logo_transparent),
             contentDescription = "Re:Player",
-            modifier = Modifier
-                .padding(bottom = 20.dp)
-                .size(72.dp)
+            modifier = Modifier.size(64.dp)
         )
+
+        Spacer(modifier = Modifier.height(22.dp))
 
         NavItem.entries.forEach { item ->
             val isSelected = item == selectedItem
             TvFocusCard(
-                onClick = { onItemSelected(item) },
+                onClick = {
+                    onItemSelected(item)
+                    onEnterSection(item)
+                },
                 isSelected = isSelected,
+                cornerRadius = 14.dp,
                 modifier = Modifier
-                    .padding(vertical = 8.dp)
-                    .width(54.dp)
-                    .height(54.dp)
+                    .padding(vertical = 7.dp)
+                    .size(50.dp)
+                    .onFocusChanged { focusState ->
+                        if (focusState.hasFocus) {
+                            pendingFocusedItem = item
+                        }
+                    }
+                    .onPreviewKeyEvent { keyEvent ->
+                        if (keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.DirectionRight) {
+                            onItemSelected(item)
+                            onEnterSection(item)
+                            true
+                        } else {
+                            false
+                        }
+                    }
             ) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (isSelected) {
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.CenterStart)
-                                .width(3.dp)
-                                .height(24.dp)
-                                .clip(RoundedCornerShape(topEnd = 3.dp, bottomEnd = 3.dp))
-                                .background(
-                                    Brush.verticalGradient(listOf(AccentCyan, AccentOrange))
-                                )
-                        )
-                    }
                     Icon(
                         imageVector = item.icon,
                         contentDescription = item.label,
-                        tint = if (isSelected) AccentCyan else TextSecondary,
-                        modifier = Modifier.size(23.dp)
+                        tint = if (isSelected) AccentCyanBright else TextSecondary,
+                        modifier = Modifier.size(22.dp)
                     )
                 }
             }

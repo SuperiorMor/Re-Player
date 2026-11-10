@@ -11,15 +11,15 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.BugReport
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.List
-import androidx.compose.material.icons.filled.QrCode
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.outlined.BugReport
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.ListAlt
+import androidx.compose.material.icons.outlined.QrCode2
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Send
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -56,6 +56,8 @@ import com.replayer.diagnostics.CrashReportInfo
 import com.replayer.diagnostics.CrashReporter
 import com.replayer.diagnostics.TelegramConfigServer
 import com.replayer.ui.theme.AccentCyan
+import com.replayer.ui.theme.AccentCyanBright
+import com.replayer.ui.theme.AccentOrange
 import com.replayer.ui.theme.DarkCard
 import com.replayer.ui.theme.DarkSurface
 import com.replayer.ui.theme.TextPrimary
@@ -118,10 +120,10 @@ fun DiagnosticsSection() {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        imageVector = Icons.Default.BugReport,
+                        imageVector = Icons.Outlined.BugReport,
                         contentDescription = null,
                         tint = if (isConfigured) AccentCyan else TextSecondary,
-                        modifier = Modifier.size(30.dp)
+                        modifier = Modifier.size(28.dp)
                     )
                     Spacer(modifier = Modifier.width(16.dp))
                     Column {
@@ -206,7 +208,7 @@ fun DiagnosticsSection() {
                     ) {
                         val isSecondaryStyle = hasBuiltIn && !hasCustom
                         Icon(
-                            imageVector = Icons.Default.QrCode,
+                            imageVector = Icons.Outlined.QrCode2,
                             contentDescription = null,
                             tint = if (isSecondaryStyle) TextSecondary else AccentCyan,
                             modifier = Modifier.size(18.dp)
@@ -249,7 +251,7 @@ fun DiagnosticsSection() {
                                 strokeWidth = 2.dp
                             )
                         } else {
-                            Icon(Icons.Default.Send, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Outlined.Send, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
@@ -275,7 +277,7 @@ fun DiagnosticsSection() {
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.List, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Outlined.ListAlt, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = "Журнал (${reports.size})",
@@ -390,7 +392,7 @@ private fun TelegramSetupDialog(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
-                                imageVector = if (manualMode) Icons.Default.QrCode else Icons.Default.Edit,
+                                imageVector = if (manualMode) Icons.Outlined.QrCode2 else Icons.Outlined.Edit,
                                 contentDescription = null,
                                 tint = AccentCyan,
                                 modifier = Modifier.size(16.dp)
@@ -523,7 +525,7 @@ private fun TelegramSetupDialog(
                                     horizontalArrangement = Arrangement.Center,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(Icons.Default.Search, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
+                                    Icon(Icons.Outlined.Search, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text("Найти Chat ID", style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
                                 }
@@ -553,7 +555,7 @@ private fun TelegramSetupDialog(
                                     horizontalArrangement = Arrangement.Center,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
+                                    Icon(Icons.Outlined.CheckCircle, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text("Сохранить и тест", style = MaterialTheme.typography.bodyMedium, color = AccentCyan, fontWeight = FontWeight.Bold)
                                 }
@@ -566,7 +568,7 @@ private fun TelegramSetupDialog(
                     Text(
                         text = statusText ?: "",
                         style = MaterialTheme.typography.bodySmall,
-                        color = if (statusText?.startsWith("Ошибка") == true) Color(0xFFFF6B6B) else Color(0xFF4ADE80)
+                        color = if (statusText?.startsWith("Ошибка") == true) AccentOrange else AccentCyanBright
                     )
                 }
 
@@ -677,7 +679,7 @@ private fun CrashLogsViewerDialog(
                                     horizontalArrangement = Arrangement.Center,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(Icons.Default.Delete, contentDescription = null, tint = Color(0xFFFF6B6B), modifier = Modifier.size(16.dp))
+                                    Icon(Icons.Outlined.DeleteOutline, contentDescription = null, tint = AccentOrange, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text("Очистить", style = MaterialTheme.typography.bodySmall, color = TextPrimary)
                                 }
@@ -694,7 +696,7 @@ private fun CrashLogsViewerDialog(
                                 horizontalArrangement = Arrangement.Center,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(Icons.Default.Close, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Outlined.Close, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text("Закрыть", style = MaterialTheme.typography.bodySmall, color = TextPrimary)
                             }

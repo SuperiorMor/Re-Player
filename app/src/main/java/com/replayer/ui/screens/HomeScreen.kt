@@ -17,10 +17,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.Tv
+import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.LiveTv
+import androidx.compose.material.icons.outlined.PlayCircle
+import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -29,6 +29,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -60,6 +62,7 @@ fun HomeScreen(
     onOpenFavorite: (FavoriteFolder) -> Unit,
     onPlayMedia: (MediaItem) -> Unit,
     onPlayChannel: (IptvChannel) -> Unit,
+    enterSectionTrigger: Int = 0,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -80,6 +83,16 @@ fun HomeScreen(
     val favoriteChannels = remember(channels, favoriteChannelIds, watchTimes) {
         iptvManager.getFavoriteChannels()
     }
+    val entryFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(enterSectionTrigger) {
+        if (enterSectionTrigger > 0) {
+            delay(50)
+            try {
+                entryFocusRequester.requestFocus()
+            } catch (_: Exception) {}
+        }
+    }
 
     LaunchedEffect(connectedDevice?.contentDirectoryControlUrl, recentList) {
         if (recentList.any { it.thumbnailUrl.isNullOrBlank() }) {
@@ -99,12 +112,12 @@ fun HomeScreen(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 28.dp, vertical = 18.dp)
+            .padding(start = 28.dp, end = 28.dp, top = 34.dp, bottom = 18.dp)
     ) {
         // -------------------------------------------------------------
         // ВЕРХНИЙ БЛОК: СЛЕВА ПОСТЕРЫ (~ПОЛОВИНА ЭКРАНА) | СПРАВА «ИЗБРАННЫЕ ПАПКИ» ДО КРАЯ ЭКРАНА
         // -------------------------------------------------------------
-        val posterSectionHeight = 220.dp
+        val posterSectionHeight = 208.dp
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.Top
@@ -136,7 +149,7 @@ fun HomeScreen(
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Icon(
-                                imageVector = Icons.Default.PlayArrow,
+                                imageVector = Icons.Outlined.PlayCircle,
                                 contentDescription = null,
                                 tint = AccentCyan.copy(alpha = 0.55f),
                                 modifier = Modifier.size(34.dp)
@@ -154,7 +167,7 @@ fun HomeScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
-                        recentPosters.forEach { recent ->
+                        recentPosters.forEachIndexed { idx, recent ->
                             val watchProgress = remember(recent, progressMap) {
                                 (progressMap[recent.id]?.progress()
                                     ?: progressMap[recent.uri]?.progress()
@@ -166,6 +179,7 @@ fun HomeScreen(
                                 modifier = Modifier
                                     .weight(1f)
                                     .height(posterSectionHeight)
+                                    .then(if (idx == 0) Modifier.focusRequester(entryFocusRequester) else Modifier)
                             ) { isFocused ->
                                 Box(modifier = Modifier.fillMaxSize()) {
                                     // Background: Full-bleed vertical cover poster OR sleek slate fallback
@@ -354,12 +368,17 @@ fun HomeScreen(
                             contentPadding = PaddingValues(horizontal = 2.dp, vertical = 2.dp),
                             modifier = Modifier.fillMaxSize()
                         ) {
-                            gridItemsIndexed(favorites, key = { idx, fav -> "${fav.id}_$idx" }) { _, fav ->
+                            gridItemsIndexed(favorites, key = { idx, fav -> "${fav.id}_$idx" }) { idx, fav ->
                                 HomeShelfFocusCard(
                                     onClick = { onOpenFavorite(fav) },
                                     modifier = Modifier
                                         .width(cardWidth)
                                         .fillMaxHeight()
+                                        .then(
+                                            if (recentPosters.isEmpty() && idx == 0) {
+                                                Modifier.focusRequester(entryFocusRequester)
+                                            } else Modifier
+                                        )
                                 ) { _ ->
                                     Row(
                                         modifier = Modifier
@@ -380,10 +399,10 @@ fun HomeScreen(
                                                 contentAlignment = Alignment.Center
                                             ) {
                                                 Icon(
-                                                    imageVector = Icons.Default.Folder,
+                                                    imageVector = Icons.Outlined.FolderOpen,
                                                     contentDescription = null,
                                                     tint = AccentCyan,
-                                                    modifier = Modifier.size(22.dp)
+                                                    modifier = Modifier.size(21.dp)
                                                 )
                                             }
                                             Spacer(modifier = Modifier.width(12.dp))
@@ -401,7 +420,7 @@ fun HomeScreen(
                                         }
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Icon(
-                                            imageVector = Icons.Default.Star,
+                                            imageVector = Icons.Rounded.Star,
                                             contentDescription = "В избранном",
                                             tint = AccentGold,
                                             modifier = Modifier.size(18.dp)
@@ -442,7 +461,7 @@ fun HomeScreen(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        imageVector = Icons.Default.Tv,
+                        imageVector = Icons.Outlined.LiveTv,
                         contentDescription = null,
                         tint = TextSecondary,
                         modifier = Modifier.size(24.dp)
@@ -461,6 +480,7 @@ fun HomeScreen(
                 epgMap = epgMap,
                 iptvManager = iptvManager,
                 nowMs = nowMs,
+                entryFocusRequester = if (recentPosters.isEmpty() && favorites.isEmpty()) entryFocusRequester else null,
                 onPlayChannel = onPlayChannel
             )
         }
@@ -531,6 +551,7 @@ private fun GoogleTvLiveGuide(
     epgMap: Map<String, List<EpgProgram>>,
     iptvManager: IptvManager,
     nowMs: Long,
+    entryFocusRequester: FocusRequester? = null,
     onPlayChannel: (IptvChannel) -> Unit
 ) {
     val totalWindowMs = 75 * 60_000L // 1h 15m visible window matching Google TV
@@ -603,11 +624,11 @@ private fun GoogleTvLiveGuide(
                         .fillMaxHeight()
                 ) {
                     val widthDp = maxWidth
-                    // Current RED time label right next to the red dot
+                    // Current Amber-Orange time label right next to the live dot
                     Text(
                         text = nowTimeStr,
                         style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold),
-                        color = Color(0xFFFF3D57),
+                        color = AccentOrange,
                         modifier = Modifier
                             .offset(x = widthDp * nowFraction + 8.dp)
                             .align(Alignment.CenterStart)
@@ -628,7 +649,7 @@ private fun GoogleTvLiveGuide(
             }
 
             // Channel Rows (single focusable unit per channel row)
-            favoriteChannels.forEach { channel ->
+            favoriteChannels.forEachIndexed { channelIdx, channel ->
                 val progs = remember(channel, epgMap) {
                     iptvManager.getProgramsForChannel(channel)
                 }
@@ -653,6 +674,11 @@ private fun GoogleTvLiveGuide(
                             width = if (isRowFocused) 2.dp else 1.dp,
                             color = if (isRowFocused) FocusBorder else Color.Transparent,
                             shape = RoundedCornerShape(14.dp)
+                        )
+                        .then(
+                            if (channelIdx == 0 && entryFocusRequester != null) {
+                                Modifier.focusRequester(entryFocusRequester)
+                            } else Modifier
                         )
                         .clickable(
                             interactionSource = rowInteractionSource,
@@ -733,7 +759,7 @@ private fun GoogleTvLiveGuide(
             }
         }
 
-        // Red vertical NOW indicator line across the entire timeline
+        // Amber-Orange vertical NOW indicator line across the entire timeline
         Row(
             modifier = Modifier
                 .matchParentSize()
@@ -746,15 +772,15 @@ private fun GoogleTvLiveGuide(
                     .fillMaxHeight()
             ) {
                 val nowX = maxWidth * nowFraction
-                // Top Red Circle Dot
+                // Top Amber Circle Dot
                 Box(
                     modifier = Modifier
                         .offset(x = nowX - 3.5.dp, y = 0.dp)
                         .size(7.dp)
                         .clip(CircleShape)
-                        .background(Color(0xFFFF3D57))
+                        .background(AccentOrange)
                 )
-                // Continuous Vertical Red Line
+                // Continuous Vertical Amber-Orange Line
                 Box(
                     modifier = Modifier
                         .offset(x = nowX - 0.75.dp, y = 4.dp)
@@ -763,9 +789,9 @@ private fun GoogleTvLiveGuide(
                         .background(
                             Brush.verticalGradient(
                                 colors = listOf(
-                                    Color(0xFFFF3D57),
-                                    Color(0xEEFF3D57),
-                                    Color(0x33FF3D57)
+                                    AccentOrange,
+                                    AccentOrange.copy(alpha = 0.85f),
+                                    AccentOrange.copy(alpha = 0.2f)
                                 )
                             )
                         )

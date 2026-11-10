@@ -14,6 +14,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -64,6 +65,7 @@ private enum class UrlEditTarget {
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
+    enterSectionTrigger: Int = 0,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -72,6 +74,16 @@ fun SettingsScreen(
     val discovery = remember { SsdpDiscovery(context) }
     val updateManager = remember { UpdateManager(context) }
     val currentVersion = remember { getCurrentAppVersion(context) }
+    val entryFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(enterSectionTrigger) {
+        if (enterSectionTrigger > 0) {
+            delay(50)
+            try {
+                entryFocusRequester.requestFocus()
+            } catch (_: Exception) {}
+        }
+    }
 
     val connectedUpnpDevice by serverConfigManager.connectedUpnpDevice.collectAsState()
 
@@ -203,7 +215,7 @@ fun SettingsScreen(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 32.dp, vertical = 24.dp)
+            .padding(start = 32.dp, end = 32.dp, top = 30.dp, bottom = 24.dp)
     ) {
         Text(
             text = "Настройки",
@@ -248,7 +260,7 @@ fun SettingsScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Folder,
+                            imageVector = Icons.Outlined.FolderOpen,
                             contentDescription = null,
                             tint = if (connectedUpnpDevice != null) AccentCyan else TextSecondary
                         )
@@ -290,6 +302,7 @@ fun SettingsScreen(
                             modifier = Modifier
                                 .width(150.dp)
                                 .height(44.dp)
+                                .focusRequester(entryFocusRequester)
                         ) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Text(
@@ -310,7 +323,7 @@ fun SettingsScreen(
                                 .height(44.dp)
                         ) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text(text = "Отключить", color = Color(0xFFFF5252), style = MaterialTheme.typography.bodyMedium)
+                                Text(text = "Отключить", color = AccentOrange, style = MaterialTheme.typography.bodyMedium)
                             }
                         }
                     }
@@ -369,7 +382,7 @@ fun SettingsScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(Icons.Default.Folder, contentDescription = null, tint = AccentCyan)
+                                        Icon(Icons.Outlined.FolderOpen, contentDescription = null, tint = AccentCyan)
                                         Spacer(modifier = Modifier.width(16.dp))
                                         Column {
                                             Text(text = device.friendlyName, style = MaterialTheme.typography.titleMedium, color = TextPrimary)
@@ -395,6 +408,7 @@ fun SettingsScreen(
                         modifier = Modifier
                             .width(220.dp)
                             .height(48.dp)
+                            .then(if (connectedUpnpDevice == null) Modifier.focusRequester(entryFocusRequester) else Modifier)
                     ) {
                         Row(
                             modifier = Modifier.fillMaxSize(),
@@ -404,7 +418,7 @@ fun SettingsScreen(
                             if (isScanningUpnp) {
                                 CircularProgressIndicator(modifier = Modifier.size(18.dp), color = AccentCyan, strokeWidth = 2.dp)
                             } else {
-                                Icon(Icons.Default.Refresh, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
+                                Icon(Icons.Outlined.Refresh, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
                             }
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(text = if (isScanningUpnp) "Поиск..." else "Обновить список", style = MaterialTheme.typography.bodyMedium)
@@ -473,10 +487,10 @@ fun SettingsScreen(
                             }
                             Spacer(modifier = Modifier.width(10.dp))
                             Icon(
-                                imageVector = Icons.Default.Edit,
+                                imageVector = Icons.Outlined.Edit,
                                 contentDescription = "Редактировать",
                                 tint = AccentCyan,
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }
@@ -523,7 +537,7 @@ fun SettingsScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.Folder,
+                                    imageVector = Icons.Outlined.FolderOpen,
                                     contentDescription = null,
                                     tint = AccentCyan,
                                     modifier = Modifier.size(22.dp)
@@ -585,10 +599,10 @@ fun SettingsScreen(
                             }
                             Spacer(modifier = Modifier.width(10.dp))
                             Icon(
-                                imageVector = Icons.Default.Edit,
+                                imageVector = Icons.Outlined.Edit,
                                 contentDescription = "Редактировать",
                                 tint = AccentCyan,
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }
@@ -642,13 +656,13 @@ fun SettingsScreen(
                                 !isEpgError
 
                             val statusIcon = when {
-                                isEpgFresh -> Icons.Default.CheckCircle
-                                isEpgError -> Icons.Default.Warning
-                                else -> Icons.Default.Refresh
+                                isEpgFresh -> Icons.Outlined.CheckCircle
+                                isEpgError -> Icons.Outlined.WarningAmber
+                                else -> Icons.Outlined.Refresh
                             }
                             val statusColor = when {
                                 isEpgFresh -> StatusSuccess
-                                isEpgError -> RedAccent
+                                isEpgError -> AccentOrange
                                 iptvEpgInput.isBlank() -> TextSecondary
                                 else -> AccentCyan
                             }
@@ -710,7 +724,7 @@ fun SettingsScreen(
                     Text(
                         text = iptvStatusMessage ?: "",
                         style = MaterialTheme.typography.bodySmall,
-                        color = Color(0xFFFF5252),
+                        color = AccentOrange,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(top = 2.dp)
@@ -748,10 +762,10 @@ fun SettingsScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        imageVector = Icons.Default.SystemUpdate,
+                        imageVector = Icons.Outlined.SystemUpdate,
                         contentDescription = null,
                         tint = AccentCyan,
-                        modifier = Modifier.size(32.dp)
+                        modifier = Modifier.size(30.dp)
                     )
                     Spacer(modifier = Modifier.width(16.dp))
                     Column {
@@ -787,7 +801,7 @@ fun SettingsScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = when (updateUiState) {
                                 is UpdateUiState.Available -> AccentCyan
-                                is UpdateUiState.Error -> Color(0xFFFF5252)
+                                is UpdateUiState.Error -> AccentOrange
                                 else -> TextSecondary
                             }
                         )
@@ -904,15 +918,15 @@ fun SettingsScreen(
                                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                                         ) {
                                             Icon(
-                                                imageVector = Icons.Default.CheckCircle,
+                                                imageVector = Icons.Outlined.CheckCircle,
                                                 contentDescription = null,
-                                                tint = StatusSuccess,
+                                                tint = AccentCyanBright,
                                                 modifier = Modifier.size(18.dp)
                                             )
                                             Text(
                                                 text = "Установка",
                                                 style = MaterialTheme.typography.bodyMedium,
-                                                color = StatusSuccess,
+                                                color = AccentCyanBright,
                                                 fontWeight = FontWeight.Bold
                                             )
                                         }
@@ -1249,7 +1263,7 @@ fun SettingsScreen(
                                     .height(44.dp)
                             ) {
                                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    Text("Очистить", style = MaterialTheme.typography.bodyMedium, color = Color(0xFFFF5252))
+                                    Text("Очистить", style = MaterialTheme.typography.bodyMedium, color = AccentOrange)
                                 }
                             }
                         }

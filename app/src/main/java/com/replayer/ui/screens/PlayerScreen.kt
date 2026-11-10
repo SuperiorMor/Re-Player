@@ -23,17 +23,17 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Audiotrack
-import androidx.compose.material.icons.filled.ClosedCaption
-import androidx.compose.material.icons.filled.Forward10
-import androidx.compose.material.icons.filled.MenuBook
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Replay10
-import androidx.compose.material.icons.filled.SkipNext
-import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.outlined.Audiotrack
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.ClosedCaption
+import androidx.compose.material.icons.outlined.EventNote
+import androidx.compose.material.icons.outlined.Pause
+import androidx.compose.material.icons.outlined.SkipNext
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -46,12 +46,15 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -70,8 +73,11 @@ import com.replayer.model.SubtitleTrackInfo
 import com.replayer.player.RePlayerEngine
 import com.replayer.ui.components.TvFocusCard
 import com.replayer.ui.theme.*
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlin.math.abs
 
 @Composable
 fun PlayerScreen(
@@ -86,11 +92,23 @@ fun PlayerScreen(
     val playerState by engine.playerState.collectAsState()
 
     var showControls by remember { mutableStateOf(true) }
-    var showAudioDialog by remember { mutableStateOf(false) }
-    var showSubtitleDialog by remember { mutableStateOf(false) }
+    var showTracksDialog by remember { mutableStateOf(false) }
     var showEpgDialog by remember { mutableStateOf(false) }
     var osdFeedback by remember { mutableStateOf<String?>(null) }
     var lastInteractionTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
+
+    val scope = rememberCoroutineScope()
+    var isSeekScrubbing by remember { mutableStateOf(false) }
+    var activeScrubTargetMs by remember { mutableLongStateOf(-1L) }
+    var pendingCommitTargetMs by remember { mutableLongStateOf(-1L) }
+    var displaySeekDeltaMs by remember { mutableLongStateOf(0L) }
+    var lastSeekDir by remember { mutableIntStateOf(0) }
+    var lastSeekStepTimeMs by remember { mutableLongStateOf(0L) }
+    var consecutiveSeekTicks by remember { mutableIntStateOf(0) }
+    var seekCommitJob by remember { mutableStateOf<Job?>(null) }
+    var seekFadeJob by remember { mutableStateOf<Job?>(null) }
+    var liveWatermarkVisible by remember { mutableStateOf(false) }
+    var liveWatermarkJob by remember { mutableStateOf<Job?>(null) }
 
     val isIptv = mediaItem.sourceType == MediaSourceType.IPTV
     val iptvManager = remember { IptvManager.getInstance(context) }
@@ -124,6 +142,99 @@ fun PlayerScreen(
             engine.play(mediaItem.copy(title = "${fullChannel.name} • ${prog.title}", uri = archiveUrl))
         } else {
             osdFeedback = "Архив недоступен для этого канала"
+        }
+    }
+
+    fun showLiveWatermark() {
+        liveWatermarkVisible = true
+        liveWatermarkJob?.cancel()
+        liveWatermarkJob = scope.launch {
+            delay(1350)
+            liveWatermarkVisible = false
+        }
+    }
+
+    fun commitScrubIfPending() {
+        val target = pendingCommitTargetMs
+        if (target < 0L) return
+        pendingCommitTargetMs = -1L
+        seekCommitJob?.cancel()
+        engine.seekTo(target)
+        seekFadeJob?.cancel()
+        seekFadeJob = scope.launch {
+            delay(950)
+            isSeekScrubbing = false
+            displaySeekDeltaMs = 0L
+            activeScrubTargetMs = -1L
+        }
+    }
+
+    fun handleScrubStep(dir: Int, repeatCount: Int) {
+        if (isIptv && playingArchiveProgram == null) {
+            if (dir > 0) {
+                if (showControls) {
+                    osdFeedback = "Прямой эфир"
+                } else {
+                    showLiveWatermark()
+                }
+            } else if (repeatCount == 0) {
+                val cur = currentProgram
+                if (fullChannel.hasArchive && cur != null) {
+                    playArchiveProgram(cur)
+                } else {
+                    osdFeedback = "Архив недоступен для этого канала"
+                }
+            }
+            return
+        }
+
+        val nowMs = System.currentTimeMillis()
+        val tickCount = if (repeatCount > 0) {
+            repeatCount
+        } else {
+            if (lastSeekDir == dir && (nowMs - lastSeekStepTimeMs) < 650L) {
+                consecutiveSeekTicks + 1
+            } else {
+                0
+            }
+        }
+        lastSeekDir = dir
+        lastSeekStepTimeMs = nowMs
+        consecutiveSeekTicks = tickCount
+
+        val stepMs = when {
+            tickCount <= 3 -> 15_000L
+            tickCount <= 7 -> 30_000L
+            tickCount <= 12 -> 60_000L
+            else -> 120_000L
+        }
+
+        val maxDur = if (playingArchiveProgram != null) {
+            val archDur = (playingArchiveProgram!!.endTime - playingArchiveProgram!!.startTime).coerceAtLeast(0L)
+            maxOf(playerState.durationMs, archDur)
+        } else {
+            playerState.durationMs
+        }
+
+        val currentBase = if (isSeekScrubbing && activeScrubTargetMs >= 0L) {
+            activeScrubTargetMs
+        } else {
+            playerState.currentPositionMs.coerceAtLeast(0L)
+        }
+        val rawTarget = (currentBase + dir * stepMs).coerceAtLeast(0L)
+        val clampedTarget = if (maxDur > 0L) rawTarget.coerceAtMost(maxDur) else rawTarget
+        val actualStep = clampedTarget - currentBase
+
+        activeScrubTargetMs = clampedTarget
+        pendingCommitTargetMs = clampedTarget
+        displaySeekDeltaMs += actualStep
+        isSeekScrubbing = true
+
+        seekFadeJob?.cancel()
+        seekCommitJob?.cancel()
+        seekCommitJob = scope.launch {
+            delay(280)
+            commitScrubIfPending()
         }
     }
 
@@ -165,6 +276,14 @@ fun PlayerScreen(
     // Trigger playback whenever mediaItem switches (initial file, next episode, etc.)
     LaunchedEffect(mediaItem.id, mediaItem.uri) {
         playingArchiveProgram = null
+        seekCommitJob?.cancel()
+        seekFadeJob?.cancel()
+        liveWatermarkJob?.cancel()
+        isSeekScrubbing = false
+        activeScrubTargetMs = -1L
+        pendingCommitTargetMs = -1L
+        displaySeekDeltaMs = 0L
+        liveWatermarkVisible = false
         if (!isIptv) {
             recentManager.addRecent(
                 id = mediaItem.id,
@@ -198,18 +317,18 @@ fun PlayerScreen(
     }
 
     // Auto-hide TV controls after 5 seconds of inactivity (PAUSED if any dialog is open!)
-    LaunchedEffect(showControls, lastInteractionTime, showAudioDialog, showSubtitleDialog, showEpgDialog) {
-        if (showControls && !showAudioDialog && !showSubtitleDialog && !showEpgDialog) {
+    LaunchedEffect(showControls, lastInteractionTime, showTracksDialog, showEpgDialog) {
+        if (showControls && !showTracksDialog && !showEpgDialog) {
             delay(5000)
             showControls = false
         }
     }
 
     // Focus management: when controls are shown, focus play button; when hidden, focus root box
-    LaunchedEffect(showControls, showAudioDialog, showSubtitleDialog, showEpgDialog) {
+    LaunchedEffect(showControls, showTracksDialog, showEpgDialog) {
         delay(100)
         try {
-            if (!showAudioDialog && !showSubtitleDialog && !showEpgDialog) {
+            if (!showTracksDialog && !showEpgDialog) {
                 if (showControls) playButtonFocusRequester.requestFocus() else rootFocusRequester.requestFocus()
             }
         } catch (_: Exception) {}
@@ -217,7 +336,7 @@ fun PlayerScreen(
 
     LaunchedEffect(osdFeedback) {
         if (osdFeedback != null) {
-            delay(3000)
+            delay(2800)
             osdFeedback = null
         }
     }
@@ -226,9 +345,8 @@ fun PlayerScreen(
         if (showEpgDialog) {
             showEpgDialog = false
             lastInteractionTime = System.currentTimeMillis()
-        } else if (showAudioDialog || showSubtitleDialog) {
-            showAudioDialog = false
-            showSubtitleDialog = false
+        } else if (showTracksDialog) {
+            showTracksDialog = false
             lastInteractionTime = System.currentTimeMillis()
         } else if (showControls) {
             showControls = false
@@ -245,7 +363,7 @@ fun PlayerScreen(
             .fillMaxSize()
             .background(Color.Black)
             .focusRequester(rootFocusRequester)
-            .focusable(enabled = !showControls && !showAudioDialog && !showSubtitleDialog && !showEpgDialog)
+            .focusable(enabled = !showControls && !showTracksDialog && !showEpgDialog)
             .onPreviewKeyEvent { keyEvent ->
                 if (keyEvent.type == KeyEventType.KeyDown && showControls) {
                     lastInteractionTime = System.currentTimeMillis()
@@ -255,9 +373,8 @@ fun PlayerScreen(
                         showEpgDialog = false
                         lastInteractionTime = System.currentTimeMillis()
                         return@onPreviewKeyEvent true
-                    } else if (showAudioDialog || showSubtitleDialog) {
-                        showAudioDialog = false
-                        showSubtitleDialog = false
+                    } else if (showTracksDialog) {
+                        showTracksDialog = false
                         lastInteractionTime = System.currentTimeMillis()
                         return@onPreviewKeyEvent true
                     } else if (showControls) {
@@ -274,17 +391,15 @@ fun PlayerScreen(
                 false
             }
             .onKeyEvent { keyEvent ->
-                if (keyEvent.type == KeyEventType.KeyDown) {
-                    if (!showControls) {
+                if (!showControls) {
+                    if (keyEvent.type == KeyEventType.KeyDown) {
                         when (keyEvent.key) {
                             Key.DirectionRight -> {
-                                // 10s forward without showing controls
-                                engine.seekRelative(10000)
+                                handleScrubStep(dir = 1, repeatCount = keyEvent.nativeKeyEvent.repeatCount)
                                 true
                             }
                             Key.DirectionLeft -> {
-                                // 10s back without showing controls
-                                engine.seekRelative(-10000)
+                                handleScrubStep(dir = -1, repeatCount = keyEvent.nativeKeyEvent.repeatCount)
                                 true
                             }
                             Key.DirectionCenter, Key.Enter,
@@ -297,11 +412,20 @@ fun PlayerScreen(
                             }
                             else -> false
                         }
+                    } else if (keyEvent.type == KeyEventType.KeyUp &&
+                        (keyEvent.key == Key.DirectionLeft || keyEvent.key == Key.DirectionRight)
+                    ) {
+                        commitScrubIfPending()
+                        true
                     } else {
-                        lastInteractionTime = System.currentTimeMillis()
                         false
                     }
-                } else false
+                } else {
+                    if (keyEvent.type == KeyEventType.KeyDown) {
+                        lastInteractionTime = System.currentTimeMillis()
+                    }
+                    false
+                }
             }
     ) {
         // Video Surface via LibVLC
@@ -325,41 +449,139 @@ fun PlayerScreen(
                 }
         )
 
-        // OSD Toast / Feedback overlay
+        // Minimalist Transparent Seek Watermark (without controls or timeline)
         AnimatedVisibility(
-            visible = osdFeedback != null,
-            enter = fadeIn(),
-            exit = fadeOut(),
+            visible = isSeekScrubbing && !showControls && !showTracksDialog && !showEpgDialog,
+            enter = fadeIn(tween(120)),
+            exit = fadeOut(tween(240)),
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .padding(top = 80.dp)
+                .padding(top = 64.dp)
         ) {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(SurfaceDark.copy(alpha = 0.94f))
-                    .border(1.5.dp, FocusBorder.copy(alpha = 0.7f), RoundedCornerShape(14.dp))
-                    .padding(horizontal = 24.dp, vertical = 12.dp)
-            ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                val isForward = lastSeekDir >= 0
+                val deltaLabel = if (displaySeekDeltaMs != 0L) {
+                    formatSignedSeekDelta(displaySeekDeltaMs)
+                } else {
+                    if (isForward) "+0:00" else "-0:00"
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = if (isForward) "$deltaLabel  ››" else "‹‹  $deltaLabel",
+                        style = MaterialTheme.typography.displayLarge.copy(
+                            fontSize = 34.sp,
+                            fontWeight = FontWeight.Bold,
+                            shadow = Shadow(
+                                color = Color(0x99000000),
+                                offset = Offset(0f, 2f),
+                                blurRadius = 14f
+                            )
+                        ),
+                        color = if (isForward) AccentCyanBright.copy(alpha = 0.78f) else AccentOrange.copy(alpha = 0.80f)
+                    )
+                }
+                if (activeScrubTargetMs >= 0L) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    val targetSub = if (!isIptv && playerState.durationMs > 0L) {
+                        "${formatTime(activeScrubTargetMs)}  /  ${formatTime(playerState.durationMs)}"
+                    } else {
+                        formatTime(activeScrubTargetMs)
+                    }
+                    Text(
+                        text = targetSub,
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            shadow = Shadow(
+                                color = Color(0x99000000),
+                                offset = Offset(0f, 1f),
+                                blurRadius = 10f
+                            )
+                        ),
+                        color = Color.White.copy(alpha = 0.56f)
+                    )
+                }
+            }
+        }
+
+        // Faint Transparent "ЭФИР" Watermark when trying to fast-forward Live TV
+        AnimatedVisibility(
+            visible = liveWatermarkVisible && !showControls && !isSeekScrubbing,
+            enter = fadeIn(tween(150)),
+            exit = fadeOut(tween(320)),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 74.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(7.dp)
+                        .clip(CircleShape)
+                        .background(AccentCyanBright.copy(alpha = 0.55f))
+                )
+                Spacer(modifier = Modifier.width(10.dp))
                 Text(
-                    text = osdFeedback ?: "",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = AccentCyanBright
+                    text = "ЭФИР",
+                    style = MaterialTheme.typography.displayLarge.copy(
+                        fontSize = 28.sp,
+                        letterSpacing = 3.sp,
+                        fontWeight = FontWeight.Bold,
+                        shadow = Shadow(
+                            color = Color(0x88000000),
+                            offset = Offset(0f, 2f),
+                            blurRadius = 12f
+                        )
+                    ),
+                    color = Color.White.copy(alpha = 0.42f)
                 )
             }
         }
 
+        // Large Transparent Cover-Style Informational Warnings (no heavy card box)
+        AnimatedVisibility(
+            visible = osdFeedback != null && !isSeekScrubbing,
+            enter = fadeIn(tween(160)),
+            exit = fadeOut(tween(300)),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 74.dp, start = 48.dp, end = 48.dp)
+        ) {
+            Text(
+                text = osdFeedback ?: "",
+                style = MaterialTheme.typography.displayLarge.copy(
+                    fontSize = 26.sp,
+                    fontWeight = FontWeight.Bold,
+                    shadow = Shadow(
+                        color = Color(0xAA000000),
+                        offset = Offset(0f, 2f),
+                        blurRadius = 14f
+                    )
+                ),
+                color = Color.White.copy(alpha = 0.64f),
+                textAlign = TextAlign.Center,
+                maxLines = 2
+            )
+        }
+
         // TV On-Screen Display (OSD) Overlay
         AnimatedVisibility(
-            visible = showControls && !showAudioDialog && !showSubtitleDialog && !showEpgDialog,
+            visible = showControls && !showTracksDialog && !showEpgDialog,
             enter = fadeIn(),
             exit = fadeOut()
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color(0xB3000000))
-                    .padding(horizontal = 48.dp, vertical = 36.dp)
+                    .background(
+                        Brush.verticalGradient(
+                            0.0f to Color(0x8804060A),
+                            0.24f to Color.Transparent,
+                            0.56f to Color.Transparent,
+                            1.0f to Color(0xE006080E)
+                        )
+                    )
+                    .padding(horizontal = 48.dp, vertical = 32.dp)
             ) {
                 // Top Bar: Title & Source & Active Audio Track
                 Column(modifier = Modifier.align(Alignment.TopStart)) {
@@ -375,27 +597,33 @@ fun PlayerScreen(
                         Text(
                             text = "Источник: ${mediaItem.sourceType.name}$audioInfo",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = AccentCyan
+                            color = AccentCyanBright
                         )
                     }
                 }
 
-                // Bottom Controls: Progress & Audio/Subtitle selection buttons
+                // Bottom Controls: Sleek thin timeline & control pills
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .align(Alignment.BottomCenter)
                 ) {
+                    val displayedPosMs = if (isSeekScrubbing && activeScrubTargetMs >= 0L) {
+                        activeScrubTargetMs
+                    } else {
+                        playerState.currentPositionMs
+                    }
+
                     // Time Labels & Interactive Seek Bar / IPTV EPG Timebar
                     if (isIptv) {
                         val displayProg = playingArchiveProgram ?: currentProgram
                         val progFraction = if (playingArchiveProgram != null) {
                             val arch = playingArchiveProgram!!
                             val archDurMs = (arch.endTime - arch.startTime).coerceAtLeast(1L)
-                            if (playerState.currentPositionMs in 1L..(archDurMs + 60_000L)) {
-                                (playerState.currentPositionMs.toFloat() / archDurMs.toFloat()).coerceIn(0f, 1f)
-                            } else if (playerState.durationMs > 0L && playerState.currentPositionMs > 0L) {
-                                (playerState.currentPositionMs.toFloat() / playerState.durationMs.toFloat()).coerceIn(0f, 1f)
+                            if (displayedPosMs in 1L..(archDurMs + 60_000L)) {
+                                (displayedPosMs.toFloat() / archDurMs.toFloat()).coerceIn(0f, 1f)
+                            } else if (playerState.durationMs > 0L && displayedPosMs > 0L) {
+                                (displayedPosMs.toFloat() / playerState.durationMs.toFloat()).coerceIn(0f, 1f)
                             } else {
                                 0f
                             }
@@ -412,21 +640,27 @@ fun PlayerScreen(
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(6.dp))
                                             .background(
-                                                if (playingArchiveProgram != null) AccentOrange.copy(alpha = 0.2f)
-                                                else AccentCyan.copy(alpha = 0.18f)
+                                                if (playingArchiveProgram != null) AccentOrange.copy(alpha = 0.14f)
+                                                else AccentCyan.copy(alpha = 0.14f)
+                                            )
+                                            .border(
+                                                0.75.dp,
+                                                if (playingArchiveProgram != null) AccentOrange.copy(alpha = 0.5f)
+                                                else AccentCyan.copy(alpha = 0.5f),
+                                                RoundedCornerShape(6.dp)
                                             )
                                             .padding(horizontal = 8.dp, vertical = 2.dp)
                                     ) {
                                         Text(
                                             text = if (playingArchiveProgram != null) "АРХИВ" else "В ЭФИРЕ",
-                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
                                             color = if (playingArchiveProgram != null) AccentOrange else AccentCyanBright
                                         )
                                     }
                                     Spacer(modifier = Modifier.width(10.dp))
                                     Text(
                                         text = displayProg.title,
-                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                                         color = TextPrimary,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
@@ -439,7 +673,7 @@ fun PlayerScreen(
                             ) {
                                 Text(
                                     text = displayProg?.formattedStartTime() ?: "В эфире",
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                                     color = AccentCyanBright
                                 )
 
@@ -450,25 +684,12 @@ fun PlayerScreen(
                                     isArchiveMode = playingArchiveProgram != null,
                                     focusRequester = timelineFocusRequester,
                                     downFocusRequester = playButtonFocusRequester,
-                                    onSeekLeft = {
-                                        if (playingArchiveProgram != null) {
-                                            engine.seekRelative(-10000)
-                                            osdFeedback = "⏪ -10 сек"
-                                        } else if (fullChannel.hasArchive && currentProgram != null) {
-                                            playArchiveProgram(currentProgram!!)
-                                        } else {
-                                            osdFeedback = "Архив недоступен в прямом эфире"
-                                        }
+                                    onScrubStep = { dir, repeat ->
                                         lastInteractionTime = System.currentTimeMillis()
+                                        handleScrubStep(dir, repeat)
                                     },
-                                    onSeekRight = {
-                                        if (playingArchiveProgram != null) {
-                                            engine.seekRelative(10000)
-                                            osdFeedback = "⏩ +10 сек"
-                                        } else {
-                                            osdFeedback = "Сейчас прямой эфир"
-                                        }
-                                        lastInteractionTime = System.currentTimeMillis()
+                                    onScrubRelease = {
+                                        commitScrubIfPending()
                                     },
                                     onOpenSchedule = {
                                         showEpgDialog = true
@@ -492,22 +713,24 @@ fun PlayerScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = formatTime(playerState.currentPositionMs),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = TextPrimary
+                                text = formatTime(displayedPosMs),
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = if (isSeekScrubbing) AccentCyanBright else TextPrimary
                             )
 
                             Spacer(modifier = Modifier.width(16.dp))
 
-                            // Interactive Focusable Timeline Seek Bar
                             TvTimelineBar(
-                                currentPositionMs = playerState.currentPositionMs,
+                                currentPositionMs = displayedPosMs,
                                 durationMs = playerState.durationMs,
                                 focusRequester = timelineFocusRequester,
                                 downFocusRequester = playButtonFocusRequester,
-                                onSeekRelative = { delta ->
-                                    engine.seekRelative(delta)
+                                onScrubStep = { dir, repeat ->
                                     lastInteractionTime = System.currentTimeMillis()
+                                    handleScrubStep(dir, repeat)
+                                },
+                                onScrubRelease = {
+                                    commitScrubIfPending()
                                 },
                                 modifier = Modifier.weight(1f)
                             )
@@ -522,9 +745,11 @@ fun PlayerScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(20.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
 
-                    // Buttons Row for TV Remote — locked vertically (timeline up, cancel down) & horizontally on edges
+                    // Sleek Thin Player Control Bar
+                    // DLNA: [ Play/Pause (Gradient) ] [ Next File ] [ Audio & Subtitles ]
+                    // TV:   [ Play/Pause (Gradient) ] [ Audio & Subtitles ] [ Schedule ] [ Эфир ]
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -535,62 +760,12 @@ fun PlayerScreen(
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        if (!isIptv) {
-                            TvPlayerIconButton(
-                                icon = Icons.Default.Replay10,
-                                contentDescription = "Назад на 10 сек",
-                                modifier = Modifier.focusProperties {
-                                    left = FocusRequester.Cancel
-                                    up = timelineFocusRequester
-                                    down = FocusRequester.Cancel
-                                },
-                                onClick = {
-                                    engine.seekRelative(-10000)
-                                    lastInteractionTime = System.currentTimeMillis()
-                                }
-                            )
-
-                            Spacer(modifier = Modifier.width(20.dp))
-                        } else {
-                            // IPTV: Switch to previous program in archive
-                            TvPlayerIconButton(
-                                icon = Icons.Default.SkipPrevious,
-                                contentDescription = "Предыдущая передача",
-                                modifier = Modifier.focusProperties {
-                                    left = FocusRequester.Cancel
-                                    up = timelineFocusRequester
-                                    down = FocusRequester.Cancel
-                                },
-                                onClick = {
-                                    val now = System.currentTimeMillis()
-                                    val anchor = playingArchiveProgram ?: currentProgram
-                                    val anchorIdx = if (anchor != null) {
-                                        channelSchedule.indexOfFirst { it.startTime == anchor.startTime }
-                                    } else {
-                                        channelSchedule.indexOfFirst { it.isCurrent(now) }
-                                    }
-                                    val prevProg = when {
-                                        anchorIdx > 0 -> channelSchedule[anchorIdx - 1]
-                                        else -> channelSchedule.lastOrNull { it.isPast(now) }
-                                    }
-
-                                    if (prevProg != null) {
-                                        playArchiveProgram(prevProg)
-                                    } else {
-                                        osdFeedback = "Предыдущая передача не найдена"
-                                    }
-                                    lastInteractionTime = System.currentTimeMillis()
-                                }
-                            )
-
-                            Spacer(modifier = Modifier.width(20.dp))
-                        }
-
-                        TvPlayerIconButton(
-                            icon = if (playerState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = if (playerState.isPlaying) "Пауза" else "Воспроизведение",
+                        // Primary Centerpiece: Play / Pause (Cyan -> Gold -> Orange accent)
+                        TvPrimaryPlayButton(
+                            isPlaying = playerState.isPlaying,
                             focusRequester = playButtonFocusRequester,
                             modifier = Modifier.focusProperties {
+                                left = FocusRequester.Cancel
                                 up = timelineFocusRequester
                                 down = FocusRequester.Cancel
                             },
@@ -600,93 +775,84 @@ fun PlayerScreen(
                             }
                         )
 
+                        Spacer(modifier = Modifier.width(14.dp))
+
                         if (!isIptv) {
-                            Spacer(modifier = Modifier.width(20.dp))
-
-                            TvPlayerIconButton(
-                                icon = Icons.Default.Forward10,
-                                contentDescription = "Вперед на 10 сек",
-                                modifier = Modifier.focusProperties {
-                                    up = timelineFocusRequester
-                                    down = FocusRequester.Cancel
-                                },
-                                onClick = {
-                                    engine.seekRelative(10000)
-                                    lastInteractionTime = System.currentTimeMillis()
-                                }
-                            )
-
-                            Spacer(modifier = Modifier.width(20.dp))
-
-                            // Next Episode / File in folder
+                            // Next File in DLNA Folder
                             val currentFileIdx = playlist.indexOfFirst { it.id == mediaItem.id }
                             val nextFile = if (currentFileIdx in 0 until playlist.size - 1) playlist[currentFileIdx + 1] else null
-                            TvPlayerIconButton(
-                                icon = Icons.Default.SkipNext,
-                                contentDescription = "Следующая серия",
+                            TvPlayerPillButton(
+                                icon = Icons.Outlined.SkipNext,
+                                contentDescription = "Следующий файл",
                                 modifier = Modifier.focusProperties {
                                     up = timelineFocusRequester
                                     down = FocusRequester.Cancel
                                 },
                                 onClick = {
                                     if (nextFile != null) {
-                                        osdFeedback = "Следующая серия: ${nextFile.title}"
+                                        osdFeedback = "Следующий файл: ${nextFile.title}"
                                         onPlayMediaItem?.invoke(nextFile)
                                     } else {
-                                        osdFeedback = "Следующая серия отсутствует"
+                                        osdFeedback = "Следующий файл отсутствует"
                                     }
                                     lastInteractionTime = System.currentTimeMillis()
                                 }
                             )
+
+                            Spacer(modifier = Modifier.width(14.dp))
                         }
 
-                        Spacer(modifier = Modifier.width(36.dp))
-
-                        // Audio Track Selector Button
-                        TvPlayerIconButton(
-                            icon = Icons.Default.Audiotrack,
-                            contentDescription = "Аудиодорожки",
-                            modifier = Modifier.focusProperties {
-                                up = timelineFocusRequester
-                                down = FocusRequester.Cancel
-                            },
-                            onClick = {
-                                showAudioDialog = true
-                                lastInteractionTime = System.currentTimeMillis()
-                            }
-                        )
-
-                        Spacer(modifier = Modifier.width(16.dp))
-
-                        // Subtitle Track Selector Button (rightmost edge when !isIptv)
-                        TvPlayerIconButton(
-                            icon = Icons.Default.ClosedCaption,
-                            contentDescription = "Субтитры",
+                        // Unified Audio & Subtitles Button
+                        TvPlayerDualIconButton(
+                            leftIcon = Icons.Outlined.Audiotrack,
+                            rightIcon = Icons.Outlined.ClosedCaption,
+                            contentDescription = "Аудиодорожки и субтитры",
                             modifier = Modifier.focusProperties {
                                 up = timelineFocusRequester
                                 down = FocusRequester.Cancel
                                 if (!isIptv) right = FocusRequester.Cancel
                             },
                             onClick = {
-                                showSubtitleDialog = true
+                                showTracksDialog = true
                                 lastInteractionTime = System.currentTimeMillis()
                             }
                         )
 
                         if (isIptv) {
-                            Spacer(modifier = Modifier.width(16.dp))
+                            Spacer(modifier = Modifier.width(14.dp))
 
-                            // EPG Schedule Button (rightmost edge when isIptv)
-                            TvPlayerIconButton(
-                                icon = Icons.Default.MenuBook,
-                                contentDescription = "Телепрограмма и архив",
+                            // EPG Schedule Button
+                            TvPlayerPillButton(
+                                icon = Icons.Outlined.EventNote,
+                                contentDescription = "Программа передач",
+                                modifier = Modifier.focusProperties {
+                                    up = timelineFocusRequester
+                                    down = FocusRequester.Cancel
+                                },
+                                onClick = {
+                                    showEpgDialog = true
+                                    lastInteractionTime = System.currentTimeMillis()
+                                }
+                            )
+
+                            Spacer(modifier = Modifier.width(14.dp))
+
+                            // Live TV ("Эфир") Pill Button: active when live, muted when watching archive
+                            TvLiveStatusButton(
+                                isLiveActive = (playingArchiveProgram == null),
                                 modifier = Modifier.focusProperties {
                                     up = timelineFocusRequester
                                     down = FocusRequester.Cancel
                                     right = FocusRequester.Cancel
                                 },
                                 onClick = {
-                                    showEpgDialog = true
+                                    if (playingArchiveProgram != null) {
+                                        playingArchiveProgram = null
+                                        engine.play(mediaItem)
+                                        osdFeedback = "Прямой эфир: ${fullChannel.name}"
+                                    } else {
+                                        osdFeedback = "Сейчас прямой эфир"
+                                    }
                                     lastInteractionTime = System.currentTimeMillis()
                                 }
                             )
@@ -696,31 +862,25 @@ fun PlayerScreen(
             }
         }
 
-        // Audio Track Selection Dialog
-        if (showAudioDialog) {
-            AudioTrackDialog(
-                tracks = playerState.audioTracks,
-                selectedId = playerState.selectedAudioTrackId,
-                onSelect = { track ->
+        // Unified Audio & Subtitles Popup
+        if (showTracksDialog) {
+            TrackSelectionDialog(
+                audioTracks = playerState.audioTracks,
+                selectedAudioId = playerState.selectedAudioTrackId,
+                subtitleTracks = playerState.subtitleTracks,
+                selectedSubtitleId = playerState.selectedSubtitleTrackId,
+                onSelectAudio = { track ->
                     engine.selectAudioTrack(track)
-                    showAudioDialog = false
                     lastInteractionTime = System.currentTimeMillis()
                 },
-                onDismiss = { showAudioDialog = false }
-            )
-        }
-
-        // Subtitle Track Selection Dialog
-        if (showSubtitleDialog) {
-            SubtitleTrackDialog(
-                tracks = playerState.subtitleTracks,
-                selectedId = playerState.selectedSubtitleTrackId,
-                onSelect = { track ->
+                onSelectSubtitle = { track ->
                     engine.selectSubtitleTrack(track)
-                    showSubtitleDialog = false
                     lastInteractionTime = System.currentTimeMillis()
                 },
-                onDismiss = { showSubtitleDialog = false }
+                onDismiss = {
+                    showTracksDialog = false
+                    lastInteractionTime = System.currentTimeMillis()
+                }
             )
         }
 
@@ -764,7 +924,8 @@ fun PlayerScreen(
 fun TvTimelineBar(
     currentPositionMs: Long,
     durationMs: Long,
-    onSeekRelative: (Long) -> Unit,
+    onScrubStep: (dir: Int, repeatCount: Int) -> Unit,
+    onScrubRelease: () -> Unit,
     modifier: Modifier = Modifier,
     focusRequester: FocusRequester? = null,
     downFocusRequester: FocusRequester? = null
@@ -774,8 +935,8 @@ fun TvTimelineBar(
         progress = progress,
         focusRequester = focusRequester,
         downFocusRequester = downFocusRequester,
-        onStepLeft = { onSeekRelative(-10000) },
-        onStepRight = { onSeekRelative(10000) },
+        onScrubStep = onScrubStep,
+        onScrubRelease = onScrubRelease,
         modifier = modifier
     )
 }
@@ -784,8 +945,8 @@ fun TvTimelineBar(
 fun TvIptvTimelineBar(
     progress: Float,
     isArchiveMode: Boolean,
-    onSeekLeft: () -> Unit,
-    onSeekRight: () -> Unit,
+    onScrubStep: (dir: Int, repeatCount: Int) -> Unit,
+    onScrubRelease: () -> Unit,
     onOpenSchedule: () -> Unit,
     modifier: Modifier = Modifier,
     focusRequester: FocusRequester? = null,
@@ -796,8 +957,8 @@ fun TvIptvTimelineBar(
         focusRequester = focusRequester,
         downFocusRequester = downFocusRequester,
         thumbBorderColor = if (isArchiveMode) AccentOrange else FocusBorder,
-        onStepLeft = onSeekLeft,
-        onStepRight = onSeekRight,
+        onScrubStep = onScrubStep,
+        onScrubRelease = onScrubRelease,
         onCenterClick = onOpenSchedule,
         modifier = modifier
     )
@@ -808,8 +969,8 @@ private fun TvScrubberTrack(
     progress: Float,
     focusRequester: FocusRequester?,
     downFocusRequester: FocusRequester?,
-    onStepLeft: () -> Unit,
-    onStepRight: () -> Unit,
+    onScrubStep: (dir: Int, repeatCount: Int) -> Unit,
+    onScrubRelease: () -> Unit,
     modifier: Modifier = Modifier,
     thumbBorderColor: Color = FocusBorder,
     onCenterClick: (() -> Unit)? = null
@@ -820,8 +981,13 @@ private fun TvScrubberTrack(
 
     BoxWithConstraints(
         modifier = modifier
-            .height(36.dp)
+            .height(30.dp)
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+            .onFocusChanged { state ->
+                if (!state.hasFocus) {
+                    onScrubRelease()
+                }
+            }
             .focusProperties {
                 up = FocusRequester.Cancel
                 left = FocusRequester.Cancel
@@ -831,25 +997,29 @@ private fun TvScrubberTrack(
                 }
             }
             .onKeyEvent { keyEvent ->
-                if (keyEvent.type == KeyEventType.KeyDown) {
-                    when (keyEvent.key) {
-                        Key.DirectionLeft -> {
-                            onStepLeft()
-                            true
+                when (keyEvent.key) {
+                    Key.DirectionLeft -> {
+                        when (keyEvent.type) {
+                            KeyEventType.KeyDown -> onScrubStep(-1, keyEvent.nativeKeyEvent.repeatCount)
+                            KeyEventType.KeyUp -> onScrubRelease()
                         }
-                        Key.DirectionRight -> {
-                            onStepRight()
-                            true
-                        }
-                        Key.DirectionCenter, Key.Enter -> {
-                            if (onCenterClick != null) {
-                                onCenterClick()
-                                true
-                            } else false
-                        }
-                        else -> false
+                        true
                     }
-                } else false
+                    Key.DirectionRight -> {
+                        when (keyEvent.type) {
+                            KeyEventType.KeyDown -> onScrubStep(1, keyEvent.nativeKeyEvent.repeatCount)
+                            KeyEventType.KeyUp -> onScrubRelease()
+                        }
+                        true
+                    }
+                    Key.DirectionCenter, Key.Enter -> {
+                        if (keyEvent.type == KeyEventType.KeyDown && onCenterClick != null) {
+                            onCenterClick()
+                            true
+                        } else false
+                    }
+                    else -> false
+                }
             }
             .then(
                 if (onCenterClick != null) {
@@ -865,19 +1035,14 @@ private fun TvScrubberTrack(
     ) {
         val totalWidth = maxWidth
 
-        // Background track bar
+        // Ultra-slim track (4dp unfocused -> 7dp focused)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(if (isFocused) 10.dp else 6.dp)
-                .clip(RoundedCornerShape(5.dp))
-                .background(if (isFocused) Color(0x55FFFFFF) else Color(0x30FFFFFF))
-                .then(
-                    if (isFocused) Modifier.border(1.dp, thumbBorderColor.copy(alpha = 0.7f), RoundedCornerShape(5.dp))
-                    else Modifier
-                )
+                .height(if (isFocused) 7.dp else 4.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(if (isFocused) Color(0x4DFFFFFF) else Color(0x2BFFFFFF))
         ) {
-            // Played progress fill in brand gradient
             if (clampedProgress > 0f) {
                 Box(
                     modifier = Modifier
@@ -894,7 +1059,7 @@ private fun TvScrubberTrack(
 
         // Focused Scrubber Thumb
         if (isFocused) {
-            val thumbOffset = ((totalWidth - 18.dp) * clampedProgress).coerceAtLeast(0.dp)
+            val thumbOffset = ((totalWidth - 14.dp) * clampedProgress).coerceAtLeast(0.dp)
             Box(
                 modifier = Modifier.fillMaxWidth(),
                 contentAlignment = Alignment.CenterStart
@@ -902,10 +1067,10 @@ private fun TvScrubberTrack(
                 Box(
                     modifier = Modifier
                         .padding(start = thumbOffset)
-                        .size(18.dp)
-                        .clip(RoundedCornerShape(9.dp))
+                        .size(14.dp)
+                        .clip(CircleShape)
                         .background(Color.White)
-                        .border(2.5.dp, thumbBorderColor, RoundedCornerShape(9.dp))
+                        .border(2.dp, thumbBorderColor, CircleShape)
                 )
             }
         }
@@ -913,35 +1078,56 @@ private fun TvScrubberTrack(
 }
 
 @Composable
-fun TvPlayerIconButton(
-    icon: ImageVector,
-    contentDescription: String,
+private fun TvControlCapsule(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    focusRequester: FocusRequester? = null
+    focusRequester: FocusRequester? = null,
+    isActive: Boolean = false,
+    isPrimaryGradient: Boolean = false,
+    content: @Composable BoxScope.(isFocused: Boolean) -> Unit
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
-    val scale by animateFloatAsState(if (isFocused) 1.14f else 1.0f, label = "btn_scale")
-    val bgColor by animateColorAsState(
-        targetValue = if (isFocused) CardFocusedBackground else Color(0x40121824),
-        label = "btn_bg"
+    val scale by animateFloatAsState(
+        targetValue = if (isFocused) 1.09f else 1.0f,
+        animationSpec = tween(durationMillis = 130),
+        label = "capsule_scale"
     )
+    val shape = RoundedCornerShape(22.dp)
+    val brandGradient = Brush.horizontalGradient(listOf(AccentCyan, AccentGold, AccentOrange))
+
+    val bgModifier = when {
+        isPrimaryGradient -> Modifier.background(
+            Brush.horizontalGradient(
+                colors = if (isFocused) {
+                    listOf(AccentCyan.copy(alpha = 0.34f), AccentOrange.copy(alpha = 0.32f))
+                } else {
+                    listOf(AccentCyan.copy(alpha = 0.16f), AccentOrange.copy(alpha = 0.16f))
+                }
+            )
+        )
+        isFocused -> Modifier.background(CardFocusedBackground.copy(alpha = 0.92f))
+        isActive -> Modifier.background(AccentCyan.copy(alpha = 0.15f))
+        else -> Modifier.background(Color(0x520C1018))
+    }
+
+    val borderModifier = when {
+        isPrimaryGradient -> Modifier.border(
+            width = if (isFocused) 2.2.dp else 1.4.dp,
+            brush = brandGradient,
+            shape = shape
+        )
+        isFocused -> Modifier.border(1.8.dp, FocusBorder, shape)
+        isActive -> Modifier.border(1.1.dp, AccentCyan.copy(alpha = 0.65f), shape)
+        else -> Modifier.border(1.dp, Color(0x2EFFFFFF), shape)
+    }
 
     Box(
         modifier = Modifier
-            .size(56.dp)
-            .padding(4.dp)
             .scale(scale)
-            .clip(RoundedCornerShape(14.dp))
-            .background(bgColor)
-            .then(
-                if (isFocused) {
-                    Modifier.border(2.5.dp, FocusBorder, RoundedCornerShape(14.dp))
-                } else {
-                    Modifier.border(1.dp, BorderSubtle, RoundedCornerShape(14.dp))
-                }
-            )
+            .clip(shape)
+            .then(bgModifier)
+            .then(borderModifier)
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .then(modifier)
             .clickable(
@@ -952,136 +1138,162 @@ fun TvPlayerIconButton(
             .focusable(interactionSource = interactionSource),
         contentAlignment = Alignment.Center
     ) {
+        content(isFocused)
+    }
+}
+
+@Composable
+private fun TvPrimaryPlayButton(
+    isPlaying: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    focusRequester: FocusRequester? = null
+) {
+    TvControlCapsule(
+        onClick = onClick,
+        focusRequester = focusRequester,
+        isPrimaryGradient = true,
+        modifier = modifier
+            .width(76.dp)
+            .height(44.dp)
+    ) {
         Icon(
-            imageVector = icon,
-            contentDescription = contentDescription,
-            tint = if (isFocused) AccentCyanBright else TextPrimary,
-            modifier = Modifier.size(28.dp)
+            imageVector = if (isPlaying) Icons.Outlined.Pause else Icons.Rounded.PlayArrow,
+            contentDescription = if (isPlaying) "Пауза" else "Воспроизведение",
+            tint = TextPrimary,
+            modifier = Modifier.size(24.dp)
         )
     }
 }
 
 @Composable
-fun AudioTrackDialog(
-    tracks: List<AudioTrackInfo>,
-    selectedId: String?,
-    onSelect: (AudioTrackInfo) -> Unit,
-    onDismiss: () -> Unit
+private fun TvPlayerPillButton(
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    val firstFocusRequester = remember { FocusRequester() }
-    val closeFocusRequester = remember { FocusRequester() }
-
-    LaunchedEffect(Unit) {
-        delay(120)
-        try {
-            if (tracks.isNotEmpty()) {
-                firstFocusRequester.requestFocus()
-            } else {
-                closeFocusRequester.requestFocus()
-            }
-        } catch (_: Exception) {}
+    TvControlCapsule(
+        onClick = onClick,
+        modifier = modifier
+            .width(50.dp)
+            .height(42.dp)
+    ) { isFocused ->
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = if (isFocused) AccentCyanBright else TextPrimary.copy(alpha = 0.88f),
+            modifier = Modifier.size(20.dp)
+        )
     }
+}
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        Box(
-            modifier = Modifier
-                .width(480.dp)
-                .clip(RoundedCornerShape(20.dp))
-                .background(DarkCard)
-                .border(1.dp, AccentCyan.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
-                .padding(24.dp)
+@Composable
+private fun TvPlayerDualIconButton(
+    leftIcon: ImageVector,
+    rightIcon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    TvControlCapsule(
+        onClick = onClick,
+        modifier = modifier
+            .width(74.dp)
+            .height(42.dp)
+    ) { isFocused ->
+        val tint = if (isFocused) AccentCyanBright else TextPrimary.copy(alpha = 0.88f)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(7.dp)
         ) {
-            Column {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Выбор аудиодорожки",
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                        color = TextPrimary
-                    )
-                    TvFocusCard(
-                        onClick = onDismiss,
-                        modifier = Modifier
-                            .width(100.dp)
-                            .height(36.dp)
-                            .then(if (tracks.isEmpty()) Modifier.focusRequester(closeFocusRequester) else Modifier)
-                    ) {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text("Закрыть", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                if (tracks.isEmpty()) {
-                    Text(
-                        text = "Дорожки не найдены",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = TextSecondary,
-                        modifier = Modifier.padding(vertical = 12.dp)
-                    )
-                }
-
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 300.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    itemsIndexed(tracks) { index, track ->
-                        val isFirst = index == 0
-                        val isSelected = track.id == selectedId
-                        TvFocusCard(
-                            onClick = { onSelect(track) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(52.dp)
-                                .then(if (isFirst) Modifier.focusRequester(firstFocusRequester) else Modifier)
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(horizontal = 16.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = track.label,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = if (isSelected) AccentCyan else TextPrimary,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                if (isSelected) {
-                                    Text(text = "✓", color = AccentCyan, fontWeight = FontWeight.Bold)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            Icon(
+                imageVector = leftIcon,
+                contentDescription = contentDescription,
+                tint = tint,
+                modifier = Modifier.size(18.dp)
+            )
+            Box(
+                modifier = Modifier
+                    .width(1.dp)
+                    .height(14.dp)
+                    .background(Color.White.copy(alpha = 0.22f))
+            )
+            Icon(
+                imageVector = rightIcon,
+                contentDescription = null,
+                tint = tint,
+                modifier = Modifier.size(18.dp)
+            )
         }
     }
 }
 
 @Composable
-fun SubtitleTrackDialog(
-    tracks: List<SubtitleTrackInfo>,
-    selectedId: String?,
-    onSelect: (SubtitleTrackInfo?) -> Unit,
+private fun TvLiveStatusButton(
+    isLiveActive: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    TvControlCapsule(
+        onClick = onClick,
+        isActive = isLiveActive,
+        modifier = modifier
+            .height(42.dp)
+    ) { isFocused ->
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(7.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .background(
+                        when {
+                            isLiveActive -> AccentCyanBright
+                            isFocused -> AccentCyanBright.copy(alpha = 0.75f)
+                            else -> TextSecondary.copy(alpha = 0.45f)
+                        }
+                    )
+            )
+            Text(
+                text = "Эфир",
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = 13.sp,
+                    fontWeight = if (isLiveActive) FontWeight.Bold else FontWeight.Medium
+                ),
+                color = when {
+                    isLiveActive || isFocused -> AccentCyanBright
+                    else -> TextSecondary
+                }
+            )
+        }
+    }
+}
+
+@Composable
+fun TrackSelectionDialog(
+    audioTracks: List<AudioTrackInfo>,
+    selectedAudioId: String?,
+    subtitleTracks: List<SubtitleTrackInfo>,
+    selectedSubtitleId: String?,
+    onSelectAudio: (AudioTrackInfo) -> Unit,
+    onSelectSubtitle: (SubtitleTrackInfo?) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val firstFocusRequester = remember { FocusRequester() }
+    val firstAudioFocusRequester = remember { FocusRequester() }
+    val firstSubFocusRequester = remember { FocusRequester() }
 
     LaunchedEffect(Unit) {
         delay(120)
         try {
-            firstFocusRequester.requestFocus()
+            if (audioTracks.isNotEmpty()) {
+                firstAudioFocusRequester.requestFocus()
+            } else {
+                firstSubFocusRequester.requestFocus()
+            }
         } catch (_: Exception) {}
     }
 
@@ -1091,10 +1303,16 @@ fun SubtitleTrackDialog(
     ) {
         Box(
             modifier = Modifier
-                .width(480.dp)
+                .width(680.dp)
                 .clip(RoundedCornerShape(20.dp))
                 .background(DarkCard)
-                .border(1.dp, AccentCyan.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
+                .border(
+                    width = 1.dp,
+                    brush = Brush.horizontalGradient(
+                        listOf(AccentCyan.copy(alpha = 0.55f), AccentOrange.copy(alpha = 0.45f))
+                    ),
+                    shape = RoundedCornerShape(20.dp)
+                )
                 .padding(24.dp)
         ) {
             Column {
@@ -1104,79 +1322,201 @@ fun SubtitleTrackDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Выбор субтитров",
+                        text = "Аудиодорожки и субтитры",
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                         color = TextPrimary
                     )
                     TvFocusCard(
                         onClick = onDismiss,
+                        cornerRadius = 18.dp,
                         modifier = Modifier
-                            .width(100.dp)
+                            .width(104.dp)
                             .height(36.dp)
                     ) {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Row(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Outlined.Close, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text("Закрыть", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(18.dp))
 
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 300.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(18.dp)
                 ) {
-                    item {
-                        TvFocusCard(
-                            onClick = { onSelect(null) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(52.dp)
-                                .focusRequester(firstFocusRequester)
+                    // Left Column: Audio Tracks
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.padding(bottom = 10.dp)
                         ) {
-                            Row(
+                            Icon(Icons.Outlined.Audiotrack, contentDescription = null, tint = AccentCyanBright, modifier = Modifier.size(17.dp))
+                            Text(
+                                text = "Звук",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = AccentCyanBright
+                            )
+                        }
+
+                        if (audioTracks.isEmpty()) {
+                            Text(
+                                text = "Дорожки не найдены",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary,
+                                modifier = Modifier.padding(vertical = 12.dp)
+                            )
+                        } else {
+                            LazyColumn(
                                 modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(horizontal = 16.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                                    .fillMaxWidth()
+                                    .heightIn(max = 280.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Text(
-                                    text = "Отключить субтитры",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = if (selectedId == null) AccentCyan else TextPrimary,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                if (selectedId == null) {
-                                    Text(text = "✓", color = AccentCyan, fontWeight = FontWeight.Bold)
+                                itemsIndexed(audioTracks) { idx, track ->
+                                    val isSelected = track.id == selectedAudioId
+                                    TvFocusCard(
+                                        onClick = { onSelectAudio(track) },
+                                        isSelected = isSelected,
+                                        cornerRadius = 12.dp,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(46.dp)
+                                            .then(if (idx == 0) Modifier.focusRequester(firstAudioFocusRequester) else Modifier)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .padding(horizontal = 14.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = track.label,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = if (isSelected) AccentCyanBright else TextPrimary,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            if (isSelected) {
+                                                Icon(
+                                                    imageVector = Icons.Outlined.Check,
+                                                    contentDescription = null,
+                                                    tint = AccentCyanBright,
+                                                    modifier = Modifier.size(17.dp)
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
 
-                    items(tracks) { track ->
-                        val isSelected = track.id == selectedId
-                        TvFocusCard(
-                            onClick = { onSelect(track) },
+                    // Hairline vertical divider
+                    Box(
+                        modifier = Modifier
+                            .width(1.dp)
+                            .height(260.dp)
+                            .background(BorderSubtle)
+                    )
+
+                    // Right Column: Subtitles
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.padding(bottom = 10.dp)
+                        ) {
+                            Icon(Icons.Outlined.ClosedCaption, contentDescription = null, tint = AccentOrange, modifier = Modifier.size(17.dp))
+                            Text(
+                                text = "Субтитры",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = AccentOrange
+                            )
+                        }
+
+                        LazyColumn(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(52.dp)
+                                .heightIn(max = 280.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(horizontal = 16.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = track.label,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = if (isSelected) AccentCyan else TextPrimary,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                if (isSelected) {
-                                    Text(text = "✓", color = AccentCyan, fontWeight = FontWeight.Bold)
+                            item {
+                                val isDisabledSelected = selectedSubtitleId == null
+                                TvFocusCard(
+                                    onClick = { onSelectSubtitle(null) },
+                                    isSelected = isDisabledSelected,
+                                    cornerRadius = 12.dp,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(46.dp)
+                                        .focusRequester(firstSubFocusRequester)
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .padding(horizontal = 14.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "Отключены",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = if (isDisabledSelected) AccentOrange else TextPrimary,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        if (isDisabledSelected) {
+                                            Icon(
+                                                imageVector = Icons.Outlined.Check,
+                                                contentDescription = null,
+                                                tint = AccentOrange,
+                                                modifier = Modifier.size(17.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            items(subtitleTracks) { track ->
+                                val isSelected = track.id == selectedSubtitleId
+                                TvFocusCard(
+                                    onClick = { onSelectSubtitle(track) },
+                                    isSelected = isSelected,
+                                    cornerRadius = 12.dp,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(46.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .padding(horizontal = 14.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = track.label,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = if (isSelected) AccentOrange else TextPrimary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        if (isSelected) {
+                                            Icon(
+                                                imageVector = Icons.Outlined.Check,
+                                                contentDescription = null,
+                                                tint = AccentOrange,
+                                                modifier = Modifier.size(17.dp)
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1347,8 +1687,8 @@ fun EpgAccordionDialog(
                                 else -> null
                             }
                             val badgeColor = when {
-                                isPlayingArchiveItem || isItemCurrent -> AccentCyan
-                                isItemPast && hasArchive -> Color(0xFF81C784)
+                                isPlayingArchiveItem || isItemCurrent -> AccentCyanBright
+                                isItemPast && hasArchive -> AccentOrange
                                 else -> TextSecondary
                             }
 
@@ -1507,5 +1847,18 @@ private fun formatTime(ms: Long): String {
         String.format("%02d:%02d:%02d", hours, minutes, seconds)
     } else {
         String.format("%02d:%02d", minutes, seconds)
+    }
+}
+
+private fun formatSignedSeekDelta(deltaMs: Long): String {
+    val sign = if (deltaMs >= 0L) "+" else "-"
+    val totalSec = abs(deltaMs) / 1000L
+    val sec = totalSec % 60L
+    val min = (totalSec / 60L) % 60L
+    val hrs = totalSec / 3600L
+    return if (hrs > 0L) {
+        String.format("%s%d:%02d:%02d", sign, hrs, min, sec)
+    } else {
+        String.format("%s%d:%02d", sign, min, sec)
     }
 }
