@@ -79,6 +79,7 @@ class ContentDirectoryService {
 
         var eventType = parser.eventType
         var currentItem: MutableMap<String, String>? = null
+        var currentResIsThumb = false
         val textBuffer = StringBuilder()
 
         while (eventType != XmlPullParser.END_DOCUMENT) {
@@ -90,13 +91,28 @@ class ContentDirectoryService {
 
                     if (localTag == "container" || localTag == "item") {
                         currentItem = mutableMapOf()
+                        currentResIsThumb = false
                         currentItem["isContainer"] = if (localTag == "container") "true" else "false"
                         currentItem["id"] = parser.getAttributeValue(null, "id") ?: ""
                     }
                     if (localTag == "res" && currentItem != null) {
+                        val proto = parser.getAttributeValue(null, "protocolInfo") ?: ""
                         val sizeAttr = parser.getAttributeValue(null, "size")
-                        if (!sizeAttr.isNullOrEmpty()) {
-                            currentItem["size"] = sizeAttr
+                        val resAttr = parser.getAttributeValue(null, "resolution")
+                        val upnpCls = currentItem["class"] ?: ""
+                        currentResIsThumb = proto.contains("JPEG_TN", ignoreCase = true) ||
+                            proto.contains("PNG_TN", ignoreCase = true) ||
+                            (upnpCls.contains("videoItem", ignoreCase = true) && proto.contains("image/", ignoreCase = true))
+
+                        if (!currentResIsThumb) {
+                            if (!sizeAttr.isNullOrEmpty() && !currentItem.containsKey("size")) {
+                                currentItem["size"] = sizeAttr
+                            }
+                            if (!resAttr.isNullOrEmpty() && !currentItem.containsKey("resolution")) {
+                                currentItem["resolution"] = resAttr
+                            }
+                        } else if (!resAttr.isNullOrEmpty() && !currentItem.containsKey("albumArtResolution")) {
+                            currentItem["albumArtResolution"] = resAttr
                         }
                     }
                 }
@@ -111,7 +127,15 @@ class ContentDirectoryService {
                     if (currentItem != null && text.isNotEmpty()) {
                         when (localTag) {
                             "title" -> currentItem["title"] = text
-                            "res" -> currentItem["res"] = text
+                            "res" -> {
+                                if (currentResIsThumb) {
+                                    if (!currentItem.containsKey("albumArt")) {
+                                        currentItem["albumArt"] = text
+                                    }
+                                } else if (!currentItem.containsKey("res")) {
+                                    currentItem["res"] = text
+                                }
+                            }
                             "class" -> currentItem["class"] = text
                             "date" -> currentItem["date"] = text
                             "albumarturi" -> currentItem["albumArt"] = text
@@ -126,6 +150,8 @@ class ContentDirectoryService {
                         val res = currentItem["res"] ?: ""
                         val size = currentItem["size"]?.toLongOrNull() ?: 0L
                         val date = currentItem["date"]
+                        val albumArt = currentItem["albumArt"]
+                        val resolution = currentItem["resolution"]
                         val ext = title.substringAfterLast('.', "").uppercase()
                         val format = if (ext.isNotEmpty() && ext.length <= 5) ext else null
 
@@ -154,9 +180,11 @@ class ContentDirectoryService {
                                 type = mediaType,
                                 sourceType = MediaSourceType.UPNP_DLNA,
                                 size = size,
+                                thumbnailUrl = albumArt,
                                 parentId = parentId,
                                 dateAdded = date,
-                                format = format
+                                format = format,
+                                resolution = resolution
                             )
                         )
                         currentItem = null

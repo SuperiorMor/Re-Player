@@ -146,9 +146,11 @@ class IptvManager private constructor(private val context: Context) {
             // Migration to M3U Parser v3 (#EXTGRP + catchup/tvg-rec archives)
             val parserVersion = prefs.getInt("m3u_parser_version", 1)
             val needsParserUpgrade = parserVersion < 3
+            val epgDescVersion = prefs.getInt("epg_desc_version", 1)
+            val needsEpgRefresh = epgDescVersion < 2
 
             if (needsParserUpgrade) {
-                prefs.edit().putInt("m3u_parser_version", 3).apply()
+                prefs.edit().putInt("m3u_parser_version", 3).putInt("epg_desc_version", 2).apply()
                 if (!savedPlaylist.isNullOrBlank()) {
                     loadPlaylist(savedPlaylist, savedEpg)
                     return@launch
@@ -159,6 +161,12 @@ class IptvManager private constructor(private val context: Context) {
                     fetchEpg(savedEpg)
                     return@launch
                 }
+            } else if (needsEpgRefresh && !savedEpg.isNullOrBlank()) {
+                prefs.edit().putInt("epg_desc_version", 2).apply()
+                fetchEpg(savedEpg)
+                return@launch
+            } else if (needsEpgRefresh) {
+                prefs.edit().putInt("epg_desc_version", 2).apply()
             }
 
             if (_channels.value.isEmpty() && !savedPlaylist.isNullOrBlank()) {

@@ -9,7 +9,10 @@ data class RecentMedia(
     val uri: String,
     val timestamp: Long = System.currentTimeMillis(),
     val positionMs: Long = 0L,
-    val durationMs: Long = 0L
+    val durationMs: Long = 0L,
+    val thumbnailUrl: String? = null,
+    val parentId: String? = null,
+    val folderTitle: String? = null
 ) {
     fun progress(): Float {
         if (durationMs <= 0L || positionMs <= 0L) return 0f
@@ -21,6 +24,8 @@ data class RecentMedia(
         title = title,
         uri = uri,
         type = MediaType.VIDEO,
-        sourceType = MediaSourceType.UPNP_DLNA
+        sourceType = MediaSourceType.UPNP_DLNA,
+        thumbnailUrl = thumbnailUrl,
+        parentId = parentId
     )
 }

@@ -170,7 +170,7 @@ object XmlTvParser {
                                             EpgProgram(
                                                 channelId = channel,
                                                 title = title,
-                                                description = desc?.take(250),
+                                                description = desc?.take(1200),
                                                 startTime = start,
                                                 endTime = stop
                                             )

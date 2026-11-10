@@ -164,6 +164,15 @@ fun PlayerScreen(
     // Trigger playback whenever mediaItem switches (initial file, next episode, etc.)
     LaunchedEffect(mediaItem.id, mediaItem.uri) {
         playingArchiveProgram = null
+        if (!isIptv) {
+            recentManager.addRecent(
+                id = mediaItem.id,
+                title = mediaItem.title,
+                uri = mediaItem.uri,
+                parentId = mediaItem.parentId,
+                thumbnailUrl = mediaItem.thumbnailUrl
+            )
+        }
         engine.play(mediaItem)
     }
 
@@ -1047,18 +1056,38 @@ fun EpgAccordionDialog(
         } catch (_: Exception) {}
     }
 
+    // Ensure newly expanded accordion item's description is never clipped below the viewport
+    LaunchedEffect(focusedIndex) {
+        delay(235)
+        try {
+            val visibleInfo = listState.layoutInfo.visibleItemsInfo.find { it.index == focusedIndex }
+            val viewportEnd = listState.layoutInfo.viewportEndOffset
+            val viewportStart = listState.layoutInfo.viewportStartOffset
+            val viewportHeight = viewportEnd - viewportStart
+            if (visibleInfo != null && (visibleInfo.offset + visibleInfo.size) > viewportEnd) {
+                val targetTopOffset = -(viewportHeight - visibleInfo.size).coerceAtLeast(0)
+                listState.animateScrollToItem(
+                    index = focusedIndex,
+                    scrollOffset = targetTopOffset
+                )
+            }
+        } catch (_: Exception) {}
+    }
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Box(
             modifier = Modifier
-                .width(640.dp)
-                .height(560.dp)
+                .fillMaxWidth(0.72f)
+                .widthIn(min = 520.dp, max = 680.dp)
+                .fillMaxHeight(0.88f)
+                .heightIn(max = 476.dp)
                 .clip(RoundedCornerShape(20.dp))
                 .background(DarkCard)
                 .border(1.dp, AccentCyan.copy(alpha = 0.45f), RoundedCornerShape(20.dp))
-                .padding(22.dp)
+                .padding(20.dp)
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
                 Row(
@@ -1198,7 +1227,7 @@ fun EpgAccordionDialog(
                                                 fontWeight = if (isExpanded || isItemCurrent) FontWeight.Bold else FontWeight.Medium
                                             ),
                                             color = TextPrimary,
-                                            maxLines = if (isExpanded) 2 else 1,
+                                            maxLines = if (isExpanded) 4 else 1,
                                             overflow = TextOverflow.Ellipsis,
                                             modifier = Modifier.weight(1f)
                                         )
@@ -1260,7 +1289,10 @@ fun EpgAccordionDialog(
                                                 Spacer(modifier = Modifier.height(8.dp))
                                                 Text(
                                                     text = prog.description,
-                                                    style = MaterialTheme.typography.bodySmall,
+                                                    style = MaterialTheme.typography.bodySmall.copy(
+                                                        fontSize = 13.sp,
+                                                        lineHeight = 18.sp
+                                                    ),
                                                     color = TextSecondary
                                                 )
                                             }

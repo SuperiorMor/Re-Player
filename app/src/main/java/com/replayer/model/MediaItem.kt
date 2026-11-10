@@ -16,7 +16,8 @@ data class MediaItem(
     val thumbnailUrl: String? = null,
     val parentId: String? = null,
     val dateAdded: String? = null,
-    val format: String? = null
+    val format: String? = null,
+    val resolution: String? = null
 ) {
     fun formattedSize(): String {
         if (type == MediaType.DIRECTORY || size <= 0L) return ""

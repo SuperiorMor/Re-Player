@@ -9,9 +9,9 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyHorizontalGrid
+import androidx.compose.foundation.lazy.grid.itemsIndexed as gridItemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -22,7 +22,6 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Tv
-import androidx.compose.material.icons.filled.VideoFile
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -48,7 +47,6 @@ import com.replayer.model.EpgProgram
 import com.replayer.model.FavoriteFolder
 import com.replayer.model.IptvChannel
 import com.replayer.model.MediaItem
-import com.replayer.ui.components.TvFocusCard
 import com.replayer.ui.theme.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -92,424 +90,316 @@ fun HomeScreen(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 32.dp, vertical = 24.dp)
+            .padding(horizontal = 28.dp, vertical = 18.dp)
     ) {
-        // App / Screen Header
-        Text(
-            text = "Главная",
-            style = MaterialTheme.typography.displayLarge
-        )
-        Text(
-            text = "Недавнее воспроизведение, избранные телеканалы и папки",
-            style = MaterialTheme.typography.bodyLarge,
-            color = TextSecondary,
-            modifier = Modifier.padding(top = 4.dp, bottom = 28.dp)
-        )
-
         // -------------------------------------------------------------
-        // СТРОКА 1: ОСНОВНАЯ ЛЕНТА (Android TV Shelf)
-        // Недавние файлы DLNA + Избранные ТВ каналы
+        // ВЕРХНИЙ БЛОК: СЛЕВА 2 ПОСТЕРА «ПРОДОЛЖИТЬ ПРОСМОТР» | СПРАВА «ИЗБРАННЫЕ ПАПКИ»
         // -------------------------------------------------------------
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = Alignment.Top
         ) {
-            Text(
-                text = "Недавнее и ТВ каналы",
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                color = TextPrimary
-            )
-            if (recentList.isNotEmpty() || favoriteChannels.isNotEmpty()) {
+            // LEFT COLUMN: Продолжить просмотр (up to 2 vertical posters, 1 per folder)
+            val recentPosters = remember(recentList) { recentList.take(2) }
+            Column(modifier = Modifier.width(248.dp)) {
                 Text(
-                    text = "${recentList.size + favoriteChannels.size} элементов",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextSecondary
+                    text = "Продолжить просмотр",
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 17.sp
+                    ),
+                    color = TextPrimary,
+                    maxLines = 1
                 )
-            }
-        }
 
-        Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
-        if (recentList.isEmpty() && favoriteChannels.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(DarkCard)
-                    .padding(horizontal = 24.dp, vertical = 32.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        imageVector = Icons.Default.PlayArrow,
-                        contentDescription = null,
-                        tint = AccentCyan.copy(alpha = 0.6f),
-                        modifier = Modifier.size(40.dp)
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = "Здесь появятся ваши фильмы и избранные телеканалы",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = TextPrimary
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Запустите видео из папки DLNA или отметьте канал сердечком в разделе ТВ",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TextSecondary
-                    )
-                }
-            }
-        } else {
-            LazyRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                contentPadding = PaddingValues(vertical = 4.dp)
-            ) {
-                // 1. Recent DLNA media cards
-                itemsIndexed(recentList, key = { idx, item -> "recent_${item.id}_$idx" }) { _, recent ->
-                    val watchProgress = remember(recent, progressMap) {
-                        (progressMap[recent.id]?.progress()
-                            ?: progressMap[recent.uri]?.progress()
-                            ?: recent.progress()).coerceIn(0f, 1f)
-                    }
-
-                    HomeShelfFocusCard(
-                        onClick = { onPlayMedia(recent.toMediaItem()) },
+                if (recentPosters.isEmpty()) {
+                    Box(
                         modifier = Modifier
-                            .width(232.dp)
-                            .height(106.dp)
-                    ) { isFocused ->
-                        Box(modifier = Modifier.fillMaxSize()) {
-                            // Subtle gradient watch progress fill across entire background
-                            if (watchProgress > 0f) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxHeight()
-                                        .fillMaxWidth(fraction = watchProgress)
-                                        .background(
-                                            Brush.horizontalGradient(
-                                                colors = listOf(
-                                                    AccentCyan.copy(alpha = 0.06f),
-                                                    AccentCyan.copy(alpha = 0.22f)
-                                                )
-                                            )
-                                        )
-                                )
-                            }
-
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(14.dp),
-                                verticalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(32.dp)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(AccentCyan.copy(alpha = 0.15f)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.VideoFile,
-                                            contentDescription = null,
-                                            tint = AccentCyan,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(AccentCyan.copy(alpha = 0.18f))
-                                            .padding(horizontal = 7.dp, vertical = 3.dp)
-                                    ) {
-                                        Text(
-                                            text = "DLNA",
-                                            color = AccentCyan,
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                }
-
-                                Text(
-                                    text = recent.title,
-                                    style = MaterialTheme.typography.bodyMedium.copy(
-                                        fontSize = 13.5.sp,
-                                        fontWeight = FontWeight.SemiBold
-                                    ),
-                                    color = TextPrimary,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .then(
-                                            if (isFocused) {
-                                                Modifier.basicMarquee(
-                                                    iterations = Int.MAX_VALUE,
-                                                    initialDelayMillis = 250,
-                                                    repeatDelayMillis = 800,
-                                                    velocity = 45.dp
-                                                )
-                                            } else Modifier
-                                        )
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // 2. Favorite IPTV channel cards
-                itemsIndexed(favoriteChannels, key = { idx, ch -> "iptv_${ch.id}_$idx" }) { _, channel ->
-                    val currentProg = remember(channel, epgMap) {
-                        iptvManager.getCurrentProgram(channel)
-                    }
-                    val progFraction = currentProg?.progress()?.coerceIn(0f, 1f) ?: 0f
-
-                    HomeShelfFocusCard(
-                        onClick = { onPlayChannel(channel) },
-                        modifier = Modifier
-                            .width(232.dp)
-                            .height(106.dp)
-                    ) { isFocused ->
-                        Box(modifier = Modifier.fillMaxSize()) {
-                            if (currentProg != null && progFraction > 0f) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxHeight()
-                                        .fillMaxWidth(fraction = progFraction)
-                                        .background(
-                                            Brush.horizontalGradient(
-                                                colors = listOf(
-                                                    AccentCyan.copy(alpha = 0.05f),
-                                                    AccentCyan.copy(alpha = 0.18f)
-                                                )
-                                            )
-                                        )
-                                )
-                            }
-
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(14.dp),
-                                verticalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(32.dp)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(Color(0xFFFF4081).copy(alpha = 0.15f)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Tv,
-                                            contentDescription = null,
-                                            tint = Color(0xFFFF4081),
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                        if (!channel.logoUrl.isNullOrBlank()) {
-                                            AsyncImage(
-                                                model = channel.logoUrl,
-                                                contentDescription = null,
-                                                modifier = Modifier
-                                                    .fillMaxSize()
-                                                    .background(Color(0xFF191C22))
-                                                    .padding(2.dp),
-                                                contentScale = ContentScale.Fit
-                                            )
-                                        }
-                                    }
-
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .clip(RoundedCornerShape(4.dp))
-                                                .background(Color(0xFFFF4081).copy(alpha = 0.18f))
-                                                .padding(horizontal = 7.dp, vertical = 3.dp)
-                                        ) {
-                                            Text(
-                                                text = "ТВ КАНАЛ",
-                                                color = Color(0xFFFF4081),
-                                                fontSize = 10.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
-                                        Icon(
-                                            imageVector = Icons.Default.Favorite,
-                                            contentDescription = null,
-                                            tint = Color(0xFFFF4081),
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    }
-                                }
-
-                                Column(modifier = Modifier.fillMaxWidth()) {
-                                    Text(
-                                        text = channel.name,
-                                        style = MaterialTheme.typography.bodyMedium.copy(
-                                            fontSize = 13.5.sp,
-                                            fontWeight = FontWeight.SemiBold
-                                        ),
-                                        color = TextPrimary,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .then(
-                                                if (isFocused) {
-                                                    Modifier.basicMarquee(
-                                                        iterations = Int.MAX_VALUE,
-                                                        initialDelayMillis = 250,
-                                                        repeatDelayMillis = 800,
-                                                        velocity = 45.dp
-                                                    )
-                                                } else Modifier
-                                            )
-                                    )
-                                    Text(
-                                        text = currentProg?.title ?: channel.group,
-                                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
-                                        color = TextSecondary,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .then(
-                                                if (isFocused) {
-                                                    Modifier.basicMarquee(
-                                                        iterations = Int.MAX_VALUE,
-                                                        initialDelayMillis = 250,
-                                                        repeatDelayMillis = 800,
-                                                        velocity = 45.dp
-                                                    )
-                                                } else Modifier
-                                            )
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(34.dp))
-
-        // -------------------------------------------------------------
-        // СТРОКА 2: ИЗБРАННЫЕ ПАПКИ DLNA (Потоньше)
-        // -------------------------------------------------------------
-        Text(
-            text = "Избранные папки DLNA",
-            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-            color = TextPrimary
-        )
-
-        Spacer(modifier = Modifier.height(14.dp))
-
-        if (favorites.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(DarkCard)
-                    .padding(horizontal = 20.dp, vertical = 20.dp),
-                contentAlignment = Alignment.CenterStart
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Folder,
-                        contentDescription = null,
-                        tint = TextSecondary,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Text(
-                        text = "Нет избранных папок. Нажимайте сердечко рядом с папкой в UPnP / DLNA для быстрого доступа.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = TextSecondary
-                    )
-                }
-            }
-        } else {
-            LazyRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                contentPadding = PaddingValues(vertical = 4.dp)
-            ) {
-                items(favorites, key = { it.id }) { fav ->
-                    TvFocusCard(
-                        onClick = { onOpenFavorite(fav) },
-                        modifier = Modifier
-                            .width(220.dp)
-                            .height(68.dp)
+                            .fillMaxWidth()
+                            .height(168.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(DarkCard)
+                            .padding(16.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                modifier = Modifier.weight(1f),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Folder,
-                                    contentDescription = null,
-                                    tint = AccentCyan,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Text(
-                                    text = fav.title,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = TextPrimary,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(8.dp))
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Icon(
-                                imageVector = Icons.Default.Favorite,
-                                contentDescription = "В избранном",
-                                tint = Color(0xFFFF4081),
-                                modifier = Modifier.size(18.dp)
+                                imageVector = Icons.Default.PlayArrow,
+                                contentDescription = null,
+                                tint = AccentCyan.copy(alpha = 0.55f),
+                                modifier = Modifier.size(30.dp)
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "Нет недавних видео",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary
                             )
                         }
                     }
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        recentPosters.forEach { recent ->
+                            val watchProgress = remember(recent, progressMap) {
+                                (progressMap[recent.id]?.progress()
+                                    ?: progressMap[recent.uri]?.progress()
+                                    ?: recent.progress()).coerceIn(0f, 1f)
+                            }
+
+                            HomeShelfFocusCard(
+                                onClick = { onPlayMedia(recent.toMediaItem()) },
+                                modifier = Modifier
+                                    .width(118.dp)
+                                    .height(168.dp)
+                            ) { isFocused ->
+                                Box(modifier = Modifier.fillMaxSize()) {
+                                    // Background: Full-bleed vertical cover poster OR sleek slate fallback
+                                    if (!recent.thumbnailUrl.isNullOrBlank()) {
+                                        AsyncImage(
+                                            model = recent.thumbnailUrl,
+                                            contentDescription = recent.title,
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                    } else {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .background(
+                                                    Brush.verticalGradient(
+                                                        colors = listOf(
+                                                            Color(0xFF222A36),
+                                                            Color(0xFF141820)
+                                                        )
+                                                    )
+                                                )
+                                        )
+                                        // Subtle gradient watch fill across fallback poster background
+                                        if (watchProgress > 0f) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxHeight()
+                                                    .fillMaxWidth(fraction = watchProgress)
+                                                    .background(
+                                                        Brush.horizontalGradient(
+                                                            colors = listOf(
+                                                                AccentCyan.copy(alpha = 0.06f),
+                                                                AccentCyan.copy(alpha = 0.20f)
+                                                            )
+                                                        )
+                                                    )
+                                            )
+                                        }
+                                    }
+
+                                    // Bottom readability scrim
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .fillMaxHeight(0.55f)
+                                            .align(Alignment.BottomCenter)
+                                            .background(
+                                                Brush.verticalGradient(
+                                                    colors = listOf(
+                                                        Color.Transparent,
+                                                        Color(0xE60B0E14)
+                                                    )
+                                                )
+                                            )
+                                    )
+
+                                    // Single-line title with marquee on focus (NO camera icon, NO DLNA badge)
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .align(Alignment.BottomCenter)
+                                    ) {
+                                        Text(
+                                            text = recent.title,
+                                            style = MaterialTheme.typography.bodySmall.copy(
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            ),
+                                            color = TextPrimary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 8.dp, vertical = 7.dp)
+                                                .then(
+                                                    if (isFocused) {
+                                                        Modifier.basicMarquee(
+                                                            iterations = Int.MAX_VALUE,
+                                                            initialDelayMillis = 250,
+                                                            repeatDelayMillis = 800,
+                                                            velocity = 42.dp
+                                                        )
+                                                    } else Modifier
+                                                )
+                                        )
+
+                                        // Watch progress bar at bottom edge of poster
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(4.dp)
+                                                .background(Color(0x33FFFFFF))
+                                        ) {
+                                            if (watchProgress > 0f) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxHeight()
+                                                        .fillMaxWidth(fraction = watchProgress)
+                                                        .background(
+                                                            Brush.horizontalGradient(
+                                                                colors = listOf(
+                                                                    AccentCyan.copy(alpha = 0.75f),
+                                                                    AccentCyan
+                                                                )
+                                                            )
+                                                        )
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.width(24.dp))
+
+            // RIGHT COLUMN: Избранные папки DLNA (larger 2-row horizontal grid cards)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Избранные папки",
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 17.sp
+                    ),
+                    color = TextPrimary,
+                    maxLines = 1
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                if (favorites.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(168.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(DarkCard)
+                            .padding(horizontal = 24.dp, vertical = 20.dp),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Folder,
+                                contentDescription = null,
+                                tint = TextSecondary,
+                                modifier = Modifier.size(26.dp)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                text = "Нажимайте сердечко ♥ рядом с папкой в DLNA для быстрого доступа",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = TextSecondary
+                            )
+                        }
+                    }
+                } else {
+                    LazyHorizontalGrid(
+                        rows = GridCells.Fixed(2),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        contentPadding = PaddingValues(horizontal = 2.dp, vertical = 2.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(168.dp)
+                    ) {
+                        gridItemsIndexed(favorites, key = { idx, fav -> "${fav.id}_$idx" }) { _, fav ->
+                            HomeShelfFocusCard(
+                                onClick = { onOpenFavorite(fav) },
+                                modifier = Modifier
+                                    .width(284.dp)
+                                    .fillMaxHeight()
+                            ) { _ ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(
+                                        modifier = Modifier.weight(1f),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(38.dp)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(AccentCyan.copy(alpha = 0.14f)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Folder,
+                                                contentDescription = null,
+                                                tint = AccentCyan,
+                                                modifier = Modifier.size(22.dp)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Text(
+                                            text = fav.title,
+                                            style = MaterialTheme.typography.titleSmall.copy(
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                lineHeight = 18.sp
+                                            ),
+                                            color = TextPrimary,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Icon(
+                                        imageVector = Icons.Default.Favorite,
+                                        contentDescription = "В избранном",
+                                        tint = Color(0xFFFF4081),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(34.dp))
+        Spacer(modifier = Modifier.height(22.dp))
 
         // -------------------------------------------------------------
-        // СТРОКА 3: ТЕЛЕПРОГРАММА ИЗБРАННЫХ КАНАЛОВ (Google TV Live Guide)
+        // НИЖНИЙ БЛОК: ТЕЛЕПРОГРАММА ИЗБРАННЫХ КАНАЛОВ (Google TV Live Guide)
         // -------------------------------------------------------------
         Text(
             text = "Телепрограмма избранных каналов",
-            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+            style = MaterialTheme.typography.titleMedium.copy(
+                fontWeight = FontWeight.Bold,
+                fontSize = 17.sp
+            ),
             color = TextPrimary
         )
 
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
         if (favoriteChannels.isEmpty()) {
             Box(

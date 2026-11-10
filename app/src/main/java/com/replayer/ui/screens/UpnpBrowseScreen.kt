@@ -386,7 +386,14 @@ fun UpnpBrowseScreen(
                                     openFolder(url, item.id, item.title)
                                 }
                             } else {
-                                recentManager.addRecent(item.id, item.title, item.uri)
+                                recentManager.addRecent(
+                                    id = item.id,
+                                    title = item.title,
+                                    uri = item.uri,
+                                    parentId = item.parentId,
+                                    folderTitle = folderStack.lastOrNull()?.second
+                                )
+                                recentManager.resolveVerticalPoster(item, currentItems)
                                 val playables = currentItems.filter { it.type != MediaType.DIRECTORY }
                                 onPlayMedia(item, playables)
                             }
@@ -531,7 +538,14 @@ fun UpnpBrowseScreen(
                                     openFolder(url, item.id, item.title)
                                 }
                             } else {
-                                recentManager.addRecent(item.id, item.title, item.uri)
+                                recentManager.addRecent(
+                                    id = item.id,
+                                    title = item.title,
+                                    uri = item.uri,
+                                    parentId = item.parentId,
+                                    folderTitle = folderStack.lastOrNull()?.second
+                                )
+                                recentManager.resolveVerticalPoster(item, currentItems)
                                 val playables = currentItems.filter { it.type != MediaType.DIRECTORY }
                                 onPlayMedia(item, playables)
                             }
