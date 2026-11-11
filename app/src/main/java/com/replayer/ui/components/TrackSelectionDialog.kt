@@ -98,6 +98,15 @@ fun TrackSelectionDialog(
                 modifier = Modifier
                     .matchParentSize()
                     .background(Color(0xCC151B26))
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                AccentCyan.copy(alpha = 0.12f),
+                                Color.Transparent,
+                                AccentOrange.copy(alpha = 0.07f)
+                            )
+                        )
+                    )
                     .then(
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                             Modifier.blur(20.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)

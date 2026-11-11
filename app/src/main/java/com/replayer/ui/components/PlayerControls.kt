@@ -267,7 +267,7 @@ fun TvControlCapsule(
             .then(
                 if (isPrimaryGradient) {
                     Modifier.shadow(
-                        elevation = if (isFocused) 20.dp else 8.dp,
+                        elevation = if (isFocused) 20.dp else 12.dp,
                         shape = shape,
                         ambientColor = AccentCyan,
                         spotColor = AccentOrange
@@ -303,6 +303,12 @@ fun TvPrimaryPlayButton(
         focusRequester = focusRequester,
         isPrimaryGradient = true,
         modifier = modifier
+            .shadow(
+                elevation = 12.dp,
+                shape = RoundedCornerShape(22.dp),
+                ambientColor = AccentCyan,
+                spotColor = AccentOrange
+            )
             .width(76.dp)
             .height(44.dp)
     ) {

@@ -30,6 +30,7 @@ import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.blur
@@ -37,6 +38,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -58,6 +60,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun IptvScreen(
     onPlayChannel: (IptvChannel) -> Unit,
@@ -81,7 +84,10 @@ fun IptvScreen(
     // Level 1: Category folder selection. Level 2: Inside folder
     var selectedFolder by remember { mutableStateOf<String?>(null) }
     var sortMode by remember { mutableStateOf(ChannelSortMode.BY_WATCH_TIME) }
+    val folders = remember(channels) { iptvManager.getCategoryFolders() }
     val entryFocusRequester = remember { FocusRequester() }
+    val folderGridFocusRequester = remember { FocusRequester() }
+    val channelGridFocusRequester = remember { FocusRequester() }
     val holdFocusRequester = remember { FocusRequester() }
     var isSwitchingView by remember { mutableStateOf(false) }
     var pendingFolderTarget by remember { mutableStateOf<String?>(null) }
@@ -112,12 +118,21 @@ fun IptvScreen(
         if (enterSectionTrigger > 0 && !isSwitchingView) {
             delay(150) // Важно! Ждем отрисовки Compose
             try {
-                entryFocusRequester.requestFocus()
-            } catch (_: Exception) {}
+                when {
+                    selectedFolder == null && folders.size > 1 && channels.isNotEmpty() ->
+                        folderGridFocusRequester.requestFocus()
+                    channels.isNotEmpty() ->
+                        channelGridFocusRequester.requestFocus()
+                    else ->
+                        entryFocusRequester.requestFocus()
+                }
+            } catch (_: Exception) {
+                try {
+                    entryFocusRequester.requestFocus()
+                } catch (_: Exception) {}
+            }
         }
     }
-
-    val folders = remember(channels) { iptvManager.getCategoryFolders() }
 
     var showLocalFileDialog by remember { mutableStateOf(false) }
     var localFiles by remember { mutableStateOf<List<File>>(emptyList()) }
@@ -468,7 +483,11 @@ fun IptvScreen(
                 columns = GridCells.Adaptive(minSize = 240.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
-                contentPadding = PaddingValues(bottom = 32.dp)
+                contentPadding = PaddingValues(bottom = 32.dp),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .focusRequester(folderGridFocusRequester)
+                    .focusRestorer(fallback = entryFocusRequester)
             ) {
                 itemsIndexed(folders) { folderIdx, folder ->
                     val count = remember(channels, folder) {
@@ -547,12 +566,16 @@ fun IptvScreen(
                     )
                 }
             } else {
+                key(selectedFolder) {
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(2),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(5.dp),
                     contentPadding = PaddingValues(bottom = 24.dp),
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .focusRequester(channelGridFocusRequester)
+                        .focusRestorer(fallback = entryFocusRequester)
                 ) {
                     itemsIndexed(sortedList, key = { _, ch -> ch.id }) { idx, channel ->
                         val isFav = favoriteIds.contains(channel.id)
@@ -569,6 +592,7 @@ fun IptvScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(48.dp)
+                                .focusRestorer()
                                 .then(if (idx == 0) Modifier.focusRequester(entryFocusRequester) else Modifier)
                         ) {
                             Box(modifier = Modifier.fillMaxSize()) {
@@ -727,6 +751,7 @@ fun IptvScreen(
                             }
                         }
                     }
+                }
                 }
             }
         }

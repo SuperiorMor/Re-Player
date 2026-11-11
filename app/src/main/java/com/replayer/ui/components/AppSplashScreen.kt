@@ -21,51 +21,36 @@ import kotlinx.coroutines.delay
 @Composable
 fun AppSplashScreen(onTimeout: () -> Unit) {
     var visible by remember { mutableStateOf(true) }
-
-    val infiniteTransition = rememberInfiniteTransition(label = "splash_anim")
+    val infiniteTransition = rememberInfiniteTransition(label = "splash")
     val scale by infiniteTransition.animateFloat(
-        initialValue = 0.95f,
-        targetValue = 1.05f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1200, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ), label = "scale"
+        initialValue = 0.9f, targetValue = 1.05f,
+        animationSpec = infiniteRepeatable(tween(1000, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "s"
     )
     val alpha by infiniteTransition.animateFloat(
-        initialValue = 0.6f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1200, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ), label = "alpha"
+        initialValue = 0.6f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(1000, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "a"
     )
 
     LaunchedEffect(Unit) {
-        delay(1800)
+        delay(1500) // 1.5 секунды
         visible = false
         onTimeout()
     }
 
     if (visible) {
         Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.radialGradient(
-                        colors = listOf(Color(0xFF14D4F4).copy(alpha = 0.15f), DarkBackground),
-                        center = Offset(0f, 0f),
-                        radius = 1500f
-                    )
-                ),
+            modifier = Modifier.fillMaxSize().background(
+                Brush.radialGradient(
+                    colors = listOf(Color(0xFF14D4F4).copy(alpha = 0.15f), DarkBackground),
+                    center = Offset(0f, 0f), radius = 1500f
+                )
+            ),
             contentAlignment = Alignment.Center
         ) {
             Image(
                 painter = painterResource(id = R.drawable.app_logo_transparent),
-                contentDescription = "Re:Player Splash",
-                modifier = Modifier
-                    .size(180.dp)
-                    .scale(scale)
-                    .alpha(alpha)
+                contentDescription = "Splash",
+                modifier = Modifier.size(180.dp).scale(scale).alpha(alpha)
             )
         }
     }
