@@ -118,16 +118,16 @@ fun HomeScreen(
             .padding(start = 28.dp, end = 28.dp, top = 34.dp, bottom = 18.dp)
     ) {
         // -------------------------------------------------------------
-        // ВЕРХНИЙ БЛОК: СЛЕВА ПОСТЕРЫ (~ПОЛОВИНА ЭКРАНА) | СПРАВА «ИЗБРАННЫЕ ПАПКИ» ДО КРАЯ ЭКРАНА
+        // ВЕРХНИЙ БЛОК: СЛЕВА ПОСТЕРЫ (2:3) | СПРАВА «ИЗБРАННЫЕ ПАПКИ» ДО КРАЯ ЭКРАНА
         // -------------------------------------------------------------
-        val posterSectionHeight = 208.dp
+        val posterSectionHeight = 236.dp
         val recentPosters = remember(recentList) { recentList.take(2) }
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.Top
         ) {
-            // LEFT COLUMN: Продолжить просмотр (~46% ширины, до 2 постеров с одной папки макс.)
-            Column(modifier = Modifier.weight(0.46f)) {
+            // LEFT COLUMN: Продолжить просмотр (вытянутые постеры формата 2:3)
+            Column(modifier = Modifier.width(342.dp)) {
                 Text(
                     text = "Продолжить просмотр",
                     style = MaterialTheme.typography.titleMedium.copy(
@@ -180,8 +180,8 @@ fun HomeScreen(
                             HomeShelfFocusCard(
                                 onClick = { onPlayMedia(recent.toMediaItem()) },
                                 modifier = Modifier
-                                    .weight(1f)
                                     .height(posterSectionHeight)
+                                    .aspectRatio(2f / 3f, matchHeightConstraintsFirst = true)
                                     .then(if (idx == 0) Modifier.focusRequester(entryFocusRequester) else Modifier)
                             ) { isFocused ->
                                 Box(modifier = Modifier.fillMaxSize()) {
@@ -302,10 +302,6 @@ fun HomeScreen(
                             }
                         }
 
-                        // Preserve crisp vertical poster proportions when only 1 recent item exists
-                        if (recentPosters.size == 1) {
-                            Spacer(modifier = Modifier.weight(1f))
-                        }
                     }
                 }
             }
@@ -313,7 +309,7 @@ fun HomeScreen(
             Spacer(modifier = Modifier.width(20.dp))
 
             // RIGHT COLUMN: Избранные папки DLNA (растянуты до правого края экрана)
-            Column(modifier = Modifier.weight(0.54f)) {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = "Избранные папки",
                     style = MaterialTheme.typography.titleMedium.copy(
@@ -359,16 +355,16 @@ fun HomeScreen(
                     ) {
                         val gridWidth = maxWidth
                         val cardWidth = if (favorites.size <= 2) {
-                            gridWidth - 4.dp
+                            (gridWidth - 16.dp).coerceAtLeast(200.dp)
                         } else {
-                            ((gridWidth - 16.dp) / 2f).coerceAtLeast(200.dp)
+                            ((gridWidth - 28.dp) / 2f).coerceAtLeast(190.dp)
                         }
 
                         LazyHorizontalGrid(
                             rows = GridCells.Fixed(2),
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp),
-                            contentPadding = PaddingValues(horizontal = 2.dp, vertical = 2.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                             modifier = Modifier.fillMaxSize()
                         ) {
                             gridItemsIndexed(favorites, key = { idx, fav -> "${fav.id}_$idx" }) { idx, fav ->

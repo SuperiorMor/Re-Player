@@ -12,10 +12,12 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -342,12 +344,18 @@ fun SettingsScreen(
                                 serverConfigManager.disconnectUpnpDevice()
                                 showAvailableServers = true
                             },
+                            backgroundColor = AccentCyan,
+                            focusedBackgroundColor = AccentCyanBright,
                             modifier = Modifier
-                                .width(120.dp)
+                                .width(130.dp)
                                 .height(44.dp)
                         ) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text(text = "Отключить", color = AccentOrange, style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    text = "Отключить",
+                                    color = DarkBackground,
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                                )
                             }
                         }
                     }
@@ -632,6 +640,14 @@ fun SettingsScreen(
                     }
 
                     // Button: "Обновлено: X ч. назад"
+                    val isEpgError = iptvStatusMessage?.let {
+                        it.contains("Ошибка", ignoreCase = true) || it.contains("Сбой", ignoreCase = true)
+                    } == true
+                    val isEpgFresh = epgMap.isNotEmpty() &&
+                        lastEpgUpdateTime > 0L &&
+                        (System.currentTimeMillis() - lastEpgUpdateTime) < 24 * 3600 * 1000L &&
+                        !isEpgError
+
                     TvFocusCard(
                         onClick = {
                             if (iptvEpgInput.isNotBlank()) {
@@ -640,6 +656,9 @@ fun SettingsScreen(
                                 scope.launch { iptvManager.refreshPlaylist() }
                             }
                         },
+                        backgroundColor = if (isEpgFresh) AccentOrange.copy(alpha = 0.14f) else CardBackground,
+                        focusedBackgroundColor = if (isEpgFresh) AccentOrange.copy(alpha = 0.25f) else CardFocusedBackground,
+                        focusBorderColor = if (isEpgFresh) AccentOrange else FocusBorder,
                         modifier = Modifier
                             .width(260.dp)
                             .height(60.dp)
@@ -671,21 +690,8 @@ fun SettingsScreen(
                                 }
                             }
                         } else {
-                            val isEpgError = iptvStatusMessage?.let {
-                                it.contains("Ошибка", ignoreCase = true) || it.contains("Сбой", ignoreCase = true)
-                            } == true
-                            val isEpgFresh = epgMap.isNotEmpty() &&
-                                lastEpgUpdateTime > 0L &&
-                                (System.currentTimeMillis() - lastEpgUpdateTime) < 24 * 3600 * 1000L &&
-                                !isEpgError
-
-                            val statusIcon = when {
-                                isEpgFresh -> Icons.Outlined.CheckCircle
-                                isEpgError -> Icons.Outlined.WarningAmber
-                                else -> Icons.Outlined.Refresh
-                            }
                             val statusColor = when {
-                                isEpgFresh -> StatusSuccess
+                                isEpgFresh -> AccentOrange
                                 isEpgError -> AccentOrange
                                 iptvEpgInput.isBlank() -> TextSecondary
                                 else -> AccentCyan
@@ -710,13 +716,34 @@ fun SettingsScreen(
                                 horizontalArrangement = Arrangement.Center,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    imageVector = statusIcon,
-                                    contentDescription = null,
-                                    tint = statusColor,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                                Spacer(modifier = Modifier.width(10.dp))
+                                if (isEpgFresh) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .clip(CircleShape)
+                                            .background(
+                                                Brush.linearGradient(
+                                                    colors = listOf(AccentGold, AccentOrange)
+                                                )
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Check,
+                                            contentDescription = null,
+                                            tint = DarkBackground,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                } else {
+                                    Icon(
+                                        imageVector = if (isEpgError) Icons.Outlined.WarningAmber else Icons.Outlined.Refresh,
+                                        contentDescription = null,
+                                        tint = statusColor,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
                                 Column {
                                     Text(
                                         text = primaryLabel,
@@ -728,7 +755,7 @@ fun SettingsScreen(
                                     Text(
                                         text = secondaryLabel,
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = TextSecondary,
+                                        color = if (isEpgFresh) AccentGold.copy(alpha = 0.9f) else TextSecondary,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
@@ -1057,11 +1084,13 @@ fun SettingsScreen(
                     focusBorderColor = AccentOrange,
                     cornerRadius = 16.dp,
                     modifier = Modifier
-                        .width(166.dp)
+                        .width(168.dp)
                         .focusRequester(feedbackQrFocusRequester)
                 ) {
                     Column(
-                        modifier = Modifier.padding(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(10.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Box(
@@ -1076,7 +1105,7 @@ fun SettingsScreen(
                                     ),
                                     shape = RoundedCornerShape(12.dp)
                                 )
-                                .padding(4.dp),
+                                .padding(2.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Image(
@@ -1598,6 +1627,15 @@ fun SettingsScreen(
 }
 
 private fun getFriendlyChangelog(version: String, rawChangelog: String): List<String> {
+    if (version.contains("1.0.4")) {
+        return listOf(
+            "Исправлена навигация в ТВ: переход вниз от кнопок «Обновить»/«Настройки ТВ» в папки, фокус сразу на первом канале при открытии категории, кнопка Back возвращает в папки с одного нажатия.",
+            "Убрана лишняя кнопка «Папки» в ТВ, а в DLNA выход по кнопке Back теперь срабатывает мгновенно с первого нажатия.",
+            "Главная: постеры «Продолжить просмотр» получили формат кинопостеров 2:3, а ободок фокуса «Избранные папки» больше не обрезается.",
+            "Настройки: кнопка «Отключить» в фирменном синем стиле, кнопка «Программа обновлена» в оранжевых цветах с обновлённой галочкой, отцентрирован QR-код обратной связи и упрощён блок сбоев."
+        )
+    }
+
     if (version.contains("1.0.3")) {
         return listOf(
             "Срочный фикс меню: исправлено застревание курсора на «Домике» — теперь по меню можно свободно ходить Вверх/Вниз к Настройкам и другим разделам.",

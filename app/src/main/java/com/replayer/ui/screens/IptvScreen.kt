@@ -26,7 +26,6 @@ import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material.icons.outlined.SwapVert
-import androidx.compose.material.icons.rounded.ArrowBackIosNew
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -37,10 +36,16 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -98,59 +103,38 @@ fun IptvScreen(
     var lastFocusedChannelId by remember { mutableStateOf<String?>(null) }
 
     val entryFocusRequester = remember { FocusRequester() }
-    val holdFocusRequester = remember { FocusRequester() }
-    var isSwitchingView by remember { mutableStateOf(false) }
-    var pendingFolderTarget by remember { mutableStateOf<String?>(null) }
-    var pendingHasSwitch by remember { mutableStateOf(false) }
+    var folderSwitchCounter by remember { mutableIntStateOf(0) }
+    var handledBackKeyDown by remember { mutableStateOf(false) }
 
     fun switchCategory(targetFolder: String?) {
         if (targetFolder != null && targetFolder != selectedFolder) {
             lastFocusedFolder = targetFolder
             lastFocusedChannelId = null
         }
-        pendingFolderTarget = targetFolder
-        pendingHasSwitch = true
-        isSwitchingView = true
+        selectedFolder = targetFolder
+        folderSwitchCounter++
     }
 
-    LaunchedEffect(isSwitchingView, pendingHasSwitch) {
-        if (!isSwitchingView || !pendingHasSwitch) return@LaunchedEffect
-        delay(16)
-        try {
-            holdFocusRequester.requestFocus()
-        } catch (_: Exception) {}
-        selectedFolder = pendingFolderTarget
-        pendingHasSwitch = false
-        delay(120)
-        try {
-            if (selectedFolder == null && folders.size > 1) {
+    LaunchedEffect(enterSectionTrigger, folderSwitchCounter, isLoading, channels.isEmpty()) {
+        if (enterSectionTrigger > 0 || folderSwitchCounter > 0) {
+            delay(60)
+            if (selectedFolder == null && folders.size > 1 && channels.isNotEmpty()) {
                 val targetIdx = folders.indexOf(lastFocusedFolder).let { if (it in folders.indices) it else 0 }
-                folderGridState.scrollToItem(targetIdx)
-            } else {
+                try { folderGridState.scrollToItem(targetIdx) } catch (_: Exception) {}
+            } else if (channels.isNotEmpty() && sortedList.isNotEmpty()) {
                 val targetIdx = sortedList.indexOfFirst { it.id == lastFocusedChannelId }.let { if (it in sortedList.indices) it else 0 }
-                channelGridState.scrollToItem(targetIdx)
+                try { channelGridState.scrollToItem(targetIdx) } catch (_: Exception) {}
             }
-            delay(40)
-            entryFocusRequester.requestFocus()
-        } catch (_: Exception) {}
-        isSwitchingView = false
-    }
-
-    LaunchedEffect(enterSectionTrigger, isLoading, channels.isEmpty()) {
-        if (enterSectionTrigger > 0 && !isSwitchingView) {
-            delay(100)
-            try {
-                if (selectedFolder == null && folders.size > 1 && channels.isNotEmpty()) {
-                    val targetIdx = folders.indexOf(lastFocusedFolder).let { if (it in folders.indices) it else 0 }
-                    folderGridState.scrollToItem(targetIdx)
-                    delay(40)
-                } else if (channels.isNotEmpty() && sortedList.isNotEmpty()) {
-                    val targetIdx = sortedList.indexOfFirst { it.id == lastFocusedChannelId }.let { if (it in sortedList.indices) it else 0 }
-                    channelGridState.scrollToItem(targetIdx)
-                    delay(40)
+            for (attempt in 0..7) {
+                delay(40)
+                val focused = try {
+                    entryFocusRequester.requestFocus()
+                    true
+                } catch (_: Exception) {
+                    false
                 }
-                entryFocusRequester.requestFocus()
-            } catch (_: Exception) {}
+                if (focused) break
+            }
         }
     }
 
@@ -186,8 +170,7 @@ fun IptvScreen(
         }
     }
 
-    // Remote back button handling: inside folder -> back to folders; on folders -> back to Home
-    BackHandler(enabled = true) {
+    fun handleBackAction() {
         if (selectedFolder != null && folders.size > 1) {
             switchCategory(null)
         } else {
@@ -195,21 +178,38 @@ fun IptvScreen(
         }
     }
 
+    // Remote back button handling: inside folder -> back to folders; on folders -> back to Home
+    BackHandler(enabled = !showLocalFileDialog) {
+        handleBackAction()
+    }
+
     val isInsideFolder = selectedFolder != null || (folders.size <= 1 && channels.isNotEmpty())
 
     Column(
         modifier = modifier
             .fillMaxSize()
+            .onPreviewKeyEvent { keyEvent ->
+                if (!showLocalFileDialog && (keyEvent.key == Key.Back || keyEvent.key == Key.Escape)) {
+                    when (keyEvent.type) {
+                        KeyEventType.KeyDown -> {
+                            handledBackKeyDown = true
+                            handleBackAction()
+                            true
+                        }
+                        KeyEventType.KeyUp -> {
+                            if (handledBackKeyDown) {
+                                handledBackKeyDown = false
+                                true
+                            } else false
+                        }
+                        else -> false
+                    }
+                } else {
+                    false
+                }
+            }
             .padding(start = 28.dp, end = 28.dp, top = 24.dp, bottom = 16.dp)
     ) {
-        if (isSwitchingView) {
-            Box(
-                modifier = Modifier
-                    .size(1.dp)
-                    .focusRequester(holdFocusRequester)
-                    .focusable()
-            )
-        }
         // TOP BAR — vertically aligned with the left 64dp Logo
         Row(
             modifier = Modifier
@@ -220,43 +220,22 @@ fun IptvScreen(
         ) {
             if (isInsideFolder) {
                 val currentFolder = selectedFolder ?: folders.firstOrNull() ?: "Все каналы"
-                // Inside Folder Header (Compact so 8+ channels fit)
+                // Inside Folder Header (return to categories via remote Back button)
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (folders.size > 1 && selectedFolder != null) {
-                        TvFocusCard(
-                            onClick = { switchCategory(null) },
-                            modifier = Modifier
-                                .width(116.dp)
-                                .height(38.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxSize(),
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(Icons.Rounded.ArrowBackIosNew, contentDescription = "Назад", tint = AccentCyan, modifier = Modifier.size(14.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("Папки", style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold), color = AccentCyan)
-                            }
-                        }
-                        Spacer(Modifier.width(14.dp))
+                    Text(
+                        text = if (folders.size <= 1) "ТВ каналы" else currentFolder,
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                        color = TextPrimary
+                    )
+                    val folderChannels = remember(channels, currentFolder) {
+                        iptvManager.getChannelsInFolder(currentFolder)
                     }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = if (folders.size <= 1) "ТВ каналы" else currentFolder,
-                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                            color = TextPrimary
-                        )
-                        val folderChannels = remember(channels, currentFolder) {
-                            iptvManager.getChannelsInFolder(currentFolder)
-                        }
-                        Spacer(Modifier.width(12.dp))
-                        Text(
-                            text = "• ${folderChannels.size} каналов",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = TextSecondary
-                        )
-                    }
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        text = "• ${folderChannels.size} каналов",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary
+                    )
                 }
 
                 // Sort toggle button inside folder
@@ -271,6 +250,9 @@ fun IptvScreen(
                     modifier = Modifier
                         .width(210.dp)
                         .height(38.dp)
+                        .focusProperties {
+                            down = if (sortedList.isNotEmpty()) entryFocusRequester else FocusRequester.Default
+                        }
                 ) {
                     Row(
                         modifier = Modifier.fillMaxSize(),
@@ -304,6 +286,9 @@ fun IptvScreen(
                             modifier = Modifier
                                 .width(150.dp)
                                 .height(44.dp)
+                                .focusProperties {
+                                    down = entryFocusRequester
+                                }
                         ) {
                             Row(
                                 modifier = Modifier.fillMaxSize(),
@@ -322,6 +307,9 @@ fun IptvScreen(
                         modifier = Modifier
                             .width(160.dp)
                             .height(44.dp)
+                            .focusProperties {
+                                down = if (channels.isNotEmpty()) entryFocusRequester else FocusRequester.Default
+                            }
                             .then(
                                 if (channels.isEmpty() && isLoading) Modifier.focusRequester(entryFocusRequester)
                                 else Modifier

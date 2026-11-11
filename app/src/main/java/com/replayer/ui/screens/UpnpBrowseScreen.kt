@@ -68,6 +68,11 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -143,20 +148,26 @@ fun UpnpBrowseScreen(
     var isTransitioningFocus by remember { mutableStateOf(false) }
     var lastExitTimestamp by remember { mutableLongStateOf(0L) }
     var lastHandledEnterTrigger by remember { mutableIntStateOf(0) }
+    var handledBackKeyDown by remember { mutableStateOf(false) }
+    var lastBackHandledMs by remember { mutableLongStateOf(0L) }
+    val folderCache = remember { mutableMapOf<String, List<MediaItem>>() }
 
     val currentFolderId = folderStack.lastOrNull()?.first
 
-    fun loadFolder(controlUrl: String, folderId: String) {
+    fun loadFolder(controlUrl: String, folderId: String, showOverlay: Boolean = true) {
         val reqId = ++activeLoadRequestId
-        isTransitioningFocus = true
-        isLoadingFolder = true
-        try {
-            loadingFocusRequester.requestFocus()
-        } catch (_: Exception) {}
+        if (showOverlay) {
+            isTransitioningFocus = true
+            isLoadingFolder = true
+            try {
+                loadingFocusRequester.requestFocus()
+            } catch (_: Exception) {}
+        }
         scope.launch {
-            val loaded = contentDirectory.browse(controlUrl, folderId)
+            val loaded = contentDirectory.browse(controlUrl, folderId).distinctBy { it.id }
             if (reqId == activeLoadRequestId) {
-                currentItems = loaded.distinctBy { it.id }
+                folderCache[folderId] = loaded
+                currentItems = loaded
                 loadedFolderId = folderId
                 isLoadingFolder = false
             }
@@ -203,13 +214,27 @@ fun UpnpBrowseScreen(
     }
 
     fun navigateBack() {
+        val now = System.currentTimeMillis()
+        if (now - lastExitTimestamp < 350 || now - lastBackHandledMs < 220) {
+            return
+        }
+        lastBackHandledMs = now
         onConsumeLastPlayedMediaId()
         if (folderStack.size > 1) {
             val parentIdx = folderStack.size - 2
             val parentFolder = folderStack[parentIdx]
             folderStack = folderStack.take(parentIdx + 1)
-            connectedDevice?.contentDirectoryControlUrl?.let { url ->
-                loadFolder(url, parentFolder.first)
+            val cached = folderCache[parentFolder.first]
+            if (cached != null) {
+                activeLoadRequestId++
+                isTransitioningFocus = true
+                currentItems = cached
+                loadedFolderId = parentFolder.first
+                isLoadingFolder = false
+            } else {
+                connectedDevice?.contentDirectoryControlUrl?.let { url ->
+                    loadFolder(url, parentFolder.first)
+                }
             }
         } else {
             onBackToHome()
@@ -217,10 +242,28 @@ fun UpnpBrowseScreen(
     }
 
     BackHandler(enabled = !isPlayerActive) {
-        if (System.currentTimeMillis() - lastExitTimestamp < 400) {
-            return@BackHandler
-        }
         navigateBack()
+    }
+
+    fun handleBackPreviewKeyEvent(keyEvent: androidx.compose.ui.input.key.KeyEvent): Boolean {
+        if (isPlayerActive) return false
+        if (keyEvent.key == Key.Back || keyEvent.key == Key.Escape) {
+            return when (keyEvent.type) {
+                KeyEventType.KeyDown -> {
+                    handledBackKeyDown = true
+                    navigateBack()
+                    true
+                }
+                KeyEventType.KeyUp -> {
+                    if (handledBackKeyDown) {
+                        handledBackKeyDown = false
+                        true
+                    } else false
+                }
+                else -> false
+            }
+        }
+        return false
     }
 
     val sortedItems = remember(currentItems, sortMode) {
@@ -300,6 +343,7 @@ fun UpnpBrowseScreen(
         Box(
             modifier = modifier
                 .fillMaxSize()
+                .onPreviewKeyEvent { handleBackPreviewKeyEvent(it) }
                 .padding(32.dp),
             contentAlignment = Alignment.Center
         ) {
@@ -355,6 +399,7 @@ fun UpnpBrowseScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
+            .onPreviewKeyEvent { handleBackPreviewKeyEvent(it) }
             .padding(start = 32.dp, end = 32.dp, top = 24.dp, bottom = 18.dp)
     ) {
         // Header: Aligned vertically with the 64dp left Logo (y = 24..88dp)
