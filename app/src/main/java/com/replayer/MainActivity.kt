@@ -93,6 +93,7 @@ class MainActivity : ComponentActivity() {
                     var lastPlayedMediaId by remember { mutableStateOf<String?>(null) }
                     var sectionFocusTrigger by remember { mutableIntStateOf(0) }
                     var anyMainUiHasFocus by remember { mutableStateOf(false) }
+                    var wasFocusInContent by remember { mutableStateOf(false) }
                     var hadPlayerActive by remember { mutableStateOf(false) }
 
                     fun focusRailSelected() {
@@ -138,8 +139,9 @@ class MainActivity : ComponentActivity() {
                     // and no view inside MainActivity has focus, restore focus to the active section in rail
                     LaunchedEffect(windowInfo.isWindowFocused, anyMainUiHasFocus, activeMediaItem, showExitDialog, selectedNav) {
                         if (windowInfo.isWindowFocused && activeMediaItem == null && !showExitDialog && !anyMainUiHasFocus) {
-                            delay(140)
+                            delay(450)
                             if (windowInfo.isWindowFocused && activeMediaItem == null && !showExitDialog && !anyMainUiHasFocus) {
+                                wasFocusInContent = false
                                 try {
                                     railFocusRequesters[selectedNav]?.requestFocus()
                                 } catch (_: Exception) {}
@@ -180,13 +182,17 @@ class MainActivity : ComponentActivity() {
                             TvNavigationRail(
                                 selectedItem = selectedNav,
                                 itemFocusRequesters = railFocusRequesters,
+                                shouldSnapToSelectedOnFocus = wasFocusInContent,
+                                onSnappedToSelected = { wasFocusInContent = false },
                                 onItemSelected = {
+                                    wasFocusInContent = false
                                     if (selectedNav != it) {
                                         selectedNav = it
                                         initialUpnpFolder = null
                                     }
                                 },
                                 onEnterSection = {
+                                    wasFocusInContent = false
                                     selectedNav = it
                                     initialUpnpFolder = null
                                     sectionFocusTrigger++
@@ -197,6 +203,11 @@ class MainActivity : ComponentActivity() {
                                 modifier = Modifier
                                     .weight(1f)
                                     .fillMaxSize()
+                                    .onFocusChanged { state ->
+                                        if (state.hasFocus) {
+                                            wasFocusInContent = true
+                                        }
+                                    }
                             ) {
                                 when (selectedNav) {
                                     NavItem.HOME -> HomeScreen(

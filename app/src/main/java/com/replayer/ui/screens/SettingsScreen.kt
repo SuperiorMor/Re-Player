@@ -87,7 +87,7 @@ fun SettingsScreen(
 
     LaunchedEffect(enterSectionTrigger) {
         if (enterSectionTrigger > 0) {
-            delay(150) // Важно! Ждем отрисовки Compose
+            delay(100)
             try {
                 entryFocusRequester.requestFocus()
             } catch (_: Exception) {}
@@ -1598,6 +1598,14 @@ fun SettingsScreen(
 }
 
 private fun getFriendlyChangelog(version: String, rawChangelog: String): List<String> {
+    if (version.contains("1.0.3")) {
+        return listOf(
+            "Срочный фикс меню: исправлено застревание курсора на «Домике» — теперь по меню можно свободно ходить Вверх/Вниз к Настройкам и другим разделам.",
+            "Добавлен точный возврат на активную иконку при выходе Влево из контента.",
+            "Оптимизированы тайминги восстановления фокуса после смены экранов и возврата из диалогов."
+        )
+    }
+
     if (version.contains("1.0.2")) {
         return listOf(
             "Полностью переработана логика фокуса D-pad: курсор сразу виден при старте и сохраняется при переходе в меню, диалоги, плеер и обратно в окно.",

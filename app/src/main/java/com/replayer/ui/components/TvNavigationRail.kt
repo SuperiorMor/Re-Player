@@ -58,6 +58,8 @@ fun TvNavigationRail(
     onItemSelected: (NavItem) -> Unit,
     onEnterSection: (NavItem) -> Unit = onItemSelected,
     itemFocusRequesters: Map<NavItem, FocusRequester> = emptyMap(),
+    shouldSnapToSelectedOnFocus: Boolean = false,
+    onSnappedToSelected: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val scope = rememberCoroutineScope()
@@ -65,9 +67,10 @@ fun TvNavigationRail(
     val resolvedRequesters = remember(itemFocusRequesters) {
         NavItem.entries.associateWith { item -> itemFocusRequesters[item] ?: localRequesters.getValue(item) }
     }
-    var railHasFocus by remember { mutableStateOf(false) }
     var focusedItem by remember { mutableStateOf<NavItem?>(null) }
     val latestSelected by rememberUpdatedState(selectedItem)
+    val latestShouldSnap by rememberUpdatedState(shouldSnapToSelectedOnFocus)
+    val latestOnSnapped by rememberUpdatedState(onSnappedToSelected)
 
     Row(
         modifier = modifier
@@ -75,15 +78,16 @@ fun TvNavigationRail(
             .width(92.dp)
             .background(SurfaceDark.copy(alpha = 0.72f))
             .onFocusChanged { state ->
-                val enteringFromOutside = !railHasFocus && state.hasFocus
-                railHasFocus = state.hasFocus
                 if (!state.hasFocus) {
                     focusedItem = null
-                } else if (enteringFromOutside && focusedItem != latestSelected) {
-                    scope.launch {
-                        try {
-                            resolvedRequesters[latestSelected]?.requestFocus()
-                        } catch (_: Exception) {}
+                } else if (latestShouldSnap) {
+                    latestOnSnapped()
+                    if (focusedItem != latestSelected) {
+                        scope.launch {
+                            try {
+                                resolvedRequesters[latestSelected]?.requestFocus()
+                            } catch (_: Exception) {}
+                        }
                     }
                 }
             }

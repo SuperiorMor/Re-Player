@@ -249,7 +249,7 @@ fun UpnpBrowseScreen(
             isTransitioningFocus = false
             if (enterSectionTrigger != lastHandledEnterTrigger && enterSectionTrigger > 0) {
                 lastHandledEnterTrigger = enterSectionTrigger
-                delay(150) // Важно! Ждем отрисовки Compose
+                delay(100)
                 try {
                     settingsCtaFocusRequester.requestFocus()
                 } catch (_: Exception) {}
@@ -263,7 +263,7 @@ fun UpnpBrowseScreen(
         if (items.isEmpty()) {
             focusedItem = null
             lastFocusedFolderId = loadedFolderId
-            delay(150)
+            delay(100)
             try {
                 emptyFocusRequester.requestFocus()
             } catch (_: Exception) {}
@@ -289,7 +289,7 @@ fun UpnpBrowseScreen(
         try {
             listState.scrollToItem(resolvedIdx)
         } catch (_: Exception) {}
-        delay(150) // Важно! Ждем отрисовки Compose
+        delay(100)
         try {
             targetItemFocusRequester.requestFocus()
         } catch (_: Exception) {}
