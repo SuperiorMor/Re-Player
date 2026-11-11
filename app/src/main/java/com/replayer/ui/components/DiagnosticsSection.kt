@@ -79,23 +79,10 @@ fun DiagnosticsSection() {
     var isSendingNow by remember { mutableStateOf(false) }
     var actionFeedback by remember { mutableStateOf<String?>(null) }
     var showLogsDialog by remember { mutableStateOf(false) }
-    var hadLogsDialog by remember { mutableStateOf(false) }
     val journalFocusRequester = remember { FocusRequester() }
 
     LaunchedEffect(Unit) {
         CrashReporter.refreshReportsList()
-    }
-
-    LaunchedEffect(showLogsDialog) {
-        if (showLogsDialog) {
-            hadLogsDialog = true
-        } else if (hadLogsDialog) {
-            hadLogsDialog = false
-            delay(80)
-            try {
-                journalFocusRequester.requestFocus()
-            } catch (_: Exception) {}
-        }
     }
 
     val totalCount = reports.size

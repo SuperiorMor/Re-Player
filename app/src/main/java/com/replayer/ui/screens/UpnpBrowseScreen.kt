@@ -31,7 +31,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -59,11 +59,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -106,8 +109,11 @@ import com.replayer.ui.theme.TextSecondary
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun UpnpBrowseScreen(
+    firstItemFocusRequester: FocusRequester,
+    navMenuFocusRequester: FocusRequester,
     onPlayMedia: (MediaItem, List<MediaItem>) -> Unit,
     onNavigateToSettings: () -> Unit,
     onBackToHome: () -> Unit,
@@ -115,8 +121,6 @@ fun UpnpBrowseScreen(
     initialFolder: Pair<String, String>? = null,
     lastPlayedMediaId: String? = null,
     isPlayerActive: Boolean = false,
-    enterSectionTrigger: Int = 0,
-    onConsumeEnterTrigger: () -> Unit = {},
     onFolderLoaded: () -> Unit = {},
     onConsumeLastPlayedMediaId: () -> Unit = {}
 ) {
@@ -139,17 +143,8 @@ fun UpnpBrowseScreen(
     var sortMode by remember { mutableStateOf(SortMode.BY_NAME) }
 
     val listState = rememberLazyListState()
-    val targetItemFocusRequester = remember { FocusRequester() }
-    val loadingFocusRequester = remember { FocusRequester() }
-    val emptyFocusRequester = remember { FocusRequester() }
-    val settingsCtaFocusRequester = remember { FocusRequester() }
-    var focusTargetIndex by remember { mutableIntStateOf(0) }
     var focusedItem by remember { mutableStateOf<MediaItem?>(null) }
-    var lastFocusedFolderId by remember { mutableStateOf<String?>(null) }
-    var isTransitioningFocus by remember { mutableStateOf(false) }
     var lastExitTimestamp by remember { mutableLongStateOf(0L) }
-    var hasEnteredUpnp by remember { mutableStateOf(enterSectionTrigger > 0 || initialFolder != null) }
-    var isContentAreaFocused by remember { mutableStateOf(false) }
     var handledBackKeyDown by remember { mutableStateOf(false) }
     var lastBackHandledMs by remember { mutableLongStateOf(0L) }
     val folderCache = remember { mutableMapOf<String, List<MediaItem>>() }
@@ -159,13 +154,7 @@ fun UpnpBrowseScreen(
     fun loadFolder(controlUrl: String, folderId: String, showOverlay: Boolean = true) {
         val reqId = ++activeLoadRequestId
         if (showOverlay) {
-            isTransitioningFocus = true
             isLoadingFolder = true
-            if (hasEnteredUpnp || isContentAreaFocused) {
-                try {
-                    loadingFocusRequester.requestFocus()
-                } catch (_: Exception) {}
-            }
         }
         scope.launch {
             val loaded = contentDirectory.browse(controlUrl, folderId).distinctBy { it.id }
@@ -175,14 +164,6 @@ fun UpnpBrowseScreen(
                 loadedFolderId = folderId
                 isLoadingFolder = false
             }
-        }
-    }
-
-    LaunchedEffect(isLoadingFolder) {
-        if (isLoadingFolder && (hasEnteredUpnp || isContentAreaFocused)) {
-            try {
-                loadingFocusRequester.requestFocus()
-            } catch (_: Exception) {}
         }
     }
 
@@ -231,7 +212,6 @@ fun UpnpBrowseScreen(
             val cached = folderCache[parentFolder.first]
             if (cached != null) {
                 activeLoadRequestId++
-                isTransitioningFocus = true
                 currentItems = cached
                 loadedFolderId = parentFolder.first
                 isLoadingFolder = false
@@ -290,75 +270,10 @@ fun UpnpBrowseScreen(
 
     val latestSortedItems by rememberUpdatedState(sortedItems)
 
-    // Restore focus to the last-opened (or last-played) item inside the current folder
-    LaunchedEffect(loadedFolderId, isLoadingFolder, isPlayerActive, lastPlayedMediaId, enterSectionTrigger) {
-        if (enterSectionTrigger > 0) {
-            hasEnteredUpnp = true
-            onConsumeEnterTrigger()
-        }
-        if (initialFolder != null || lastPlayedMediaId != null) {
-            hasEnteredUpnp = true
-        }
-        val shouldMoveFocus = hasEnteredUpnp || isContentAreaFocused
-
-        if (connectedDevice == null) {
-            isTransitioningFocus = false
-            if (shouldMoveFocus) {
-                delay(80)
-                try {
-                    settingsCtaFocusRequester.requestFocus()
-                } catch (_: Exception) {}
-            }
-            return@LaunchedEffect
-        }
-        if (isPlayerActive || isLoadingFolder || loadedFolderId == null || loadedFolderId != currentFolderId) {
-            return@LaunchedEffect
-        }
-        val items = latestSortedItems
-        if (items.isEmpty()) {
-            focusedItem = null
-            lastFocusedFolderId = loadedFolderId
-            if (shouldMoveFocus) {
-                delay(80)
-                try {
-                    emptyFocusRequester.requestFocus()
-                } catch (_: Exception) {}
-            }
-            isTransitioningFocus = false
-            return@LaunchedEffect
-        }
-
-        val lastSaved = recentManager.getLastOpenedKeyInFolder(currentFolderId)
-        val sameFolderReenter = (loadedFolderId == lastFocusedFolderId && focusedItem != null && lastPlayedMediaId == null)
-        val resolvedIdx = when {
-            lastPlayedMediaId != null -> items.indexOfFirst { it.id == lastPlayedMediaId }
-            sameFolderReenter -> items.indexOfFirst { it.id == focusedItem?.id }
-            lastSaved != null -> items.indexOfFirst {
-                it.id == lastSaved.first || (lastSaved.second.isNotBlank() && it.uri == lastSaved.second)
-            }
-            else -> 0
-        }.let { if (it in items.indices) it else 0 }
-
-        lastFocusedFolderId = loadedFolderId
-        focusTargetIndex = resolvedIdx
-        focusedItem = items[resolvedIdx]
-        try {
-            listState.scrollToItem(resolvedIdx)
-        } catch (_: Exception) {}
-        if (shouldMoveFocus) {
-            delay(80)
-            try {
-                targetItemFocusRequester.requestFocus()
-            } catch (_: Exception) {}
-        }
-        isTransitioningFocus = false
-    }
-
     if (connectedDevice == null) {
         Box(
             modifier = modifier
                 .fillMaxSize()
-                .onFocusChanged { isContentAreaFocused = it.hasFocus }
                 .onPreviewKeyEvent { handleBackPreviewKeyEvent(it) }
                 .padding(32.dp),
             contentAlignment = Alignment.Center
@@ -391,7 +306,8 @@ fun UpnpBrowseScreen(
                     modifier = Modifier
                         .width(240.dp)
                         .height(52.dp)
-                        .focusRequester(settingsCtaFocusRequester)
+                        .focusRequester(firstItemFocusRequester)
+                        .focusProperties { left = navMenuFocusRequester }
                 ) {
                     Row(
                         modifier = Modifier.fillMaxSize(),
@@ -415,7 +331,6 @@ fun UpnpBrowseScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .onFocusChanged { isContentAreaFocused = it.hasFocus }
             .onPreviewKeyEvent { handleBackPreviewKeyEvent(it) }
             .padding(start = 32.dp, end = 32.dp, top = 38.dp, bottom = 18.dp)
     ) {
@@ -455,6 +370,9 @@ fun UpnpBrowseScreen(
                 modifier = Modifier
                     .width(180.dp)
                     .height(42.dp)
+                    .focusProperties {
+                        left = navMenuFocusRequester
+                    }
             ) {
                 Row(
                     modifier = Modifier.fillMaxSize(),
@@ -484,7 +402,8 @@ fun UpnpBrowseScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .focusRequester(emptyFocusRequester)
+                        .focusRequester(firstItemFocusRequester)
+                        .focusProperties { left = navMenuFocusRequester }
                         .focusable(),
                     contentAlignment = Alignment.Center
                 ) {
@@ -505,12 +424,17 @@ fun UpnpBrowseScreen(
                     LazyColumn(
                         state = listState,
                         verticalArrangement = Arrangement.spacedBy(8.dp),
-                        contentPadding = PaddingValues(top = 4.dp, bottom = 24.dp),
+                        contentPadding = PaddingValues(top = 6.dp, bottom = 24.dp, start = 14.dp, end = 14.dp),
                         modifier = Modifier
                             .weight(0.56f)
                             .fillMaxHeight()
+                            .focusRequester(firstItemFocusRequester)
+                            .focusRestorer()
+                            .focusProperties {
+                                left = navMenuFocusRequester
+                            }
                     ) {
-                        itemsIndexed(sortedItems, key = { _, item -> item.id }) { index, item ->
+                        items(sortedItems, key = { item -> item.id }) { item ->
                             val isFav = favorites.any { it.id == item.id }
                             val watchProgress = remember(item.id, item.uri, progressMap) {
                                 if (item.type != MediaType.DIRECTORY) {
@@ -524,10 +448,6 @@ fun UpnpBrowseScreen(
                             val starInteraction = remember { MutableInteractionSource() }
                             val isStarFocused by starInteraction.collectIsFocusedAsState()
                             val isAnyPartFocused = isRowFocused || isStarFocused
-
-                            val focusModifier = if (index == focusTargetIndex) {
-                                Modifier.focusRequester(targetItemFocusRequester)
-                            } else Modifier
 
                             TvFocusCard(
                                 onClick = {
@@ -563,7 +483,9 @@ fun UpnpBrowseScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(52.dp)
-                                    .then(focusModifier)
+                                    .focusProperties {
+                                        left = navMenuFocusRequester
+                                    }
                                     .onFocusChanged { state ->
                                         isRowFocused = state.hasFocus
                                         if (state.hasFocus) {
@@ -737,39 +659,32 @@ fun UpnpBrowseScreen(
                 }
             }
 
-            if (isLoadingFolder || isTransitioningFocus) {
+            if (isLoadingFolder) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .focusRequester(loadingFocusRequester)
-                        .focusable()
-                        .then(
-                            if (isLoadingFolder) Modifier.background(Color.Black.copy(alpha = 0.48f))
-                            else Modifier
-                        ),
+                        .background(Color.Black.copy(alpha = 0.48f)),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (isLoadingFolder) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(DarkCard)
-                                .border(1.dp, BorderSubtle, RoundedCornerShape(14.dp))
-                                .padding(horizontal = 24.dp, vertical = 16.dp)
-                        ) {
-                            CircularProgressIndicator(
-                                color = AccentCyan,
-                                strokeWidth = 2.5.dp,
-                                modifier = Modifier.size(22.dp)
-                            )
-                            Spacer(modifier = Modifier.width(14.dp))
-                            Text(
-                                text = "Загрузка содержимого...",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = TextPrimary
-                            )
-                        }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(DarkCard)
+                            .border(1.dp, BorderSubtle, RoundedCornerShape(14.dp))
+                            .padding(horizontal = 24.dp, vertical = 16.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            color = AccentCyan,
+                            strokeWidth = 2.5.dp,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Spacer(modifier = Modifier.width(14.dp))
+                        Text(
+                            text = "Загрузка содержимого...",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = TextPrimary
+                        )
                     }
                 }
             }

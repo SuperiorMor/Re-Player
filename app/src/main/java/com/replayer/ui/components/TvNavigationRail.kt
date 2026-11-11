@@ -23,27 +23,21 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import com.replayer.ui.theme.AccentCyanBright
 import com.replayer.ui.theme.SurfaceDark
+import com.replayer.ui.theme.TextPrimary
 import com.replayer.ui.theme.TextSecondary
-import kotlinx.coroutines.launch
 
 enum class NavItem(val label: String, val icon: ImageVector) {
     HOME("Главная", Icons.Outlined.Home),
@@ -55,42 +49,16 @@ enum class NavItem(val label: String, val icon: ImageVector) {
 @Composable
 fun TvNavigationRail(
     selectedItem: NavItem,
+    navMenuFocusRequester: FocusRequester,
+    activeScreenFocusRequester: FocusRequester,
     onItemSelected: (NavItem) -> Unit,
-    onEnterSection: (NavItem) -> Unit = onItemSelected,
-    itemFocusRequesters: Map<NavItem, FocusRequester> = emptyMap(),
-    shouldSnapToSelectedOnFocus: Boolean = false,
-    onSnappedToSelected: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val scope = rememberCoroutineScope()
-    val localRequesters = remember { NavItem.entries.associateWith { FocusRequester() } }
-    val resolvedRequesters = remember(itemFocusRequesters) {
-        NavItem.entries.associateWith { item -> itemFocusRequesters[item] ?: localRequesters.getValue(item) }
-    }
-    var focusedItem by remember { mutableStateOf<NavItem?>(null) }
-    val latestSelected by rememberUpdatedState(selectedItem)
-    val latestShouldSnap by rememberUpdatedState(shouldSnapToSelectedOnFocus)
-    val latestOnSnapped by rememberUpdatedState(onSnappedToSelected)
-
     Row(
         modifier = modifier
             .fillMaxHeight()
             .width(92.dp)
             .background(SurfaceDark.copy(alpha = 0.72f))
-            .onFocusChanged { state ->
-                if (!state.hasFocus) {
-                    focusedItem = null
-                } else if (latestShouldSnap) {
-                    latestOnSnapped()
-                    if (focusedItem != latestSelected) {
-                        scope.launch {
-                            try {
-                                resolvedRequesters[latestSelected]?.requestFocus()
-                            } catch (_: Exception) {}
-                        }
-                    }
-                }
-            }
     ) {
         Column(
             modifier = Modifier
@@ -109,33 +77,33 @@ fun TvNavigationRail(
 
             Spacer(modifier = Modifier.height(22.dp))
 
-            NavItem.entries.forEach { item ->
+            NavItem.entries.forEachIndexed { idx, item ->
                 val isSelected = item == selectedItem
+                var isItemFocused by remember { mutableStateOf(false) }
+
                 TvFocusCard(
                     onClick = {
-                        onItemSelected(item)
+                        if (!isSelected) {
+                            onItemSelected(item)
+                        } else {
+                            try {
+                                activeScreenFocusRequester.requestFocus()
+                            } catch (_: Exception) {}
+                        }
                     },
                     isSelected = isSelected,
                     cornerRadius = 14.dp,
+                    focusedScale = 1.05f,
                     modifier = Modifier
                         .padding(vertical = 7.dp)
                         .size(50.dp)
-                        .focusRequester(resolvedRequesters.getValue(item))
-                        .onFocusChanged { state ->
-                            if (state.isFocused) {
-                                focusedItem = item
-                            }
-                        }
-                        .onPreviewKeyEvent { keyEvent ->
-                            if (keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.DirectionRight) {
-                                if (item == selectedItem) {
-                                    onEnterSection(item)
-                                }
-                                // Absorb Right on non-selected items so cursor never leaks or vanishes
-                                true
-                            } else {
-                                false
-                            }
+                        .then(if (isSelected) Modifier.focusRequester(navMenuFocusRequester) else Modifier)
+                        .onFocusChanged { isItemFocused = it.isFocused }
+                        .focusProperties {
+                            left = FocusRequester.Cancel
+                            right = if (isSelected) activeScreenFocusRequester else FocusRequester.Cancel
+                            if (idx == 0) up = FocusRequester.Cancel
+                            if (idx == NavItem.entries.lastIndex) down = FocusRequester.Cancel
                         }
                 ) {
                     Box(
@@ -145,7 +113,11 @@ fun TvNavigationRail(
                         Icon(
                             imageVector = item.icon,
                             contentDescription = item.label,
-                            tint = if (isSelected) AccentCyanBright else TextSecondary,
+                            tint = when {
+                                isSelected -> AccentCyanBright
+                                isItemFocused -> TextPrimary
+                                else -> TextSecondary
+                            },
                             modifier = Modifier.size(22.dp)
                         )
                     }

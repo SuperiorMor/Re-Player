@@ -26,6 +26,7 @@ import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -75,9 +76,9 @@ private enum class UrlEditTarget {
 
 @Composable
 fun SettingsScreen(
+    firstItemFocusRequester: FocusRequester,
+    navMenuFocusRequester: FocusRequester,
     onBack: () -> Unit,
-    enterSectionTrigger: Int = 0,
-    onConsumeEnterTrigger: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -86,17 +87,6 @@ fun SettingsScreen(
     val discovery = remember { SsdpDiscovery(context) }
     val updateManager = remember { UpdateManager(context) }
     val currentVersion = remember { getCurrentAppVersion(context) }
-    val entryFocusRequester = remember { FocusRequester() }
-
-    LaunchedEffect(enterSectionTrigger) {
-        if (enterSectionTrigger > 0) {
-            onConsumeEnterTrigger()
-            delay(80)
-            try {
-                entryFocusRequester.requestFocus()
-            } catch (_: Exception) {}
-        }
-    }
 
     val connectedUpnpDevice by serverConfigManager.connectedUpnpDevice.collectAsState()
 
@@ -159,28 +149,6 @@ fun SettingsScreen(
     val updateActionFocusRequester = remember { FocusRequester() }
     var showSupportQrDialog by remember { mutableStateOf(false) }
     val feedbackQrFocusRequester = remember { FocusRequester() }
-    var hadQrDialogOpen by remember { mutableStateOf(false) }
-
-    LaunchedEffect(showSupportQrDialog) {
-        if (showSupportQrDialog) {
-            hadQrDialogOpen = true
-        } else if (hadQrDialogOpen) {
-            hadQrDialogOpen = false
-            delay(80)
-            try {
-                feedbackQrFocusRequester.requestFocus()
-            } catch (_: Exception) {}
-        }
-    }
-
-    LaunchedEffect(updateUiState) {
-        if (updateUiState is UpdateUiState.ReadyToInstall) {
-            delay(60)
-            try {
-                updateActionFocusRequester.requestFocus()
-            } catch (_: Exception) {}
-        }
-    }
 
     BackHandler(enabled = true) {
         onBack()
@@ -330,7 +298,8 @@ fun SettingsScreen(
                             modifier = Modifier
                                 .width(150.dp)
                                 .height(44.dp)
-                                .focusRequester(entryFocusRequester)
+                                .focusRequester(firstItemFocusRequester)
+                                .focusProperties { left = navMenuFocusRequester }
                         ) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Text(
@@ -407,6 +376,7 @@ fun SettingsScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(72.dp)
+                                    .focusProperties { left = navMenuFocusRequester }
                             ) {
                                 Row(
                                     modifier = Modifier
@@ -442,7 +412,8 @@ fun SettingsScreen(
                         modifier = Modifier
                             .width(220.dp)
                             .height(48.dp)
-                            .then(if (connectedUpnpDevice == null) Modifier.focusRequester(entryFocusRequester) else Modifier)
+                            .then(if (connectedUpnpDevice == null) Modifier.focusRequester(firstItemFocusRequester) else Modifier)
+                            .focusProperties { left = navMenuFocusRequester }
                     ) {
                         Row(
                             modifier = Modifier.fillMaxSize(),
@@ -1137,12 +1108,6 @@ fun SettingsScreen(
     // ---------------------------------------------------------
     if (showSupportQrDialog) {
         val qrCloseFocusRequester = remember { FocusRequester() }
-        LaunchedEffect(Unit) {
-            delay(80)
-            try {
-                qrCloseFocusRequester.requestFocus()
-            } catch (_: Exception) {}
-        }
 
         Dialog(onDismissRequest = { showSupportQrDialog = false }) {
             Box(
@@ -1488,13 +1453,6 @@ fun SettingsScreen(
                 !clipboardText.isNullOrBlank() && (clipboardText.startsWith("http://", ignoreCase = true) || clipboardText.startsWith("https://", ignoreCase = true))
             }
 
-            LaunchedEffect(Unit) {
-                delay(120)
-                try {
-                    dialogFocusRequester.requestFocus()
-                } catch (_: Exception) {}
-            }
-
             Box(
                 modifier = Modifier
                     .width(620.dp)
@@ -1629,6 +1587,15 @@ fun SettingsScreen(
 }
 
 private fun getFriendlyChangelog(version: String, rawChangelog: String): List<String> {
+    if (version.contains("1.0.7")) {
+        return listOf(
+            "Полная переработка D-pad навигации: удалены все LaunchedEffect/delay костыли фокуса, переход между левым меню и экранами работает строго через focusProperties.",
+            "Левое меню: разделы переключаются только по нажатию OK, проход Вверх/Вниз подсвечивает кнопки с 4 состояниями без переключения экрана, Вправо входит в контент.",
+            "DLNA и IPTV: добавлен встроенный Modifier.focusRestorer() и ключи item.id для автоматической памяти позиции курсора в списках.",
+            "Главная: при нажатии Вправо на избранном канале оранжевый минус открывается мгновенно без фокусных задержек."
+        )
+    }
+
     if (version.contains("1.0.6")) {
         return listOf(
             "Навигация: исправлена потеря/перескок фокуса — при нажатии OK на раздел в левом меню курсор надёжно остаётся на кнопке с чётким откликом нажатия.",

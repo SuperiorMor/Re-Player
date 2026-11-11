@@ -70,12 +70,11 @@ import kotlin.math.abs
 
 @Composable
 fun HomeScreen(
+    firstItemFocusRequester: FocusRequester,
+    navMenuFocusRequester: FocusRequester,
     onOpenFavorite: (FavoriteFolder) -> Unit,
     onPlayMedia: (MediaItem) -> Unit,
     onPlayChannel: (IptvChannel, List<IptvChannel>) -> Unit,
-    onFallbackToRail: () -> Unit = {},
-    enterSectionTrigger: Int = 0,
-    onConsumeEnterTrigger: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -95,19 +94,6 @@ fun HomeScreen(
 
     val favoriteChannels = remember(channels, favoriteChannelIds, watchTimes) {
         iptvManager.getFavoriteChannels()
-    }
-    val entryFocusRequester = remember { FocusRequester() }
-
-    LaunchedEffect(enterSectionTrigger) {
-        if (enterSectionTrigger > 0) {
-            onConsumeEnterTrigger()
-            delay(80)
-            try {
-                entryFocusRequester.requestFocus()
-            } catch (_: Exception) {
-                onFallbackToRail()
-            }
-        }
     }
 
     LaunchedEffect(connectedDevice?.contentDirectoryControlUrl, recentList) {
@@ -136,6 +122,7 @@ fun HomeScreen(
         // -------------------------------------------------------------
         val posterSectionHeight = 222.dp
         val recentPosters = remember(recentList) { recentList.take(2) }
+        val allHomeShelvesEmpty = recentPosters.isEmpty() && favorites.isEmpty() && favoriteChannels.isEmpty()
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.Top
@@ -161,6 +148,14 @@ fun HomeScreen(
                             .height(posterSectionHeight)
                             .clip(RoundedCornerShape(12.dp))
                             .background(DarkCard)
+                            .then(
+                                if (allHomeShelvesEmpty) {
+                                    Modifier
+                                        .focusRequester(firstItemFocusRequester)
+                                        .focusProperties { left = navMenuFocusRequester }
+                                        .focusable()
+                                } else Modifier
+                            )
                             .padding(16.dp),
                         contentAlignment = Alignment.Center
                     ) {
@@ -196,7 +191,13 @@ fun HomeScreen(
                                 modifier = Modifier
                                     .height(posterSectionHeight)
                                     .aspectRatio(2f / 3f, matchHeightConstraintsFirst = true)
-                                    .then(if (idx == 0) Modifier.focusRequester(entryFocusRequester) else Modifier)
+                                    .then(
+                                        if (idx == 0) {
+                                            Modifier
+                                                .focusRequester(firstItemFocusRequester)
+                                                .focusProperties { left = navMenuFocusRequester }
+                                        } else Modifier
+                                    )
                             ) { isFocused ->
                                 Box(modifier = Modifier.fillMaxSize()) {
                                     // Background: Full-bleed vertical cover poster OR sleek slate fallback
@@ -389,7 +390,9 @@ fun HomeScreen(
                                         .fillMaxHeight()
                                         .then(
                                             if (recentPosters.isEmpty() && idx == 0) {
-                                                Modifier.focusRequester(entryFocusRequester)
+                                                Modifier
+                                                    .focusRequester(firstItemFocusRequester)
+                                                    .focusProperties { left = navMenuFocusRequester }
                                             } else Modifier
                                         )
                                 ) { _ ->
@@ -507,20 +510,11 @@ fun HomeScreen(
                 epgMap = epgMap,
                 iptvManager = iptvManager,
                 nowMs = nowMs,
-                entryFocusRequester = if (!hasUpperShelf) entryFocusRequester else null,
+                firstItemFocusRequester = firstItemFocusRequester,
+                navMenuFocusRequester = navMenuFocusRequester,
+                hasUpperShelf = hasUpperShelf,
                 onPlayChannel = { ch -> onPlayChannel(ch, favoriteChannels) },
-                onRemoveFavorite = { ch -> iptvManager.toggleFavorite(ch.id) },
-                onNoFavoritesLeftFocus = {
-                    if (hasUpperShelf) {
-                        try {
-                            entryFocusRequester.requestFocus()
-                        } catch (_: Exception) {
-                            onFallbackToRail()
-                        }
-                    } else {
-                        onFallbackToRail()
-                    }
-                }
+                onRemoveFavorite = { ch -> iptvManager.toggleFavorite(ch.id) }
             )
         }
     }
@@ -590,10 +584,11 @@ private fun GoogleTvLiveGuide(
     epgMap: Map<String, List<EpgProgram>>,
     iptvManager: IptvManager,
     nowMs: Long,
-    entryFocusRequester: FocusRequester? = null,
+    firstItemFocusRequester: FocusRequester,
+    navMenuFocusRequester: FocusRequester,
+    hasUpperShelf: Boolean,
     onPlayChannel: (IptvChannel) -> Unit,
-    onRemoveFavorite: (IptvChannel) -> Unit,
-    onNoFavoritesLeftFocus: () -> Unit
+    onRemoveFavorite: (IptvChannel) -> Unit
 ) {
     val totalWindowMs = 75 * 60_000L // 1h 15m visible window matching Google TV
     val windowStart = nowMs - 15 * 60_000L // NOW sits cleanly at 20%
@@ -628,32 +623,6 @@ private fun GoogleTvLiveGuide(
     val rowRequesters = remember { mutableStateMapOf<String, FocusRequester>() }
     fun requesterFor(channelId: String): FocusRequester =
         rowRequesters.getOrPut(channelId) { FocusRequester() }
-
-    var pendingFocusChannelId by remember { mutableStateOf<String?>(null) }
-    var pendingNoFavoritesFocus by remember { mutableStateOf(false) }
-
-    LaunchedEffect(favoriteChannels, pendingFocusChannelId, pendingNoFavoritesFocus) {
-        val targetId = pendingFocusChannelId
-        if (targetId != null) {
-            pendingFocusChannelId = null
-            withFrameNanos { }
-            delay(36)
-            try {
-                rowRequesters[targetId]?.requestFocus()
-            } catch (_: Exception) {
-                if (favoriteChannels.isNotEmpty()) {
-                    try {
-                        rowRequesters[favoriteChannels.first().id]?.requestFocus()
-                    } catch (_: Exception) {}
-                }
-            }
-        } else if (pendingNoFavoritesFocus) {
-            pendingNoFavoritesFocus = false
-            withFrameNanos { }
-            delay(36)
-            onNoFavoritesLeftFocus()
-        }
-    }
 
     Box(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -729,8 +698,8 @@ private fun GoogleTvLiveGuide(
                         buildTimelineSlots(progs, windowStart, windowEnd)
                     }
 
-                    val rowFocusReq = if (channelIdx == 0 && entryFocusRequester != null) {
-                        entryFocusRequester
+                    val rowFocusReq = if (channelIdx == 0 && !hasUpperShelf) {
+                        firstItemFocusRequester
                     } else {
                         remember(channel.id) { requesterFor(channel.id) }
                     }
@@ -744,42 +713,14 @@ private fun GoogleTvLiveGuide(
                     val removeInteractionSource = remember { MutableInteractionSource() }
                     val isRemoveFocused by removeInteractionSource.collectIsFocusedAsState()
 
-                    var showRemoveAction by remember(channel.id) { mutableStateOf(false) }
-                    var pendingFocusRemove by remember(channel.id) { mutableStateOf(false) }
                     var isRowKeyPressed by remember(channel.id) { mutableStateOf(false) }
                     var isRemoveKeyPressed by remember(channel.id) { mutableStateOf(false) }
-
-                    LaunchedEffect(showRemoveAction, pendingFocusRemove) {
-                        if (showRemoveAction && pendingFocusRemove) {
-                            pendingFocusRemove = false
-                            withFrameNanos { }
-                            for (attempt in 0..3) {
-                                val ok = try {
-                                    removeFocusRequester.requestFocus()
-                                    true
-                                } catch (_: Exception) {
-                                    false
-                                }
-                                if (ok) break
-                                delay(16)
-                            }
-                        }
-                    }
-
-                    LaunchedEffect(isRowFocused, isRemoveFocused) {
-                        if (!isRowFocused && !isRemoveFocused && showRemoveAction) {
-                            delay(80)
-                            if (!isRowFocused && !isRemoveFocused) {
-                                showRemoveAction = false
-                            }
-                        }
-                    }
 
                     val isAnyFocused = isRowFocused || isRemoveFocused
                     val rowScale by animateFloatAsState(
                         targetValue = when {
                             isRowKeyPressed -> 0.985f
-                            isAnyFocused -> 1.012f
+                            isAnyFocused -> 1.015f
                             else -> 1.0f
                         },
                         animationSpec = tween(durationMillis = 120),
@@ -788,7 +729,7 @@ private fun GoogleTvLiveGuide(
                     val removeScale by animateFloatAsState(
                         targetValue = when {
                             isRemoveKeyPressed -> 0.92f
-                            isRemoveFocused -> 1.06f
+                            isRemoveFocused -> 1.05f
                             else -> 1.0f
                         },
                         animationSpec = tween(durationMillis = 120),
@@ -822,21 +763,15 @@ private fun GoogleTvLiveGuide(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .focusRequester(rowFocusReq)
+                                .focusProperties {
+                                    left = navMenuFocusRequester
+                                    right = removeFocusRequester
+                                    if (prevRowReq != null) up = prevRowReq
+                                    if (nextRowReq != null) down = nextRowReq
+                                }
                                 .onFocusChanged { state ->
                                     if (!state.isFocused) {
                                         isRowKeyPressed = false
-                                    }
-                                }
-                                .onPreviewKeyEvent { keyEvent ->
-                                    if (keyEvent.type == KeyEventType.KeyDown &&
-                                        keyEvent.key == Key.DirectionRight &&
-                                        keyEvent.nativeKeyEvent.repeatCount == 0
-                                    ) {
-                                        showRemoveAction = true
-                                        pendingFocusRemove = true
-                                        true
-                                    } else {
-                                        false
                                     }
                                 }
                                 .onKeyEvent { keyEvent ->
@@ -935,93 +870,91 @@ private fun GoogleTvLiveGuide(
                             }
                         }
 
-                        // On-demand Orange Minus Button revealed at right edge when pressing Right on the channel
-                        if (showRemoveAction) {
-                            fun triggerRemove() {
-                                val remaining = favoriteChannels.filter { it.id != channel.id }
-                                if (remaining.isNotEmpty()) {
-                                    pendingFocusChannelId = remaining[channelIdx.coerceAtMost(remaining.lastIndex)].id
-                                } else {
-                                    pendingNoFavoritesFocus = true
-                                }
-                                showRemoveAction = false
-                                onRemoveFavorite(channel)
-                            }
+                        // Orange Minus Button: hidden (2dp alpha 0) until Right is pressed to focus it
+                        fun triggerRemove() {
+                            val neighborReq = nextRowReq ?: prevRowReq ?: if (hasUpperShelf) firstItemFocusRequester else navMenuFocusRequester
+                            try {
+                                neighborReq.requestFocus()
+                            } catch (_: Exception) {}
+                            onRemoveFavorite(channel)
+                        }
 
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.CenterEnd)
-                                    .padding(end = 2.dp)
-                                    .width(48.dp)
-                                    .fillMaxHeight()
-                                    .padding(vertical = 3.dp)
-                                    .scale(removeScale)
-                                    .zIndex(5f)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(Color(0xF018110B))
-                                    .background(
-                                        if (isRemoveFocused) AccentOrange.copy(alpha = 0.28f)
-                                        else AccentOrange.copy(alpha = 0.14f)
-                                    )
-                                    .border(
-                                        width = if (isRemoveFocused) 2.dp else 1.2.dp,
-                                        color = AccentOrange,
-                                        shape = RoundedCornerShape(10.dp)
-                                    )
-                                    .focusRequester(removeFocusRequester)
-                                    .focusProperties {
-                                        left = rowFocusReq
-                                        right = FocusRequester.Cancel
-                                        if (prevRowReq != null) up = prevRowReq
-                                        if (nextRowReq != null) down = nextRowReq
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.CenterEnd)
+                                .padding(end = 2.dp)
+                                .width(if (isRemoveFocused) 48.dp else 2.dp)
+                                .fillMaxHeight()
+                                .padding(vertical = 3.dp)
+                                .scale(removeScale)
+                                .zIndex(5f)
+                                .then(
+                                    if (isRemoveFocused) {
+                                        Modifier
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(Color(0xF018110B))
+                                            .background(AccentOrange.copy(alpha = 0.28f))
+                                            .border(
+                                                width = 2.dp,
+                                                color = AccentOrange,
+                                                shape = RoundedCornerShape(10.dp)
+                                            )
+                                    } else Modifier
+                                )
+                                .focusRequester(removeFocusRequester)
+                                .focusProperties {
+                                    left = rowFocusReq
+                                    right = FocusRequester.Cancel
+                                    if (prevRowReq != null) up = prevRowReq
+                                    if (nextRowReq != null) down = nextRowReq
+                                }
+                                .onFocusChanged { state ->
+                                    if (!state.isFocused) {
+                                        isRemoveKeyPressed = false
                                     }
-                                    .onFocusChanged { state ->
-                                        if (!state.isFocused) {
-                                            isRemoveKeyPressed = false
-                                        }
+                                }
+                                .onPreviewKeyEvent { keyEvent ->
+                                    if (keyEvent.type == KeyEventType.KeyDown &&
+                                        (keyEvent.key == Key.Back || keyEvent.key == Key.Escape)
+                                    ) {
+                                        try {
+                                            rowFocusReq.requestFocus()
+                                        } catch (_: Exception) {}
+                                        true
+                                    } else {
+                                        false
                                     }
-                                    .onPreviewKeyEvent { keyEvent ->
-                                        if (keyEvent.type == KeyEventType.KeyDown &&
-                                            (keyEvent.key == Key.DirectionLeft || keyEvent.key == Key.Back || keyEvent.key == Key.Escape)
-                                        ) {
-                                            showRemoveAction = false
-                                            try {
-                                                rowFocusReq.requestFocus()
-                                            } catch (_: Exception) {}
+                                }
+                                .onKeyEvent { keyEvent ->
+                                    val isConfirm = keyEvent.key == Key.DirectionCenter ||
+                                        keyEvent.key == Key.Enter ||
+                                        keyEvent.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER
+                                    if (!isConfirm) return@onKeyEvent false
+                                    when (keyEvent.type) {
+                                        KeyEventType.KeyDown -> {
+                                            if (keyEvent.nativeKeyEvent.repeatCount == 0) {
+                                                isRemoveKeyPressed = true
+                                            }
                                             true
-                                        } else {
-                                            false
                                         }
-                                    }
-                                    .onKeyEvent { keyEvent ->
-                                        val isConfirm = keyEvent.key == Key.DirectionCenter ||
-                                            keyEvent.key == Key.Enter ||
-                                            keyEvent.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER
-                                        if (!isConfirm) return@onKeyEvent false
-                                        when (keyEvent.type) {
-                                            KeyEventType.KeyDown -> {
-                                                if (keyEvent.nativeKeyEvent.repeatCount == 0) {
-                                                    isRemoveKeyPressed = true
-                                                }
-                                                true
+                                        KeyEventType.KeyUp -> {
+                                            val startedHere = isRemoveKeyPressed
+                                            isRemoveKeyPressed = false
+                                            if (startedHere) {
+                                                triggerRemove()
                                             }
-                                            KeyEventType.KeyUp -> {
-                                                val startedHere = isRemoveKeyPressed
-                                                isRemoveKeyPressed = false
-                                                if (startedHere) {
-                                                    triggerRemove()
-                                                }
-                                                true
-                                            }
-                                            else -> false
+                                            true
                                         }
+                                        else -> false
                                     }
-                                    .pointerInput(channel.id) {
-                                        detectTapGestures(onTap = { triggerRemove() })
-                                    }
-                                    .focusable(interactionSource = removeInteractionSource),
-                                contentAlignment = Alignment.Center
-                            ) {
+                                }
+                                .pointerInput(channel.id) {
+                                    detectTapGestures(onTap = { triggerRemove() })
+                                }
+                                .focusable(interactionSource = removeInteractionSource),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (isRemoveFocused) {
                                 Icon(
                                     imageVector = Icons.Rounded.Remove,
                                     contentDescription = "Убрать из избранного",
@@ -1133,8 +1066,8 @@ private fun HomeShelfFocusCard(
     val latestOnClick by rememberUpdatedState(onClick)
     val scale by animateFloatAsState(
         targetValue = when {
-            isPressed -> 0.97f
-            isFocused -> 1.03f
+            isPressed -> 0.96f
+            isFocused -> 1.05f
             else -> 1.0f
         },
         animationSpec = tween(durationMillis = 120),

@@ -67,6 +67,7 @@ fun TvFocusCard(
     isSelected: Boolean = false,
     cornerRadius: Dp = 12.dp,
     enabled: Boolean = true,
+    focusedScale: Float = 1.05f,
     content: @Composable BoxScope.() -> Unit
 ) {
     val interactionSource = remember { MutableInteractionSource() }
@@ -79,8 +80,8 @@ fun TvFocusCard(
 
     val scale by animateFloatAsState(
         targetValue = when {
-            isPressed -> 0.96f
-            isFocused -> 1.025f
+            isPressed -> 0.95f
+            isFocused -> focusedScale
             else -> 1.0f
         },
         animationSpec = tween(durationMillis = 120),
@@ -88,19 +89,41 @@ fun TvFocusCard(
     )
     val resolvedBg by animateColorAsState(
         targetValue = when {
-            isPressed -> focusBorderColor.copy(alpha = 0.22f)
+            isPressed -> focusBorderColor.copy(alpha = 0.24f)
             isFocused -> focusedBackgroundColor
-            isSelected -> AccentCyan.copy(alpha = 0.13f)
             else -> backgroundColor
         },
         animationSpec = tween(durationMillis = 120),
         label = "card_bg"
     )
+    val selectedGradientBg = remember {
+        Brush.horizontalGradient(
+            colors = listOf(
+                AccentCyan.copy(alpha = 0.24f),
+                AccentOrange.copy(alpha = 0.20f)
+            )
+        )
+    }
+    val selectedFocusedGradientBg = remember {
+        Brush.horizontalGradient(
+            colors = listOf(
+                AccentCyan.copy(alpha = 0.34f),
+                AccentOrange.copy(alpha = 0.26f)
+            )
+        )
+    }
+    val selectedGradientBorder = remember {
+        Brush.horizontalGradient(
+            colors = listOf(
+                AccentCyan.copy(alpha = 0.75f),
+                AccentOrange.copy(alpha = 0.65f)
+            )
+        )
+    }
     val resolvedBorderColor by animateColorAsState(
         targetValue = when {
             isPressed -> focusBorderColor
             isFocused -> focusBorderColor
-            isSelected -> AccentCyan.copy(alpha = 0.48f)
             else -> BorderSubtle
         },
         animationSpec = tween(durationMillis = 120),
@@ -108,18 +131,25 @@ fun TvFocusCard(
     )
     val shape = RoundedCornerShape(cornerRadius)
 
+    val bgModifier = when {
+        isSelected && isFocused -> Modifier.background(selectedFocusedGradientBg)
+        isSelected -> Modifier.background(selectedGradientBg)
+        else -> Modifier.background(resolvedBg)
+    }
+    val borderModifier = when {
+        isPressed || isFocused -> Modifier.border(width = 2.dp, color = resolvedBorderColor, shape = shape)
+        isSelected -> Modifier.border(width = 1.5.dp, brush = selectedGradientBorder, shape = shape)
+        else -> Modifier.border(width = 1.dp, color = resolvedBorderColor, shape = shape)
+    }
+
     Box(
         modifier = modifier
             .padding(2.dp)
             .zIndex(if (isFocused) 10f else 1f)
             .scale(scale)
             .clip(shape)
-            .background(resolvedBg)
-            .border(
-                width = if (isFocused || isPressed) 2.dp else 1.dp,
-                color = resolvedBorderColor,
-                shape = shape
-            )
+            .then(bgModifier)
+            .then(borderModifier)
             .semantics { role = Role.Button }
             .onFocusChanged { state ->
                 if (!state.isFocused) {
