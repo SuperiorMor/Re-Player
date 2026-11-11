@@ -4,8 +4,8 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -29,7 +29,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -46,6 +49,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -161,11 +165,9 @@ fun TvScrubberTrack(
             }
             .then(
                 if (onCenterClick != null) {
-                    Modifier.clickable(
-                        interactionSource = interactionSource,
-                        indication = null,
-                        onClick = onCenterClick
-                    )
+                    Modifier.pointerInput(Unit) {
+                        detectTapGestures(onTap = { onCenterClick() })
+                    }
                 } else Modifier
             )
             .focusable(interactionSource = interactionSource),
@@ -226,9 +228,17 @@ fun TvControlCapsule(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
+    var isKeyPressed by remember { mutableStateOf(false) }
+    var isPointerPressed by remember { mutableStateOf(false) }
+    val isPressed = isKeyPressed || isPointerPressed
+    val latestOnClick by rememberUpdatedState(onClick)
     val scale by animateFloatAsState(
-        targetValue = if (isFocused) 1.09f else 1.0f,
-        animationSpec = tween(durationMillis = 130),
+        targetValue = when {
+            isPressed -> 0.94f
+            isFocused -> 1.09f
+            else -> 1.0f
+        },
+        animationSpec = tween(durationMillis = 120),
         label = "capsule_scale"
     )
     val shape = RoundedCornerShape(22.dp)
@@ -268,11 +278,44 @@ fun TvControlCapsule(
             .then(borderModifier)
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .then(modifier)
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null,
-                onClick = onClick
-            )
+            .onFocusChanged { state ->
+                if (!state.isFocused) {
+                    isKeyPressed = false
+                }
+            }
+            .onKeyEvent { keyEvent ->
+                val isConfirm = keyEvent.key == Key.DirectionCenter ||
+                    keyEvent.key == Key.Enter ||
+                    keyEvent.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER
+                if (!isConfirm) return@onKeyEvent false
+                when (keyEvent.type) {
+                    KeyEventType.KeyDown -> {
+                        if (keyEvent.nativeKeyEvent.repeatCount == 0) {
+                            isKeyPressed = true
+                        }
+                        true
+                    }
+                    KeyEventType.KeyUp -> {
+                        val startedHere = isKeyPressed
+                        isKeyPressed = false
+                        if (startedHere) {
+                            latestOnClick()
+                        }
+                        true
+                    }
+                    else -> false
+                }
+            }
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onPress = {
+                        isPointerPressed = true
+                        tryAwaitRelease()
+                        isPointerPressed = false
+                    },
+                    onTap = { latestOnClick() }
+                )
+            }
             .focusable(interactionSource = interactionSource),
         contentAlignment = Alignment.Center
     ) {

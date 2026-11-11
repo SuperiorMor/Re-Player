@@ -71,6 +71,7 @@ fun IptvScreen(
     onNavigateToSettings: () -> Unit,
     onBackToHome: () -> Unit = {},
     enterSectionTrigger: Int = 0,
+    onConsumeEnterTrigger: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -104,6 +105,7 @@ fun IptvScreen(
 
     val entryFocusRequester = remember { FocusRequester() }
     var folderSwitchCounter by remember { mutableIntStateOf(0) }
+    var hasEnteredSection by remember { mutableStateOf(enterSectionTrigger > 0) }
     var handledBackKeyDown by remember { mutableStateOf(false) }
 
     fun switchCategory(targetFolder: String?) {
@@ -112,11 +114,16 @@ fun IptvScreen(
             lastFocusedChannelId = null
         }
         selectedFolder = targetFolder
+        hasEnteredSection = true
         folderSwitchCounter++
     }
 
     LaunchedEffect(enterSectionTrigger, folderSwitchCounter, isLoading, channels.isEmpty()) {
-        if (enterSectionTrigger > 0 || folderSwitchCounter > 0) {
+        if (enterSectionTrigger > 0) {
+            hasEnteredSection = true
+            onConsumeEnterTrigger()
+        }
+        if (hasEnteredSection || folderSwitchCounter > 0) {
             delay(60)
             if (selectedFolder == null && folders.size > 1 && channels.isNotEmpty()) {
                 val targetIdx = folders.indexOf(lastFocusedFolder).let { if (it in folders.indices) it else 0 }
@@ -208,15 +215,15 @@ fun IptvScreen(
                     false
                 }
             }
-            .padding(start = 28.dp, end = 28.dp, top = 24.dp, bottom = 16.dp)
+            .padding(start = 28.dp, end = 28.dp, top = 38.dp, bottom = 16.dp)
     ) {
-        // TOP BAR — vertically aligned with the left 64dp Logo
+        // TOP BAR — vertically aligned with visible left Logo graphics (y ≈ 44..71dp)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 64.dp),
+                .heightIn(min = 48.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = if (isInsideFolder) Alignment.CenterVertically else Alignment.Top
         ) {
             if (isInsideFolder) {
                 val currentFolder = selectedFolder ?: folders.firstOrNull() ?: "Все каналы"

@@ -5,8 +5,8 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Box
@@ -25,13 +25,26 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
@@ -58,27 +71,39 @@ fun TvFocusCard(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
+    var isKeyPressed by remember { mutableStateOf(false) }
+    var isPointerPressed by remember { mutableStateOf(false) }
+    val isPressed = isKeyPressed || isPointerPressed
+    val latestOnClick by rememberUpdatedState(onClick)
+    val latestEnabled by rememberUpdatedState(enabled)
+
     val scale by animateFloatAsState(
-        targetValue = if (isFocused) 1.025f else 1.0f,
-        animationSpec = tween(durationMillis = 140),
+        targetValue = when {
+            isPressed -> 0.96f
+            isFocused -> 1.025f
+            else -> 1.0f
+        },
+        animationSpec = tween(durationMillis = 120),
         label = "card_scale"
     )
     val resolvedBg by animateColorAsState(
         targetValue = when {
+            isPressed -> focusBorderColor.copy(alpha = 0.22f)
             isFocused -> focusedBackgroundColor
             isSelected -> AccentCyan.copy(alpha = 0.13f)
             else -> backgroundColor
         },
-        animationSpec = tween(durationMillis = 140),
+        animationSpec = tween(durationMillis = 120),
         label = "card_bg"
     )
     val resolvedBorderColor by animateColorAsState(
         targetValue = when {
+            isPressed -> focusBorderColor
             isFocused -> focusBorderColor
             isSelected -> AccentCyan.copy(alpha = 0.48f)
             else -> BorderSubtle
         },
-        animationSpec = tween(durationMillis = 140),
+        animationSpec = tween(durationMillis = 120),
         label = "card_border"
     )
     val shape = RoundedCornerShape(cornerRadius)
@@ -91,17 +116,53 @@ fun TvFocusCard(
             .clip(shape)
             .background(resolvedBg)
             .border(
-                width = if (isFocused) 2.dp else 1.dp,
+                width = if (isFocused || isPressed) 2.dp else 1.dp,
                 color = resolvedBorderColor,
                 shape = shape
             )
-            .clickable(
-                enabled = enabled,
-                interactionSource = interactionSource,
-                indication = null,
-                onClick = onClick
-            )
-            .focusable(interactionSource = interactionSource),
+            .semantics { role = Role.Button }
+            .onFocusChanged { state ->
+                if (!state.isFocused) {
+                    isKeyPressed = false
+                }
+            }
+            .onKeyEvent { keyEvent ->
+                if (!latestEnabled) return@onKeyEvent false
+                val isConfirm = keyEvent.key == Key.DirectionCenter ||
+                    keyEvent.key == Key.Enter ||
+                    keyEvent.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER
+                if (!isConfirm) return@onKeyEvent false
+                when (keyEvent.type) {
+                    KeyEventType.KeyDown -> {
+                        if (keyEvent.nativeKeyEvent.repeatCount == 0) {
+                            isKeyPressed = true
+                        }
+                        true
+                    }
+                    KeyEventType.KeyUp -> {
+                        val startedHere = isKeyPressed
+                        isKeyPressed = false
+                        if (startedHere) {
+                            latestOnClick()
+                        }
+                        true
+                    }
+                    else -> false
+                }
+            }
+            .pointerInput(enabled) {
+                if (enabled) {
+                    detectTapGestures(
+                        onPress = {
+                            isPointerPressed = true
+                            tryAwaitRelease()
+                            isPointerPressed = false
+                        },
+                        onTap = { latestOnClick() }
+                    )
+                }
+            }
+            .focusable(enabled = enabled, interactionSource = interactionSource),
         content = content
     )
 }

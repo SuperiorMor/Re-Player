@@ -116,6 +116,7 @@ fun UpnpBrowseScreen(
     lastPlayedMediaId: String? = null,
     isPlayerActive: Boolean = false,
     enterSectionTrigger: Int = 0,
+    onConsumeEnterTrigger: () -> Unit = {},
     onFolderLoaded: () -> Unit = {},
     onConsumeLastPlayedMediaId: () -> Unit = {}
 ) {
@@ -147,7 +148,8 @@ fun UpnpBrowseScreen(
     var lastFocusedFolderId by remember { mutableStateOf<String?>(null) }
     var isTransitioningFocus by remember { mutableStateOf(false) }
     var lastExitTimestamp by remember { mutableLongStateOf(0L) }
-    var lastHandledEnterTrigger by remember { mutableIntStateOf(0) }
+    var hasEnteredUpnp by remember { mutableStateOf(enterSectionTrigger > 0 || initialFolder != null) }
+    var isContentAreaFocused by remember { mutableStateOf(false) }
     var handledBackKeyDown by remember { mutableStateOf(false) }
     var lastBackHandledMs by remember { mutableLongStateOf(0L) }
     val folderCache = remember { mutableMapOf<String, List<MediaItem>>() }
@@ -159,9 +161,11 @@ fun UpnpBrowseScreen(
         if (showOverlay) {
             isTransitioningFocus = true
             isLoadingFolder = true
-            try {
-                loadingFocusRequester.requestFocus()
-            } catch (_: Exception) {}
+            if (hasEnteredUpnp || isContentAreaFocused) {
+                try {
+                    loadingFocusRequester.requestFocus()
+                } catch (_: Exception) {}
+            }
         }
         scope.launch {
             val loaded = contentDirectory.browse(controlUrl, folderId).distinctBy { it.id }
@@ -175,7 +179,7 @@ fun UpnpBrowseScreen(
     }
 
     LaunchedEffect(isLoadingFolder) {
-        if (isLoadingFolder) {
+        if (isLoadingFolder && (hasEnteredUpnp || isContentAreaFocused)) {
             try {
                 loadingFocusRequester.requestFocus()
             } catch (_: Exception) {}
@@ -288,11 +292,19 @@ fun UpnpBrowseScreen(
 
     // Restore focus to the last-opened (or last-played) item inside the current folder
     LaunchedEffect(loadedFolderId, isLoadingFolder, isPlayerActive, lastPlayedMediaId, enterSectionTrigger) {
+        if (enterSectionTrigger > 0) {
+            hasEnteredUpnp = true
+            onConsumeEnterTrigger()
+        }
+        if (initialFolder != null || lastPlayedMediaId != null) {
+            hasEnteredUpnp = true
+        }
+        val shouldMoveFocus = hasEnteredUpnp || isContentAreaFocused
+
         if (connectedDevice == null) {
             isTransitioningFocus = false
-            if (enterSectionTrigger != lastHandledEnterTrigger && enterSectionTrigger > 0) {
-                lastHandledEnterTrigger = enterSectionTrigger
-                delay(100)
+            if (shouldMoveFocus) {
+                delay(80)
                 try {
                     settingsCtaFocusRequester.requestFocus()
                 } catch (_: Exception) {}
@@ -306,10 +318,12 @@ fun UpnpBrowseScreen(
         if (items.isEmpty()) {
             focusedItem = null
             lastFocusedFolderId = loadedFolderId
-            delay(100)
-            try {
-                emptyFocusRequester.requestFocus()
-            } catch (_: Exception) {}
+            if (shouldMoveFocus) {
+                delay(80)
+                try {
+                    emptyFocusRequester.requestFocus()
+                } catch (_: Exception) {}
+            }
             isTransitioningFocus = false
             return@LaunchedEffect
         }
@@ -326,16 +340,17 @@ fun UpnpBrowseScreen(
         }.let { if (it in items.indices) it else 0 }
 
         lastFocusedFolderId = loadedFolderId
-        lastHandledEnterTrigger = enterSectionTrigger
         focusTargetIndex = resolvedIdx
         focusedItem = items[resolvedIdx]
         try {
             listState.scrollToItem(resolvedIdx)
         } catch (_: Exception) {}
-        delay(100)
-        try {
-            targetItemFocusRequester.requestFocus()
-        } catch (_: Exception) {}
+        if (shouldMoveFocus) {
+            delay(80)
+            try {
+                targetItemFocusRequester.requestFocus()
+            } catch (_: Exception) {}
+        }
         isTransitioningFocus = false
     }
 
@@ -343,6 +358,7 @@ fun UpnpBrowseScreen(
         Box(
             modifier = modifier
                 .fillMaxSize()
+                .onFocusChanged { isContentAreaFocused = it.hasFocus }
                 .onPreviewKeyEvent { handleBackPreviewKeyEvent(it) }
                 .padding(32.dp),
             contentAlignment = Alignment.Center
@@ -399,16 +415,17 @@ fun UpnpBrowseScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
+            .onFocusChanged { isContentAreaFocused = it.hasFocus }
             .onPreviewKeyEvent { handleBackPreviewKeyEvent(it) }
-            .padding(start = 32.dp, end = 32.dp, top = 24.dp, bottom = 18.dp)
+            .padding(start = 32.dp, end = 32.dp, top = 38.dp, bottom = 18.dp)
     ) {
-        // Header: Aligned vertically with the 64dp left Logo (y = 24..88dp)
+        // Header: Aligned vertically with the visible left Logo (y ≈ 44..71dp)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 64.dp),
+                .heightIn(min = 48.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = Alignment.Top
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(

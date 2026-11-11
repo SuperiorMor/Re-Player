@@ -1,16 +1,12 @@
 package com.replayer.ui.screens
 
-import android.os.Build
-import androidx.activity.compose.BackHandler
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.*
@@ -25,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.LiveTv
 import androidx.compose.material.icons.outlined.PlayCircle
+import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -32,22 +29,27 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.BlurredEdgeTreatment
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
 import com.replayer.data.FavoritesManager
@@ -58,7 +60,6 @@ import com.replayer.model.EpgProgram
 import com.replayer.model.FavoriteFolder
 import com.replayer.model.IptvChannel
 import com.replayer.model.MediaItem
-import com.replayer.ui.components.TvFocusCard
 import com.replayer.ui.theme.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -74,6 +75,7 @@ fun HomeScreen(
     onPlayChannel: (IptvChannel, List<IptvChannel>) -> Unit,
     onFallbackToRail: () -> Unit = {},
     enterSectionTrigger: Int = 0,
+    onConsumeEnterTrigger: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -98,7 +100,8 @@ fun HomeScreen(
 
     LaunchedEffect(enterSectionTrigger) {
         if (enterSectionTrigger > 0) {
-            delay(100)
+            onConsumeEnterTrigger()
+            delay(80)
             try {
                 entryFocusRequester.requestFocus()
             } catch (_: Exception) {
@@ -114,7 +117,6 @@ fun HomeScreen(
     }
 
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    var channelToRemoveFromFav by remember { mutableStateOf<IptvChannel?>(null) }
     LaunchedEffect(Unit) {
         while (isActive) {
             delay(30_000L)
@@ -126,12 +128,13 @@ fun HomeScreen(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(start = 28.dp, end = 28.dp, top = 26.dp, bottom = 18.dp)
+            .padding(start = 28.dp, end = 28.dp, top = 42.dp, bottom = 18.dp)
     ) {
         // -------------------------------------------------------------
         // ВЕРХНИЙ БЛОК: СЛЕВА ПОСТЕРЫ (2:3) | СПРАВА «ИЗБРАННЫЕ ПАПКИ» ДО КРАЯ ЭКРАНА
+        // (Выровнен по видимой графике левого логотипа: y ≈ 44..71dp)
         // -------------------------------------------------------------
-        val posterSectionHeight = 236.dp
+        val posterSectionHeight = 222.dp
         val recentPosters = remember(recentList) { recentList.take(2) }
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -464,9 +467,9 @@ fun HomeScreen(
             )
             if (favoriteChannels.isNotEmpty()) {
                 Text(
-                    text = "★ справа или удержание OK — убрать из избранного",
+                    text = "→ на канале — убрать из избранного",
                     style = MaterialTheme.typography.labelSmall,
-                    color = TextSecondary.copy(alpha = 0.65f)
+                    color = TextSecondary.copy(alpha = 0.60f)
                 )
             }
         }
@@ -498,116 +501,27 @@ fun HomeScreen(
                 }
             }
         } else {
+            val hasUpperShelf = recentPosters.isNotEmpty() || favorites.isNotEmpty()
             GoogleTvLiveGuide(
                 favoriteChannels = favoriteChannels,
                 epgMap = epgMap,
                 iptvManager = iptvManager,
                 nowMs = nowMs,
-                entryFocusRequester = if (recentPosters.isEmpty() && favorites.isEmpty()) entryFocusRequester else null,
+                entryFocusRequester = if (!hasUpperShelf) entryFocusRequester else null,
                 onPlayChannel = { ch -> onPlayChannel(ch, favoriteChannels) },
-                onToggleFavorite = { ch -> iptvManager.toggleFavorite(ch.id) },
-                onRequestRemoveFavorite = { ch -> channelToRemoveFromFav = ch }
-            )
-        }
-    }
-
-    if (channelToRemoveFromFav != null) {
-        val target = channelToRemoveFromFav!!
-        BackHandler(enabled = true) {
-            channelToRemoveFromFav = null
-        }
-        Dialog(onDismissRequest = { channelToRemoveFromFav = null }) {
-            val cancelFocusRequester = remember { FocusRequester() }
-            LaunchedEffect(Unit) {
-                delay(40)
-                try {
-                    cancelFocusRequester.requestFocus()
-                } catch (_: Exception) {}
-            }
-            Box(
-                modifier = Modifier
-                    .width(420.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .border(1.dp, AccentOrange.copy(alpha = 0.55f), RoundedCornerShape(20.dp))
-            ) {
-                Box(
-                    modifier = Modifier
-                        .matchParentSize()
-                        .background(Color(0xCC151B26))
-                        .then(
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                Modifier.blur(20.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
-                            } else Modifier
-                        )
-                )
-                Column(
-                    modifier = Modifier.padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Star,
-                        contentDescription = null,
-                        tint = AccentOrange,
-                        modifier = Modifier.size(34.dp)
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = "Убрать из избранного?",
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                        color = TextPrimary,
-                        textAlign = TextAlign.Center
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = target.name,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = AccentCyanBright,
-                        textAlign = TextAlign.Center,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(modifier = Modifier.height(20.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        TvFocusCard(
-                            onClick = {
-                                iptvManager.toggleFavorite(target.id)
-                                channelToRemoveFromFav = null
-                            },
-                            focusBorderColor = AccentOrange,
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(46.dp)
-                        ) {
-                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text(
-                                    text = "Убрать",
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = AccentOrange
-                                )
-                            }
+                onRemoveFavorite = { ch -> iptvManager.toggleFavorite(ch.id) },
+                onNoFavoritesLeftFocus = {
+                    if (hasUpperShelf) {
+                        try {
+                            entryFocusRequester.requestFocus()
+                        } catch (_: Exception) {
+                            onFallbackToRail()
                         }
-
-                        TvFocusCard(
-                            onClick = { channelToRemoveFromFav = null },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(46.dp)
-                                .focusRequester(cancelFocusRequester)
-                        ) {
-                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text(
-                                    text = "Отмена",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = TextPrimary
-                                )
-                            }
-                        }
+                    } else {
+                        onFallbackToRail()
                     }
                 }
-            }
+            )
         }
     }
 }
@@ -670,7 +584,6 @@ private fun buildTimelineSlots(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun GoogleTvLiveGuide(
     favoriteChannels: List<IptvChannel>,
@@ -679,8 +592,8 @@ private fun GoogleTvLiveGuide(
     nowMs: Long,
     entryFocusRequester: FocusRequester? = null,
     onPlayChannel: (IptvChannel) -> Unit,
-    onToggleFavorite: (IptvChannel) -> Unit,
-    onRequestRemoveFavorite: (IptvChannel) -> Unit
+    onRemoveFavorite: (IptvChannel) -> Unit,
+    onNoFavoritesLeftFocus: () -> Unit
 ) {
     val totalWindowMs = 75 * 60_000L // 1h 15m visible window matching Google TV
     val windowStart = nowMs - 15 * 60_000L // NOW sits cleanly at 20%
@@ -711,8 +624,36 @@ private fun GoogleTvLiveGuide(
 
     val logoColWidth = 112.dp
     val colGap = 10.dp
-    val starColWidth = 34.dp
-    val starGap = 6.dp
+
+    val rowRequesters = remember { mutableStateMapOf<String, FocusRequester>() }
+    fun requesterFor(channelId: String): FocusRequester =
+        rowRequesters.getOrPut(channelId) { FocusRequester() }
+
+    var pendingFocusChannelId by remember { mutableStateOf<String?>(null) }
+    var pendingNoFavoritesFocus by remember { mutableStateOf(false) }
+
+    LaunchedEffect(favoriteChannels, pendingFocusChannelId, pendingNoFavoritesFocus) {
+        val targetId = pendingFocusChannelId
+        if (targetId != null) {
+            pendingFocusChannelId = null
+            withFrameNanos { }
+            delay(36)
+            try {
+                rowRequesters[targetId]?.requestFocus()
+            } catch (_: Exception) {
+                if (favoriteChannels.isNotEmpty()) {
+                    try {
+                        rowRequesters[favoriteChannels.first().id]?.requestFocus()
+                    } catch (_: Exception) {}
+                }
+            }
+        } else if (pendingNoFavoritesFocus) {
+            pendingNoFavoritesFocus = false
+            withFrameNanos { }
+            delay(36)
+            onNoFavoritesLeftFocus()
+        }
+    }
 
     Box(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -776,174 +717,319 @@ private fun GoogleTvLiveGuide(
                         )
                     }
                 }
-
-                Spacer(modifier = Modifier.width(starGap + starColWidth))
             }
 
             // Channel Rows
             favoriteChannels.forEachIndexed { channelIdx, channel ->
-                val progs = remember(channel, epgMap) {
-                    iptvManager.getProgramsForChannel(channel)
-                }
-                val slots = remember(progs, windowStart, windowEnd) {
-                    buildTimelineSlots(progs, windowStart, windowEnd)
-                }
-                val rowInteractionSource = remember { MutableInteractionSource() }
-                val isRowFocused by rowInteractionSource.collectIsFocusedAsState()
-                val starInteractionSource = remember { MutableInteractionSource() }
-                val isStarFocused by starInteractionSource.collectIsFocusedAsState()
-                val isAnyFocused = isRowFocused || isStarFocused
-                val rowScale by animateFloatAsState(
-                    targetValue = if (isAnyFocused) 1.012f else 1.0f,
-                    label = "gtv_row_scale"
-                )
+                key(channel.id) {
+                    val progs = remember(channel, epgMap) {
+                        iptvManager.getProgramsForChannel(channel)
+                    }
+                    val slots = remember(progs, windowStart, windowEnd) {
+                        buildTimelineSlots(progs, windowStart, windowEnd)
+                    }
 
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .scale(rowScale)
-                        .zIndex(if (isAnyFocused) 1f else 0f)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(if (isAnyFocused) CardFocusedBackground else Color.Transparent)
-                        .border(
-                            width = if (isRowFocused) 2.dp else if (isStarFocused) 1.5.dp else 1.dp,
-                            color = when {
-                                isRowFocused -> FocusBorder
-                                isStarFocused -> AccentOrange.copy(alpha = 0.65f)
-                                else -> Color.Transparent
-                            },
-                            shape = RoundedCornerShape(14.dp)
-                        )
-                        .padding(horizontal = 4.dp, vertical = 3.dp)
-                        .height(56.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .then(
-                                if (channelIdx == 0 && entryFocusRequester != null) {
-                                    Modifier.focusRequester(entryFocusRequester)
-                                } else Modifier
-                            )
-                            .combinedClickable(
-                                interactionSource = rowInteractionSource,
-                                indication = null,
-                                onClick = { onPlayChannel(channel) },
-                                onLongClick = { onRequestRemoveFavorite(channel) }
-                            )
-                            .focusable(interactionSource = rowInteractionSource),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Left Channel Logo Box (clean logo only)
-                        Box(
-                            modifier = Modifier
-                                .width(logoColWidth)
-                                .fillMaxHeight()
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(if (isAnyFocused) Color(0xFF242934) else Color(0xFF191C22))
-                                .border(
-                                    width = 1.dp,
-                                    color = if (isAnyFocused) Color(0x66FFFFFF) else Color(0xFF262B35),
-                                    shape = RoundedCornerShape(10.dp)
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (!channel.logoUrl.isNullOrBlank()) {
-                                AsyncImage(
-                                    model = channel.logoUrl,
-                                    contentDescription = channel.name,
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                                    contentScale = ContentScale.Fit
-                                )
-                            } else {
-                                Text(
-                                    text = channel.name,
-                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, fontSize = 11.sp),
-                                    color = TextPrimary,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.padding(horizontal = 8.dp)
-                                )
-                            }
-                        }
+                    val rowFocusReq = if (channelIdx == 0 && entryFocusRequester != null) {
+                        entryFocusRequester
+                    } else {
+                        remember(channel.id) { requesterFor(channel.id) }
+                    }
+                    SideEffect {
+                        rowRequesters[channel.id] = rowFocusReq
+                    }
 
-                        Spacer(modifier = Modifier.width(colGap))
+                    val rowInteractionSource = remember { MutableInteractionSource() }
+                    val isRowFocused by rowInteractionSource.collectIsFocusedAsState()
+                    val removeFocusRequester = remember(channel.id) { FocusRequester() }
+                    val removeInteractionSource = remember { MutableInteractionSource() }
+                    val isRemoveFocused by removeInteractionSource.collectIsFocusedAsState()
 
-                        // Right Timeline Slots
-                        Row(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            slots.forEach { slot ->
-                                val durationMs = (slot.endMs - slot.startMs).coerceAtLeast(60_000L)
-                                val weight = (durationMs.toFloat() / totalWindowMs.toFloat()).coerceAtLeast(0.05f)
-                                val isTooNarrowForText = durationMs < 6 * 60_000L
-                                val isLiveSlot = nowMs in slot.startMs until slot.endMs
-                                val title = if (slot.program != null) {
-                                    if (slot.startedBeforeWindow) "‹  ${slot.program.title}" else slot.program.title
-                                } else {
-                                    "Прямой эфир"
+                    var showRemoveAction by remember(channel.id) { mutableStateOf(false) }
+                    var pendingFocusRemove by remember(channel.id) { mutableStateOf(false) }
+                    var isRowKeyPressed by remember(channel.id) { mutableStateOf(false) }
+                    var isRemoveKeyPressed by remember(channel.id) { mutableStateOf(false) }
+
+                    LaunchedEffect(showRemoveAction, pendingFocusRemove) {
+                        if (showRemoveAction && pendingFocusRemove) {
+                            pendingFocusRemove = false
+                            withFrameNanos { }
+                            for (attempt in 0..3) {
+                                val ok = try {
+                                    removeFocusRequester.requestFocus()
+                                    true
+                                } catch (_: Exception) {
+                                    false
                                 }
-
-                                GoogleTvProgramTile(
-                                    title = if (isTooNarrowForText) "" else title,
-                                    isHighlighted = isRowFocused && isLiveSlot,
-                                    isRowFocused = isAnyFocused,
-                                    modifier = Modifier
-                                        .weight(weight)
-                                        .fillMaxHeight()
-                                )
+                                if (ok) break
+                                delay(16)
                             }
                         }
                     }
 
-                    Spacer(modifier = Modifier.width(starGap))
+                    LaunchedEffect(isRowFocused, isRemoveFocused) {
+                        if (!isRowFocused && !isRemoveFocused && showRemoveAction) {
+                            delay(80)
+                            if (!isRowFocused && !isRemoveFocused) {
+                                showRemoveAction = false
+                            }
+                        }
+                    }
 
-                    // Remove-from-favorites Star button at row end
-                    val starBg by animateColorAsState(
+                    val isAnyFocused = isRowFocused || isRemoveFocused
+                    val rowScale by animateFloatAsState(
                         targetValue = when {
-                            isStarFocused -> AccentOrange.copy(alpha = 0.24f)
-                            isRowFocused -> AccentGold.copy(alpha = 0.12f)
-                            else -> Color.Transparent
+                            isRowKeyPressed -> 0.985f
+                            isAnyFocused -> 1.012f
+                            else -> 1.0f
                         },
-                        label = "home_fav_star_bg"
+                        animationSpec = tween(durationMillis = 120),
+                        label = "gtv_row_scale"
                     )
+                    val removeScale by animateFloatAsState(
+                        targetValue = when {
+                            isRemoveKeyPressed -> 0.92f
+                            isRemoveFocused -> 1.06f
+                            else -> 1.0f
+                        },
+                        animationSpec = tween(durationMillis = 120),
+                        label = "gtv_remove_scale"
+                    )
+
+                    val prevRowReq = if (channelIdx > 0) requesterFor(favoriteChannels[channelIdx - 1].id) else null
+                    val nextRowReq = if (channelIdx < favoriteChannels.lastIndex) requesterFor(favoriteChannels[channelIdx + 1].id) else null
+
                     Box(
                         modifier = Modifier
-                            .width(starColWidth)
-                            .fillMaxHeight()
-                            .padding(vertical = 8.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(starBg)
-                            .then(
-                                if (isStarFocused) {
-                                    Modifier.border(2.dp, AccentOrange, RoundedCornerShape(10.dp))
-                                } else Modifier
+                            .fillMaxWidth()
+                            .scale(rowScale)
+                            .zIndex(if (isAnyFocused) 2f else 0f)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(if (isAnyFocused) CardFocusedBackground else Color.Transparent)
+                            .border(
+                                width = if (isRowFocused) 2.dp else if (isRemoveFocused) 1.5.dp else 1.dp,
+                                color = when {
+                                    isRowFocused -> FocusBorder
+                                    isRemoveFocused -> AccentOrange.copy(alpha = 0.70f)
+                                    else -> Color.Transparent
+                                },
+                                shape = RoundedCornerShape(14.dp)
                             )
-                            .clickable(
-                                interactionSource = starInteractionSource,
-                                indication = null,
-                                onClick = { onToggleFavorite(channel) }
-                            )
-                            .focusable(interactionSource = starInteractionSource),
-                        contentAlignment = Alignment.Center
+                            .padding(horizontal = 4.dp, vertical = 3.dp)
+                            .height(56.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Star,
-                            contentDescription = "Убрать из избранного",
-                            tint = when {
-                                isStarFocused -> AccentOrange
-                                isRowFocused -> AccentGold
-                                else -> AccentGold.copy(alpha = 0.35f)
-                            },
-                            modifier = Modifier.size(18.dp)
-                        )
+                        // Main Full-Width Channel Row
+                        Row(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .focusRequester(rowFocusReq)
+                                .onFocusChanged { state ->
+                                    if (!state.isFocused) {
+                                        isRowKeyPressed = false
+                                    }
+                                }
+                                .onPreviewKeyEvent { keyEvent ->
+                                    if (keyEvent.type == KeyEventType.KeyDown &&
+                                        keyEvent.key == Key.DirectionRight &&
+                                        keyEvent.nativeKeyEvent.repeatCount == 0
+                                    ) {
+                                        showRemoveAction = true
+                                        pendingFocusRemove = true
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                }
+                                .onKeyEvent { keyEvent ->
+                                    val isConfirm = keyEvent.key == Key.DirectionCenter ||
+                                        keyEvent.key == Key.Enter ||
+                                        keyEvent.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER
+                                    if (!isConfirm) return@onKeyEvent false
+                                    when (keyEvent.type) {
+                                        KeyEventType.KeyDown -> {
+                                            if (keyEvent.nativeKeyEvent.repeatCount == 0) {
+                                                isRowKeyPressed = true
+                                            }
+                                            true
+                                        }
+                                        KeyEventType.KeyUp -> {
+                                            val startedHere = isRowKeyPressed
+                                            isRowKeyPressed = false
+                                            if (startedHere) {
+                                                onPlayChannel(channel)
+                                            }
+                                            true
+                                        }
+                                        else -> false
+                                    }
+                                }
+                                .pointerInput(channel.id) {
+                                    detectTapGestures(onTap = { onPlayChannel(channel) })
+                                }
+                                .focusable(interactionSource = rowInteractionSource),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Left Channel Logo Box (clean logo only)
+                            Box(
+                                modifier = Modifier
+                                    .width(logoColWidth)
+                                    .fillMaxHeight()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(if (isAnyFocused) Color(0xFF242934) else Color(0xFF191C22))
+                                    .border(
+                                        width = 1.dp,
+                                        color = if (isAnyFocused) Color(0x66FFFFFF) else Color(0xFF262B35),
+                                        shape = RoundedCornerShape(10.dp)
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (!channel.logoUrl.isNullOrBlank()) {
+                                    AsyncImage(
+                                        model = channel.logoUrl,
+                                        contentDescription = channel.name,
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                                        contentScale = ContentScale.Fit
+                                    )
+                                } else {
+                                    Text(
+                                        text = channel.name,
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, fontSize = 11.sp),
+                                        color = TextPrimary,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.padding(horizontal = 8.dp)
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.width(colGap))
+
+                            // Right Timeline Slots
+                            Row(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                slots.forEach { slot ->
+                                    val durationMs = (slot.endMs - slot.startMs).coerceAtLeast(60_000L)
+                                    val weight = (durationMs.toFloat() / totalWindowMs.toFloat()).coerceAtLeast(0.05f)
+                                    val isTooNarrowForText = durationMs < 6 * 60_000L
+                                    val isLiveSlot = nowMs in slot.startMs until slot.endMs
+                                    val title = if (slot.program != null) {
+                                        if (slot.startedBeforeWindow) "‹  ${slot.program.title}" else slot.program.title
+                                    } else {
+                                        "Прямой эфир"
+                                    }
+
+                                    GoogleTvProgramTile(
+                                        title = if (isTooNarrowForText) "" else title,
+                                        isHighlighted = isRowFocused && isLiveSlot,
+                                        isRowFocused = isAnyFocused,
+                                        modifier = Modifier
+                                            .weight(weight)
+                                            .fillMaxHeight()
+                                    )
+                                }
+                            }
+                        }
+
+                        // On-demand Orange Minus Button revealed at right edge when pressing Right on the channel
+                        if (showRemoveAction) {
+                            fun triggerRemove() {
+                                val remaining = favoriteChannels.filter { it.id != channel.id }
+                                if (remaining.isNotEmpty()) {
+                                    pendingFocusChannelId = remaining[channelIdx.coerceAtMost(remaining.lastIndex)].id
+                                } else {
+                                    pendingNoFavoritesFocus = true
+                                }
+                                showRemoveAction = false
+                                onRemoveFavorite(channel)
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.CenterEnd)
+                                    .padding(end = 2.dp)
+                                    .width(48.dp)
+                                    .fillMaxHeight()
+                                    .padding(vertical = 3.dp)
+                                    .scale(removeScale)
+                                    .zIndex(5f)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color(0xF018110B))
+                                    .background(
+                                        if (isRemoveFocused) AccentOrange.copy(alpha = 0.28f)
+                                        else AccentOrange.copy(alpha = 0.14f)
+                                    )
+                                    .border(
+                                        width = if (isRemoveFocused) 2.dp else 1.2.dp,
+                                        color = AccentOrange,
+                                        shape = RoundedCornerShape(10.dp)
+                                    )
+                                    .focusRequester(removeFocusRequester)
+                                    .focusProperties {
+                                        left = rowFocusReq
+                                        right = FocusRequester.Cancel
+                                        if (prevRowReq != null) up = prevRowReq
+                                        if (nextRowReq != null) down = nextRowReq
+                                    }
+                                    .onFocusChanged { state ->
+                                        if (!state.isFocused) {
+                                            isRemoveKeyPressed = false
+                                        }
+                                    }
+                                    .onPreviewKeyEvent { keyEvent ->
+                                        if (keyEvent.type == KeyEventType.KeyDown &&
+                                            (keyEvent.key == Key.DirectionLeft || keyEvent.key == Key.Back || keyEvent.key == Key.Escape)
+                                        ) {
+                                            showRemoveAction = false
+                                            try {
+                                                rowFocusReq.requestFocus()
+                                            } catch (_: Exception) {}
+                                            true
+                                        } else {
+                                            false
+                                        }
+                                    }
+                                    .onKeyEvent { keyEvent ->
+                                        val isConfirm = keyEvent.key == Key.DirectionCenter ||
+                                            keyEvent.key == Key.Enter ||
+                                            keyEvent.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER
+                                        if (!isConfirm) return@onKeyEvent false
+                                        when (keyEvent.type) {
+                                            KeyEventType.KeyDown -> {
+                                                if (keyEvent.nativeKeyEvent.repeatCount == 0) {
+                                                    isRemoveKeyPressed = true
+                                                }
+                                                true
+                                            }
+                                            KeyEventType.KeyUp -> {
+                                                val startedHere = isRemoveKeyPressed
+                                                isRemoveKeyPressed = false
+                                                if (startedHere) {
+                                                    triggerRemove()
+                                                }
+                                                true
+                                            }
+                                            else -> false
+                                        }
+                                    }
+                                    .pointerInput(channel.id) {
+                                        detectTapGestures(onTap = { triggerRemove() })
+                                    }
+                                    .focusable(interactionSource = removeInteractionSource),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Remove,
+                                    contentDescription = "Убрать из избранного",
+                                    tint = AccentOrange,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -987,7 +1073,6 @@ private fun GoogleTvLiveGuide(
                         )
                 )
             }
-            Spacer(modifier = Modifier.width(starGap + starColWidth))
         }
     }
 }
@@ -1042,7 +1127,19 @@ private fun HomeShelfFocusCard(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
-    val scale by animateFloatAsState(if (isFocused) 1.03f else 1.0f, label = "shelf_card_scale")
+    var isKeyPressed by remember { mutableStateOf(false) }
+    var isPointerPressed by remember { mutableStateOf(false) }
+    val isPressed = isKeyPressed || isPointerPressed
+    val latestOnClick by rememberUpdatedState(onClick)
+    val scale by animateFloatAsState(
+        targetValue = when {
+            isPressed -> 0.97f
+            isFocused -> 1.03f
+            else -> 1.0f
+        },
+        animationSpec = tween(durationMillis = 120),
+        label = "shelf_card_scale"
+    )
 
     Box(
         modifier = modifier
@@ -1052,17 +1149,50 @@ private fun HomeShelfFocusCard(
             .clip(RoundedCornerShape(14.dp))
             .background(if (isFocused) CardFocusedBackground else CardBackground)
             .then(
-                if (isFocused) {
+                if (isFocused || isPressed) {
                     Modifier.border(2.5.dp, FocusBorder, RoundedCornerShape(14.dp))
                 } else {
                     Modifier.border(1.dp, BorderSubtle, RoundedCornerShape(14.dp))
                 }
             )
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null,
-                onClick = onClick
-            )
+            .onFocusChanged { state ->
+                if (!state.isFocused) {
+                    isKeyPressed = false
+                }
+            }
+            .onKeyEvent { keyEvent ->
+                val isConfirm = keyEvent.key == Key.DirectionCenter ||
+                    keyEvent.key == Key.Enter ||
+                    keyEvent.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER
+                if (!isConfirm) return@onKeyEvent false
+                when (keyEvent.type) {
+                    KeyEventType.KeyDown -> {
+                        if (keyEvent.nativeKeyEvent.repeatCount == 0) {
+                            isKeyPressed = true
+                        }
+                        true
+                    }
+                    KeyEventType.KeyUp -> {
+                        val startedHere = isKeyPressed
+                        isKeyPressed = false
+                        if (startedHere) {
+                            latestOnClick()
+                        }
+                        true
+                    }
+                    else -> false
+                }
+            }
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onPress = {
+                        isPointerPressed = true
+                        tryAwaitRelease()
+                        isPointerPressed = false
+                    },
+                    onTap = { latestOnClick() }
+                )
+            }
             .focusable(interactionSource = interactionSource)
     ) {
         content(isFocused)

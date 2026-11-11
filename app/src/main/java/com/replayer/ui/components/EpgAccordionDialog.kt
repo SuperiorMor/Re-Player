@@ -11,8 +11,8 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -39,8 +39,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.BlurredEdgeTreatment
@@ -51,6 +54,12 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -85,28 +94,48 @@ fun EpgAccordionDialog(
             }
             if (archIdx >= 0) return@remember archIdx
         }
+        val exactIdx = programs.indexOfFirst { now >= it.startTime && now < it.endTime }
+        if (exactIdx >= 0) return@remember exactIdx
         val idx = programs.indexOfFirst { it.isCurrent(now) }
         if (idx >= 0) idx else programs.indexOfFirst { it.startTime > now }.let { if (it > 0) it - 1 else 0 }
     }
-    var focusedIndex by remember { mutableIntStateOf(currentProgIndex.coerceAtLeast(0)) }
+    val initialIndex = currentProgIndex.coerceAtLeast(0)
+    var focusedIndex by remember { mutableIntStateOf(initialIndex) }
     val initialFocusRequester = remember { FocusRequester() }
-    val listState = rememberLazyListState()
+    val listState = rememberLazyListState(
+        initialFirstVisibleItemIndex = initialIndex,
+        initialFirstVisibleItemScrollOffset = 0
+    )
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(initialIndex, programs.size) {
         if (programs.isNotEmpty()) {
-            val scrollTarget = currentProgIndex.coerceAtLeast(0)
             try {
-                listState.scrollToItem(scrollTarget)
+                listState.scrollToItem(initialIndex, 0)
             } catch (_: Exception) {}
-            delay(16)
+            withFrameNanos { }
+            delay(32)
             try {
                 initialFocusRequester.requestFocus()
+            } catch (_: Exception) {}
+            withFrameNanos { }
+            try {
+                listState.scrollToItem(initialIndex, 0)
             } catch (_: Exception) {}
         }
     }
 
     // Ensure newly expanded accordion item's description is never clipped below the viewport
     LaunchedEffect(focusedIndex) {
+        if (focusedIndex == initialIndex) {
+            delay(80)
+            try {
+                val visibleInfo = listState.layoutInfo.visibleItemsInfo.find { it.index == focusedIndex }
+                if (visibleInfo != null && visibleInfo.offset != 0) {
+                    listState.scrollToItem(initialIndex, 0)
+                }
+            } catch (_: Exception) {}
+            return@LaunchedEffect
+        }
         delay(235)
         try {
             val visibleInfo = listState.layoutInfo.visibleItemsInfo.find { it.index == focusedIndex }
@@ -189,20 +218,22 @@ fun EpgAccordionDialog(
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp),
+                        contentPadding = PaddingValues(start = 4.dp, end = 4.dp, top = 6.dp, bottom = 280.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         itemsIndexed(programs) { index, prog ->
                             val isItemCurrent = prog.isCurrent(now)
                             val isItemPast = prog.isPast(now)
                             val isExpanded = (index == focusedIndex)
-                            val isInitialTarget = (index == currentProgIndex)
+                            val isInitialTarget = (index == initialIndex)
                             val isPlayingArchiveItem = playingArchiveProgram != null &&
                                 playingArchiveProgram.startTime == prog.startTime &&
                                 playingArchiveProgram.title == prog.title
 
                             val interactionSource = remember { MutableInteractionSource() }
                             val isFocused by interactionSource.collectIsFocusedAsState()
+                            var isKeyPressed by remember { mutableStateOf(false) }
+                            val latestOnSelect by rememberUpdatedState { onSelectProgram(prog) }
 
                             val cardBg by animateColorAsState(
                                 targetValue = when {
@@ -251,13 +282,36 @@ fun EpgAccordionDialog(
                                     .onFocusChanged { focusState ->
                                         if (focusState.isFocused) {
                                             focusedIndex = index
+                                        } else {
+                                            isKeyPressed = false
                                         }
                                     }
-                                    .clickable(
-                                        interactionSource = interactionSource,
-                                        indication = null,
-                                        onClick = { onSelectProgram(prog) }
-                                    )
+                                    .onKeyEvent { keyEvent ->
+                                        val isConfirm = keyEvent.key == Key.DirectionCenter ||
+                                            keyEvent.key == Key.Enter ||
+                                            keyEvent.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER
+                                        if (!isConfirm) return@onKeyEvent false
+                                        when (keyEvent.type) {
+                                            KeyEventType.KeyDown -> {
+                                                if (keyEvent.nativeKeyEvent.repeatCount == 0) {
+                                                    isKeyPressed = true
+                                                }
+                                                true
+                                            }
+                                            KeyEventType.KeyUp -> {
+                                                val startedHere = isKeyPressed
+                                                isKeyPressed = false
+                                                if (startedHere) {
+                                                    latestOnSelect()
+                                                }
+                                                true
+                                            }
+                                            else -> false
+                                        }
+                                    }
+                                    .pointerInput(Unit) {
+                                        detectTapGestures(onTap = { latestOnSelect() })
+                                    }
                                     .focusable(interactionSource = interactionSource)
                                     .padding(horizontal = 16.dp, vertical = 12.dp)
                             ) {

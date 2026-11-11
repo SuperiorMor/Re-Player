@@ -29,7 +29,7 @@ class RePlayerEngine(private val context: Context) {
             "--no-drop-late-frames",
             "--no-skip-frames",
             "--audio-time-stretch",
-            "--ipv4-timeout=5000",
+            "--ipv4-timeout=3500",
             "--http-reconnect"
         )
     )
@@ -113,7 +113,14 @@ class RePlayerEngine(private val context: Context) {
         _playerState.value = _playerState.value.copy(
             currentMediaTitle = mediaItem.title,
             errorMessage = null,
-            isBuffering = true
+            isBuffering = true,
+            isPlaying = false,
+            currentPositionMs = 0L,
+            durationMs = 0L,
+            audioTracks = emptyList(),
+            subtitleTracks = emptyList(),
+            selectedAudioTrackId = null,
+            selectedSubtitleTrackId = null
         )
         if (mediaItem.uri.isBlank()) {
             _playerState.value = _playerState.value.copy(
@@ -144,13 +151,17 @@ class RePlayerEngine(private val context: Context) {
                     val media = Media(libVlc, streamUri).apply {
                         setHWDecoderEnabled(true, false)
                         if (isIptv) {
-                            addOption(":network-caching=3000")
-                            addOption(":live-caching=1500")
+                            addOption(":network-caching=1200")
+                            addOption(":live-caching=800")
                             addOption(":http-user-agent=RePlayer-TV")
                         } else {
                             addOption(":network-caching=15000")
                             addOption(":file-caching=2000")
                         }
+                    }
+                    if (isReleased || reqId != playRequestSeq.get()) {
+                        media.release()
+                        return@execute
                     }
                     // mediaPlayer.media = ... calls libvlc input_Close (vlc_join); must run off the main thread!
                     mediaPlayer.media = media

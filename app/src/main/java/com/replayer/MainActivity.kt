@@ -92,17 +92,26 @@ class MainActivity : ComponentActivity() {
                     var initialUpnpFolder by remember { mutableStateOf<Pair<String, String>?>(null) }
                     var lastPlayedMediaId by remember { mutableStateOf<String?>(null) }
                     var sectionFocusTrigger by remember { mutableIntStateOf(0) }
+                    var pendingEnterSection by remember { mutableStateOf<NavItem?>(null) }
                     var anyMainUiHasFocus by remember { mutableStateOf(false) }
                     var wasFocusInContent by remember { mutableStateOf(false) }
                     var hadPlayerActive by remember { mutableStateOf(false) }
 
                     fun focusRailSelected() {
+                        wasFocusInContent = false
+                        pendingEnterSection = null
                         scope.launch {
                             delay(40)
                             try {
                                 railFocusRequesters[selectedNav]?.requestFocus()
                             } catch (_: Exception) {}
                         }
+                    }
+
+                    fun requestEnterSection(nav: NavItem) {
+                        selectedNav = nav
+                        pendingEnterSection = nav
+                        sectionFocusTrigger++
                     }
 
                     LaunchedEffect(selectedNav) {
@@ -118,8 +127,12 @@ class MainActivity : ComponentActivity() {
                             CrashReporter.breadcrumb("Nav", "ClosePlayer")
                             if (hadPlayerActive) {
                                 hadPlayerActive = false
-                                if (selectedNav != NavItem.UPNP) {
-                                    sectionFocusTrigger++
+                                if (wasFocusInContent) {
+                                    if (selectedNav != NavItem.UPNP) {
+                                        requestEnterSection(selectedNav)
+                                    }
+                                } else {
+                                    focusRailSelected()
                                 }
                             }
                         }
@@ -184,18 +197,18 @@ class MainActivity : ComponentActivity() {
                                 itemFocusRequesters = railFocusRequesters,
                                 shouldSnapToSelectedOnFocus = wasFocusInContent,
                                 onSnappedToSelected = { wasFocusInContent = false },
-                                onItemSelected = {
+                                onItemSelected = { item ->
                                     wasFocusInContent = false
-                                    if (selectedNav != it) {
-                                        selectedNav = it
+                                    pendingEnterSection = null
+                                    if (selectedNav != item) {
+                                        selectedNav = item
                                         initialUpnpFolder = null
                                     }
                                 },
-                                onEnterSection = {
+                                onEnterSection = { item ->
                                     wasFocusInContent = false
-                                    selectedNav = it
                                     initialUpnpFolder = null
-                                    sectionFocusTrigger++
+                                    requestEnterSection(item)
                                 }
                             )
 
@@ -214,8 +227,7 @@ class MainActivity : ComponentActivity() {
                                         onOpenFavorite = { fav ->
                                             if (fav.sourceType == MediaSourceType.UPNP_DLNA) {
                                                 initialUpnpFolder = Pair(fav.id, fav.title)
-                                                selectedNav = NavItem.UPNP
-                                                sectionFocusTrigger++
+                                                requestEnterSection(NavItem.UPNP)
                                             }
                                         },
                                         onPlayMedia = { mediaItem ->
@@ -227,7 +239,10 @@ class MainActivity : ComponentActivity() {
                                             activeMediaItem = channel.toMediaItem()
                                         },
                                         onFallbackToRail = { focusRailSelected() },
-                                        enterSectionTrigger = sectionFocusTrigger
+                                        enterSectionTrigger = if (pendingEnterSection == NavItem.HOME) sectionFocusTrigger else 0,
+                                        onConsumeEnterTrigger = {
+                                            if (pendingEnterSection == NavItem.HOME) pendingEnterSection = null
+                                        }
                                     )
                                     NavItem.UPNP -> UpnpBrowseScreen(
                                         onPlayMedia = { item, playlist ->
@@ -236,17 +251,19 @@ class MainActivity : ComponentActivity() {
                                             activePlaylist = playlist
                                         },
                                         onNavigateToSettings = {
-                                            selectedNav = NavItem.SETTINGS
-                                            sectionFocusTrigger++
+                                            requestEnterSection(NavItem.SETTINGS)
                                         },
                                         onBackToHome = {
                                             selectedNav = NavItem.HOME
-                                            sectionFocusTrigger++
+                                            focusRailSelected()
                                         },
                                         initialFolder = initialUpnpFolder,
                                         lastPlayedMediaId = lastPlayedMediaId,
                                         isPlayerActive = (activeMediaItem != null),
-                                        enterSectionTrigger = sectionFocusTrigger,
+                                        enterSectionTrigger = if (pendingEnterSection == NavItem.UPNP) sectionFocusTrigger else 0,
+                                        onConsumeEnterTrigger = {
+                                            if (pendingEnterSection == NavItem.UPNP) pendingEnterSection = null
+                                        },
                                         onFolderLoaded = { initialUpnpFolder = null },
                                         onConsumeLastPlayedMediaId = { lastPlayedMediaId = null }
                                     )
@@ -256,21 +273,26 @@ class MainActivity : ComponentActivity() {
                                             activeMediaItem = channel.toMediaItem()
                                         },
                                         onNavigateToSettings = {
-                                            selectedNav = NavItem.SETTINGS
-                                            sectionFocusTrigger++
+                                            requestEnterSection(NavItem.SETTINGS)
                                         },
                                         onBackToHome = {
                                             selectedNav = NavItem.HOME
-                                            sectionFocusTrigger++
+                                            focusRailSelected()
                                         },
-                                        enterSectionTrigger = sectionFocusTrigger
+                                        enterSectionTrigger = if (pendingEnterSection == NavItem.IPTV) sectionFocusTrigger else 0,
+                                        onConsumeEnterTrigger = {
+                                            if (pendingEnterSection == NavItem.IPTV) pendingEnterSection = null
+                                        }
                                     )
                                     NavItem.SETTINGS -> SettingsScreen(
                                         onBack = {
                                             selectedNav = NavItem.HOME
-                                            sectionFocusTrigger++
+                                            focusRailSelected()
                                         },
-                                        enterSectionTrigger = sectionFocusTrigger
+                                        enterSectionTrigger = if (pendingEnterSection == NavItem.SETTINGS) sectionFocusTrigger else 0,
+                                        onConsumeEnterTrigger = {
+                                            if (pendingEnterSection == NavItem.SETTINGS) pendingEnterSection = null
+                                        }
                                     )
                                 }
                             }

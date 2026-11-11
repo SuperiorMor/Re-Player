@@ -9,10 +9,9 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -23,6 +22,7 @@ import androidx.compose.material.icons.outlined.ClosedCaption
 import androidx.compose.material.icons.outlined.EventNote
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.SkipNext
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -38,6 +38,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.input.key.*
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -69,6 +70,14 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
+private data class ZapBannerInfo(
+    val index: Int,
+    val total: Int,
+    val title: String,
+    val programTitle: String?,
+    val timeRange: String?
+)
+
 @Composable
 fun PlayerScreen(
     mediaItem: MediaItem,
@@ -81,7 +90,7 @@ fun PlayerScreen(
     val engine = remember { RePlayerEngine(context) }
     val playerState by engine.playerState.collectAsState()
 
-    var showControls by remember { mutableStateOf(true) }
+    var showControls by remember { mutableStateOf(mediaItem.sourceType != MediaSourceType.IPTV) }
     var showTracksDialog by remember { mutableStateOf(false) }
     var showEpgDialog by remember { mutableStateOf(false) }
     var osdFeedback by remember { mutableStateOf<String?>(null) }
@@ -99,6 +108,11 @@ fun PlayerScreen(
     var seekFadeJob by remember { mutableStateOf<Job?>(null) }
     var liveWatermarkVisible by remember { mutableStateOf(false) }
     var liveWatermarkJob by remember { mutableStateOf<Job?>(null) }
+    var zapPreviewItem by remember { mutableStateOf<MediaItem?>(null) }
+    var zapBanner by remember { mutableStateOf<ZapBannerInfo?>(null) }
+    var zapCommitJob by remember { mutableStateOf<Job?>(null) }
+    var zapHideJob by remember { mutableStateOf<Job?>(null) }
+    var handledBackKeyDown by remember { mutableStateOf(false) }
 
     val isIptv = mediaItem.sourceType == MediaSourceType.IPTV
     val iptvManager = remember { IptvManager.getInstance(context) }
@@ -150,18 +164,44 @@ fun PlayerScreen(
             osdFeedback = "В списке только один канал"
             return
         }
-        val curIdx = rawList.indexOfFirst { it.id == mediaItem.id }
+        val referenceItem = zapPreviewItem ?: mediaItem
+        val curIdx = rawList.indexOfFirst { it.id == referenceItem.id }.let { idx ->
+            if (idx >= 0) idx else rawList.indexOfFirst { it.uri == referenceItem.uri }
+        }
         val nextIdx = if (curIdx >= 0) {
             (curIdx + dir + rawList.size) % rawList.size
         } else {
             0
         }
         val nextItem = rawList[nextIdx]
-        playingArchiveProgram = null
+        zapPreviewItem = nextItem
+        osdFeedback = null
+
         val nextChannelObj = iptvManager.findChannelById(nextItem.id)
         val nextProg = nextChannelObj?.let { iptvManager.getCurrentProgram(it) }
-        osdFeedback = if (nextProg != null) "${nextItem.title}  •  ${nextProg.title}" else nextItem.title
-        onPlayMediaItem?.invoke(nextItem)
+        zapBanner = ZapBannerInfo(
+            index = nextIdx + 1,
+            total = rawList.size,
+            title = nextItem.title,
+            programTitle = nextProg?.title,
+            timeRange = nextProg?.formattedTimeRange()
+        )
+        zapHideJob?.cancel()
+        zapHideJob = scope.launch {
+            delay(2800)
+            zapBanner = null
+        }
+
+        zapCommitJob?.cancel()
+        zapCommitJob = scope.launch {
+            delay(220)
+            val target = zapPreviewItem
+            zapPreviewItem = null
+            if (target != null && (target.id != mediaItem.id || target.uri != mediaItem.uri)) {
+                playingArchiveProgram = null
+                onPlayMediaItem?.invoke(target)
+            }
+        }
     }
 
     fun commitScrubIfPending() {
@@ -283,6 +323,29 @@ fun PlayerScreen(
     val timelineFocusRequester = remember { FocusRequester() }
     val rootFocusRequester = remember { FocusRequester() }
 
+    // Show initial compact channel info banner when opening IPTV in fullscreen zap mode
+    LaunchedEffect(Unit) {
+        if (isIptv && !showControls) {
+            val rawList = if (playlist.isNotEmpty()) playlist else allChannels.map { it.toMediaItem() }
+            if (rawList.isNotEmpty()) {
+                val curIdx = rawList.indexOfFirst { it.id == mediaItem.id }
+                    .let { if (it >= 0) it else rawList.indexOfFirst { item -> item.uri == mediaItem.uri }.coerceAtLeast(0) }
+                zapBanner = ZapBannerInfo(
+                    index = curIdx + 1,
+                    total = rawList.size,
+                    title = mediaItem.title,
+                    programTitle = currentProgram?.title,
+                    timeRange = currentProgram?.formattedTimeRange()
+                )
+                zapHideJob?.cancel()
+                zapHideJob = scope.launch {
+                    delay(3000)
+                    zapBanner = null
+                }
+            }
+        }
+    }
+
     // Trigger playback whenever mediaItem switches (initial file, next episode, etc.)
     LaunchedEffect(mediaItem.id, mediaItem.uri) {
         playingArchiveProgram = null
@@ -312,6 +375,8 @@ fun PlayerScreen(
         activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         onDispose {
+            zapCommitJob?.cancel()
+            zapHideJob?.cancel()
             activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             if (!isIptv && latestPlayerState.durationMs > 0L && latestPlayerState.currentPositionMs > 0L) {
                 recentManager.updateProgress(
@@ -334,14 +399,24 @@ fun PlayerScreen(
         }
     }
 
-    // Focus management: when controls are shown, focus play button; when hidden, focus root box
+    // Focus management: when controls are shown, focus play button; when hidden, focus root box reliably
     LaunchedEffect(showControls, showTracksDialog, showEpgDialog) {
-        delay(100)
-        try {
-            if (!showTracksDialog && !showEpgDialog) {
-                if (showControls) playButtonFocusRequester.requestFocus() else rootFocusRequester.requestFocus()
+        if (showTracksDialog || showEpgDialog) return@LaunchedEffect
+        withFrameNanos { }
+        for (attempt in 0..5) {
+            val focused = try {
+                if (showControls) {
+                    playButtonFocusRequester.requestFocus()
+                } else {
+                    rootFocusRequester.requestFocus()
+                }
+                true
+            } catch (_: Exception) {
+                false
             }
-        } catch (_: Exception) {}
+            if (focused) break
+            delay(25)
+        }
     }
 
     LaunchedEffect(osdFeedback) {
@@ -360,9 +435,6 @@ fun PlayerScreen(
             lastInteractionTime = System.currentTimeMillis()
         } else if (showControls) {
             showControls = false
-            try {
-                rootFocusRequester.requestFocus()
-            } catch (_: Exception) {}
         } else {
             onBack()
         }
@@ -378,34 +450,57 @@ fun PlayerScreen(
                 if (keyEvent.type == KeyEventType.KeyDown && showControls) {
                     lastInteractionTime = System.currentTimeMillis()
                 }
-                if (keyEvent.type == KeyEventType.KeyDown && (keyEvent.key == Key.Back || keyEvent.key == Key.Escape)) {
-                    if (showEpgDialog) {
-                        showEpgDialog = false
-                        lastInteractionTime = System.currentTimeMillis()
-                        return@onPreviewKeyEvent true
-                    } else if (showTracksDialog) {
-                        showTracksDialog = false
-                        lastInteractionTime = System.currentTimeMillis()
-                        return@onPreviewKeyEvent true
-                    } else if (showControls) {
-                        showControls = false
-                        try {
-                            rootFocusRequester.requestFocus()
-                        } catch (_: Exception) {}
-                        return@onPreviewKeyEvent true
-                    } else {
-                        onBack()
-                        return@onPreviewKeyEvent true
+                if (isIptv && !showTracksDialog && !showEpgDialog && keyEvent.type == KeyEventType.KeyDown &&
+                    keyEvent.nativeKeyEvent.repeatCount == 0
+                ) {
+                    val nativeCode = keyEvent.nativeKeyEvent.keyCode
+                    when (nativeCode) {
+                        android.view.KeyEvent.KEYCODE_CHANNEL_UP, android.view.KeyEvent.KEYCODE_PAGE_UP -> {
+                            showControls = false
+                            switchIptvChannel(1)
+                            return@onPreviewKeyEvent true
+                        }
+                        android.view.KeyEvent.KEYCODE_CHANNEL_DOWN, android.view.KeyEvent.KEYCODE_PAGE_DOWN -> {
+                            showControls = false
+                            switchIptvChannel(-1)
+                            return@onPreviewKeyEvent true
+                        }
+                    }
+                }
+                if (keyEvent.key == Key.Back || keyEvent.key == Key.Escape) {
+                    return@onPreviewKeyEvent when (keyEvent.type) {
+                        KeyEventType.KeyDown -> {
+                            handledBackKeyDown = true
+                            if (showEpgDialog) {
+                                showEpgDialog = false
+                                lastInteractionTime = System.currentTimeMillis()
+                            } else if (showTracksDialog) {
+                                showTracksDialog = false
+                                lastInteractionTime = System.currentTimeMillis()
+                            } else if (showControls) {
+                                showControls = false
+                            } else {
+                                onBack()
+                            }
+                            true
+                        }
+                        KeyEventType.KeyUp -> {
+                            if (handledBackKeyDown) {
+                                handledBackKeyDown = false
+                                true
+                            } else false
+                        }
+                        else -> false
                     }
                 }
                 false
             }
             .onKeyEvent { keyEvent ->
-                if (!showControls) {
+                if (!showControls && !showTracksDialog && !showEpgDialog) {
                     if (keyEvent.type == KeyEventType.KeyDown) {
                         when (keyEvent.key) {
                             Key.DirectionRight -> {
-                                if (isIptv) {
+                                if (isIptv && playingArchiveProgram == null) {
                                     if (keyEvent.nativeKeyEvent.repeatCount == 0) {
                                         switchIptvChannel(1)
                                     }
@@ -415,7 +510,7 @@ fun PlayerScreen(
                                 true
                             }
                             Key.DirectionLeft -> {
-                                if (isIptv) {
+                                if (isIptv && playingArchiveProgram == null) {
                                     if (keyEvent.nativeKeyEvent.repeatCount == 0) {
                                         switchIptvChannel(-1)
                                     }
@@ -432,12 +527,16 @@ fun PlayerScreen(
                                 lastInteractionTime = System.currentTimeMillis()
                                 true
                             }
-                            else -> false
+                            else -> if (keyEvent.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER) {
+                                showControls = true
+                                lastInteractionTime = System.currentTimeMillis()
+                                true
+                            } else false
                         }
                     } else if (keyEvent.type == KeyEventType.KeyUp &&
                         (keyEvent.key == Key.DirectionLeft || keyEvent.key == Key.DirectionRight)
                     ) {
-                        if (!isIptv) {
+                        if (!isIptv || playingArchiveProgram != null) {
                             commitScrubIfPending()
                         }
                         true
@@ -452,7 +551,7 @@ fun PlayerScreen(
                 }
             }
     ) {
-        // Video Surface via LibVLC
+        // Video Surface via LibVLC (pointerInput instead of clickable so AndroidView never takes focus!)
         AndroidView(
             factory = { ctx ->
                 VLCVideoLayout(ctx).apply {
@@ -464,12 +563,11 @@ fun PlayerScreen(
             },
             modifier = Modifier
                 .fillMaxSize()
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null
-                ) {
-                    showControls = !showControls
-                    lastInteractionTime = System.currentTimeMillis()
+                .pointerInput(Unit) {
+                    detectTapGestures(onTap = {
+                        showControls = !showControls
+                        lastInteractionTime = System.currentTimeMillis()
+                    })
                 }
         )
 
@@ -588,6 +686,123 @@ fun PlayerScreen(
             )
         }
 
+        // Sleek IPTV Channel Zap Banner + Buffering / Stream Status when controls are hidden
+        AnimatedVisibility(
+            visible = zapBanner != null && !showControls && !isSeekScrubbing,
+            enter = fadeIn(tween(120)),
+            exit = fadeOut(tween(260)),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 36.dp)
+        ) {
+            val info = zapBanner
+            if (info != null) {
+                Box(
+                    modifier = Modifier
+                        .widthIn(min = 340.dp, max = 560.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color(0xD4101620))
+                        .border(1.dp, AccentCyan.copy(alpha = 0.42f), RoundedCornerShape(16.dp))
+                        .padding(horizontal = 20.dp, vertical = 14.dp)
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(AccentCyan.copy(alpha = 0.18f))
+                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "${info.index} / ${info.total}",
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = AccentCyanBright
+                                )
+                            }
+                            Text(
+                                text = info.title,
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                color = TextPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false)
+                            )
+                            if (playerState.isBuffering && zapPreviewItem == null) {
+                                CircularProgressIndicator(
+                                    color = AccentCyanBright,
+                                    strokeWidth = 2.dp,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                        if (!info.programTitle.isNullOrBlank()) {
+                            Text(
+                                text = buildString {
+                                    if (!info.timeRange.isNullOrBlank()) append("${info.timeRange}  •  ")
+                                    append(info.programTitle)
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Text(
+                            text = "‹ Пред. канал   •   OK — меню   •   След. канал ›",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextSecondary.copy(alpha = 0.65f)
+                        )
+                    }
+                }
+            }
+        }
+
+        // Subtle buffering / stream error indicator when controls & zap banner are hidden
+        AnimatedVisibility(
+            visible = !showControls && zapBanner == null && !isSeekScrubbing && (playerState.isBuffering || playerState.errorMessage != null),
+            enter = fadeIn(tween(150)),
+            exit = fadeOut(tween(250)),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 36.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Color(0xBA0C1018))
+                    .border(
+                        1.dp,
+                        if (playerState.errorMessage != null) AccentOrange.copy(alpha = 0.65f) else AccentCyan.copy(alpha = 0.35f),
+                        RoundedCornerShape(20.dp)
+                    )
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+            ) {
+                if (playerState.errorMessage != null) {
+                    Text(
+                        text = playerState.errorMessage!!,
+                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                        color = AccentOrange
+                    )
+                } else {
+                    CircularProgressIndicator(
+                        color = AccentCyanBright,
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Буферизация потока...",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextPrimary.copy(alpha = 0.85f)
+                    )
+                }
+            }
+        }
+
         // TV On-Screen Display (OSD) Overlay
         AnimatedVisibility(
             visible = showControls && !showTracksDialog && !showEpgDialog,
@@ -597,6 +812,9 @@ fun PlayerScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
+                    .focusProperties {
+                        canFocus = showControls && !showTracksDialog && !showEpgDialog
+                    }
                     .background(
                         Brush.verticalGradient(
                             0.0f to Color(0x8804060A),

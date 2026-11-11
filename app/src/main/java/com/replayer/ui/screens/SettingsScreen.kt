@@ -77,6 +77,7 @@ private enum class UrlEditTarget {
 fun SettingsScreen(
     onBack: () -> Unit,
     enterSectionTrigger: Int = 0,
+    onConsumeEnterTrigger: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -89,7 +90,8 @@ fun SettingsScreen(
 
     LaunchedEffect(enterSectionTrigger) {
         if (enterSectionTrigger > 0) {
-            delay(100)
+            onConsumeEnterTrigger()
+            delay(80)
             try {
                 entryFocusRequester.requestFocus()
             } catch (_: Exception) {}
@@ -241,7 +243,7 @@ fun SettingsScreen(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(start = 32.dp, end = 32.dp, top = 24.dp, bottom = 24.dp)
+            .padding(start = 32.dp, end = 32.dp, top = 38.dp, bottom = 24.dp)
     ) {
         Text(
             text = "Настройки",
@@ -1627,6 +1629,16 @@ fun SettingsScreen(
 }
 
 private fun getFriendlyChangelog(version: String, rawChangelog: String): List<String> {
+    if (version.contains("1.0.6")) {
+        return listOf(
+            "Навигация: исправлена потеря/перескок фокуса — при нажатии OK на раздел в левом меню курсор надёжно остаётся на кнопке с чётким откликом нажатия.",
+            "Дизайн: заголовки всех четырёх разделов точно выровнены по видимой высоте логотипа слева.",
+            "ТВ-плеер: ускорено и стабилизировано переключение каналов кнопками Влево / Вправо с мгновенным баннером канала и индикацией буферизации.",
+            "Программа передач: текущая передача с описанием гарантированно открывается в самом верху списка.",
+            "Главная: убран столбец звёзд и проблемный диалог удержания — при наведении на канал и нажатии Вправо справа появляется оранжевый минус для удаления из избранного."
+        )
+    }
+
     if (version.contains("1.0.5")) {
         return listOf(
             "Меню навигации: нажатие OK переключает раздел и оставляет курсор на кнопке меню без скачков и мерцания, переход в контент — по кнопке Вправо; заголовки выровнены по логотипу.",
