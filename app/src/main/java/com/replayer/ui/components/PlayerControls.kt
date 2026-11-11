@@ -34,7 +34,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
@@ -264,16 +263,6 @@ fun TvControlCapsule(
     Box(
         modifier = Modifier
             .scale(scale)
-            .then(
-                if (isPrimaryGradient) {
-                    Modifier.shadow(
-                        elevation = if (isFocused) 20.dp else 12.dp,
-                        shape = shape,
-                        ambientColor = AccentCyan,
-                        spotColor = AccentOrange
-                    )
-                } else Modifier
-            )
             .clip(shape)
             .then(bgModifier)
             .then(borderModifier)
@@ -303,12 +292,6 @@ fun TvPrimaryPlayButton(
         focusRequester = focusRequester,
         isPrimaryGradient = true,
         modifier = modifier
-            .shadow(
-                elevation = 12.dp,
-                shape = RoundedCornerShape(22.dp),
-                ambientColor = AccentCyan,
-                spotColor = AccentOrange
-            )
             .width(76.dp)
             .height(44.dp)
     ) {

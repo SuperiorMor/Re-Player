@@ -1,10 +1,15 @@
 package com.replayer.ui.screens
 
+import android.os.Build
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
@@ -27,6 +32,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
@@ -36,9 +43,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
 import com.replayer.data.FavoritesManager
@@ -49,6 +58,7 @@ import com.replayer.model.EpgProgram
 import com.replayer.model.FavoriteFolder
 import com.replayer.model.IptvChannel
 import com.replayer.model.MediaItem
+import com.replayer.ui.components.TvFocusCard
 import com.replayer.ui.theme.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -61,7 +71,7 @@ import kotlin.math.abs
 fun HomeScreen(
     onOpenFavorite: (FavoriteFolder) -> Unit,
     onPlayMedia: (MediaItem) -> Unit,
-    onPlayChannel: (IptvChannel) -> Unit,
+    onPlayChannel: (IptvChannel, List<IptvChannel>) -> Unit,
     onFallbackToRail: () -> Unit = {},
     enterSectionTrigger: Int = 0,
     modifier: Modifier = Modifier
@@ -104,6 +114,7 @@ fun HomeScreen(
     }
 
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var channelToRemoveFromFav by remember { mutableStateOf<IptvChannel?>(null) }
     LaunchedEffect(Unit) {
         while (isActive) {
             delay(30_000L)
@@ -115,7 +126,7 @@ fun HomeScreen(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(start = 28.dp, end = 28.dp, top = 34.dp, bottom = 18.dp)
+            .padding(start = 28.dp, end = 28.dp, top = 26.dp, bottom = 18.dp)
     ) {
         // -------------------------------------------------------------
         // ВЕРХНИЙ БЛОК: СЛЕВА ПОСТЕРЫ (2:3) | СПРАВА «ИЗБРАННЫЕ ПАПКИ» ДО КРАЯ ЭКРАНА
@@ -438,14 +449,27 @@ fun HomeScreen(
         // -------------------------------------------------------------
         // НИЖНИЙ БЛОК: ТЕЛЕПРОГРАММА ИЗБРАННЫХ КАНАЛОВ (Google TV Live Guide)
         // -------------------------------------------------------------
-        Text(
-            text = "Телепрограмма избранных каналов",
-            style = MaterialTheme.typography.titleMedium.copy(
-                fontWeight = FontWeight.Bold,
-                fontSize = 17.sp
-            ),
-            color = TextPrimary
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Bottom
+        ) {
+            Text(
+                text = "Телепрограмма избранных каналов",
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 17.sp
+                ),
+                color = TextPrimary
+            )
+            if (favoriteChannels.isNotEmpty()) {
+                Text(
+                    text = "★ справа или удержание OK — убрать из избранного",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextSecondary.copy(alpha = 0.65f)
+                )
+            }
+        }
 
         Spacer(modifier = Modifier.height(10.dp))
 
@@ -480,8 +504,110 @@ fun HomeScreen(
                 iptvManager = iptvManager,
                 nowMs = nowMs,
                 entryFocusRequester = if (recentPosters.isEmpty() && favorites.isEmpty()) entryFocusRequester else null,
-                onPlayChannel = onPlayChannel
+                onPlayChannel = { ch -> onPlayChannel(ch, favoriteChannels) },
+                onToggleFavorite = { ch -> iptvManager.toggleFavorite(ch.id) },
+                onRequestRemoveFavorite = { ch -> channelToRemoveFromFav = ch }
             )
+        }
+    }
+
+    if (channelToRemoveFromFav != null) {
+        val target = channelToRemoveFromFav!!
+        BackHandler(enabled = true) {
+            channelToRemoveFromFav = null
+        }
+        Dialog(onDismissRequest = { channelToRemoveFromFav = null }) {
+            val cancelFocusRequester = remember { FocusRequester() }
+            LaunchedEffect(Unit) {
+                delay(40)
+                try {
+                    cancelFocusRequester.requestFocus()
+                } catch (_: Exception) {}
+            }
+            Box(
+                modifier = Modifier
+                    .width(420.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .border(1.dp, AccentOrange.copy(alpha = 0.55f), RoundedCornerShape(20.dp))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .background(Color(0xCC151B26))
+                        .then(
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                Modifier.blur(20.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
+                            } else Modifier
+                        )
+                )
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Star,
+                        contentDescription = null,
+                        tint = AccentOrange,
+                        modifier = Modifier.size(34.dp)
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "Убрать из избранного?",
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                        color = TextPrimary,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = target.name,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = AccentCyanBright,
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        TvFocusCard(
+                            onClick = {
+                                iptvManager.toggleFavorite(target.id)
+                                channelToRemoveFromFav = null
+                            },
+                            focusBorderColor = AccentOrange,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(46.dp)
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = "Убрать",
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = AccentOrange
+                                )
+                            }
+                        }
+
+                        TvFocusCard(
+                            onClick = { channelToRemoveFromFav = null },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(46.dp)
+                                .focusRequester(cancelFocusRequester)
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = "Отмена",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = TextPrimary
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -544,6 +670,7 @@ private fun buildTimelineSlots(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun GoogleTvLiveGuide(
     favoriteChannels: List<IptvChannel>,
@@ -551,7 +678,9 @@ private fun GoogleTvLiveGuide(
     iptvManager: IptvManager,
     nowMs: Long,
     entryFocusRequester: FocusRequester? = null,
-    onPlayChannel: (IptvChannel) -> Unit
+    onPlayChannel: (IptvChannel) -> Unit,
+    onToggleFavorite: (IptvChannel) -> Unit,
+    onRequestRemoveFavorite: (IptvChannel) -> Unit
 ) {
     val totalWindowMs = 75 * 60_000L // 1h 15m visible window matching Google TV
     val windowStart = nowMs - 15 * 60_000L // NOW sits cleanly at 20%
@@ -582,6 +711,8 @@ private fun GoogleTvLiveGuide(
 
     val logoColWidth = 112.dp
     val colGap = 10.dp
+    val starColWidth = 34.dp
+    val starGap = 6.dp
 
     Box(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -645,9 +776,11 @@ private fun GoogleTvLiveGuide(
                         )
                     }
                 }
+
+                Spacer(modifier = Modifier.width(starGap + starColWidth))
             }
 
-            // Channel Rows (single focusable unit per channel row)
+            // Channel Rows
             favoriteChannels.forEachIndexed { channelIdx, channel ->
                 val progs = remember(channel, epgMap) {
                     iptvManager.getProgramsForChannel(channel)
@@ -657,8 +790,11 @@ private fun GoogleTvLiveGuide(
                 }
                 val rowInteractionSource = remember { MutableInteractionSource() }
                 val isRowFocused by rowInteractionSource.collectIsFocusedAsState()
+                val starInteractionSource = remember { MutableInteractionSource() }
+                val isStarFocused by starInteractionSource.collectIsFocusedAsState()
+                val isAnyFocused = isRowFocused || isStarFocused
                 val rowScale by animateFloatAsState(
-                    targetValue = if (isRowFocused) 1.012f else 1.0f,
+                    targetValue = if (isAnyFocused) 1.012f else 1.0f,
                     label = "gtv_row_scale"
                 )
 
@@ -666,93 +802,148 @@ private fun GoogleTvLiveGuide(
                     modifier = Modifier
                         .fillMaxWidth()
                         .scale(rowScale)
-                        .zIndex(if (isRowFocused) 1f else 0f)
+                        .zIndex(if (isAnyFocused) 1f else 0f)
                         .clip(RoundedCornerShape(14.dp))
-                        .background(if (isRowFocused) CardFocusedBackground else Color.Transparent)
+                        .background(if (isAnyFocused) CardFocusedBackground else Color.Transparent)
                         .border(
-                            width = if (isRowFocused) 2.dp else 1.dp,
-                            color = if (isRowFocused) FocusBorder else Color.Transparent,
+                            width = if (isRowFocused) 2.dp else if (isStarFocused) 1.5.dp else 1.dp,
+                            color = when {
+                                isRowFocused -> FocusBorder
+                                isStarFocused -> AccentOrange.copy(alpha = 0.65f)
+                                else -> Color.Transparent
+                            },
                             shape = RoundedCornerShape(14.dp)
                         )
-                        .then(
-                            if (channelIdx == 0 && entryFocusRequester != null) {
-                                Modifier.focusRequester(entryFocusRequester)
-                            } else Modifier
-                        )
-                        .clickable(
-                            interactionSource = rowInteractionSource,
-                            indication = null,
-                            onClick = { onPlayChannel(channel) }
-                        )
-                        .focusable(interactionSource = rowInteractionSource)
                         .padding(horizontal = 4.dp, vertical = 3.dp)
                         .height(56.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Left Channel Logo Box (clean logo only, no star badge)
-                    Box(
-                        modifier = Modifier
-                            .width(logoColWidth)
-                            .fillMaxHeight()
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(if (isRowFocused) Color(0xFF242934) else Color(0xFF191C22))
-                            .border(
-                                width = 1.dp,
-                                color = if (isRowFocused) Color(0x66FFFFFF) else Color(0xFF262B35),
-                                shape = RoundedCornerShape(10.dp)
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (!channel.logoUrl.isNullOrBlank()) {
-                            AsyncImage(
-                                model = channel.logoUrl,
-                                contentDescription = channel.name,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                                contentScale = ContentScale.Fit
-                            )
-                        } else {
-                            Text(
-                                text = channel.name,
-                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, fontSize = 11.sp),
-                                color = TextPrimary,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.padding(horizontal = 8.dp)
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.width(colGap))
-
-                    // Right Timeline Slots (purely visual inside focused channel row)
                     Row(
                         modifier = Modifier
                             .weight(1f)
-                            .fillMaxHeight(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        slots.forEach { slot ->
-                            val durationMs = (slot.endMs - slot.startMs).coerceAtLeast(60_000L)
-                            val weight = (durationMs.toFloat() / totalWindowMs.toFloat()).coerceAtLeast(0.05f)
-                            val isTooNarrowForText = durationMs < 6 * 60_000L
-                            val isLiveSlot = nowMs in slot.startMs until slot.endMs
-                            val title = if (slot.program != null) {
-                                if (slot.startedBeforeWindow) "‹  ${slot.program.title}" else slot.program.title
-                            } else {
-                                "Прямой эфир"
-                            }
-
-                            GoogleTvProgramTile(
-                                title = if (isTooNarrowForText) "" else title,
-                                isHighlighted = isRowFocused && isLiveSlot,
-                                isRowFocused = isRowFocused,
-                                modifier = Modifier
-                                    .weight(weight)
-                                    .fillMaxHeight()
+                            .fillMaxHeight()
+                            .then(
+                                if (channelIdx == 0 && entryFocusRequester != null) {
+                                    Modifier.focusRequester(entryFocusRequester)
+                                } else Modifier
                             )
+                            .combinedClickable(
+                                interactionSource = rowInteractionSource,
+                                indication = null,
+                                onClick = { onPlayChannel(channel) },
+                                onLongClick = { onRequestRemoveFavorite(channel) }
+                            )
+                            .focusable(interactionSource = rowInteractionSource),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Left Channel Logo Box (clean logo only)
+                        Box(
+                            modifier = Modifier
+                                .width(logoColWidth)
+                                .fillMaxHeight()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (isAnyFocused) Color(0xFF242934) else Color(0xFF191C22))
+                                .border(
+                                    width = 1.dp,
+                                    color = if (isAnyFocused) Color(0x66FFFFFF) else Color(0xFF262B35),
+                                    shape = RoundedCornerShape(10.dp)
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (!channel.logoUrl.isNullOrBlank()) {
+                                AsyncImage(
+                                    model = channel.logoUrl,
+                                    contentDescription = channel.name,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    contentScale = ContentScale.Fit
+                                )
+                            } else {
+                                Text(
+                                    text = channel.name,
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, fontSize = 11.sp),
+                                    color = TextPrimary,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(horizontal = 8.dp)
+                                )
+                            }
                         }
+
+                        Spacer(modifier = Modifier.width(colGap))
+
+                        // Right Timeline Slots
+                        Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            slots.forEach { slot ->
+                                val durationMs = (slot.endMs - slot.startMs).coerceAtLeast(60_000L)
+                                val weight = (durationMs.toFloat() / totalWindowMs.toFloat()).coerceAtLeast(0.05f)
+                                val isTooNarrowForText = durationMs < 6 * 60_000L
+                                val isLiveSlot = nowMs in slot.startMs until slot.endMs
+                                val title = if (slot.program != null) {
+                                    if (slot.startedBeforeWindow) "‹  ${slot.program.title}" else slot.program.title
+                                } else {
+                                    "Прямой эфир"
+                                }
+
+                                GoogleTvProgramTile(
+                                    title = if (isTooNarrowForText) "" else title,
+                                    isHighlighted = isRowFocused && isLiveSlot,
+                                    isRowFocused = isAnyFocused,
+                                    modifier = Modifier
+                                        .weight(weight)
+                                        .fillMaxHeight()
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(starGap))
+
+                    // Remove-from-favorites Star button at row end
+                    val starBg by animateColorAsState(
+                        targetValue = when {
+                            isStarFocused -> AccentOrange.copy(alpha = 0.24f)
+                            isRowFocused -> AccentGold.copy(alpha = 0.12f)
+                            else -> Color.Transparent
+                        },
+                        label = "home_fav_star_bg"
+                    )
+                    Box(
+                        modifier = Modifier
+                            .width(starColWidth)
+                            .fillMaxHeight()
+                            .padding(vertical = 8.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(starBg)
+                            .then(
+                                if (isStarFocused) {
+                                    Modifier.border(2.dp, AccentOrange, RoundedCornerShape(10.dp))
+                                } else Modifier
+                            )
+                            .clickable(
+                                interactionSource = starInteractionSource,
+                                indication = null,
+                                onClick = { onToggleFavorite(channel) }
+                            )
+                            .focusable(interactionSource = starInteractionSource),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Star,
+                            contentDescription = "Убрать из избранного",
+                            tint = when {
+                                isStarFocused -> AccentOrange
+                                isRowFocused -> AccentGold
+                                else -> AccentGold.copy(alpha = 0.35f)
+                            },
+                            modifier = Modifier.size(18.dp)
+                        )
                     }
                 }
             }
@@ -796,6 +987,7 @@ private fun GoogleTvLiveGuide(
                         )
                 )
             }
+            Spacer(modifier = Modifier.width(starGap + starColWidth))
         }
     }
 }

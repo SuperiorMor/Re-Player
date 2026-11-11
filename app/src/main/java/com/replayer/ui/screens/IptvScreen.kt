@@ -67,7 +67,7 @@ import java.io.File
 
 @Composable
 fun IptvScreen(
-    onPlayChannel: (IptvChannel) -> Unit,
+    onPlayChannel: (IptvChannel, List<IptvChannel>) -> Unit,
     onNavigateToSettings: () -> Unit,
     onBackToHome: () -> Unit = {},
     enterSectionTrigger: Int = 0,
@@ -590,7 +590,7 @@ fun IptvScreen(
                         val isStarFocused by starInteraction.collectIsFocusedAsState()
 
                         TvFocusCard(
-                            onClick = { onPlayChannel(channel) },
+                            onClick = { onPlayChannel(channel, sortedList) },
                             isSelected = isStarFocused,
                             modifier = Modifier
                                 .fillMaxWidth()

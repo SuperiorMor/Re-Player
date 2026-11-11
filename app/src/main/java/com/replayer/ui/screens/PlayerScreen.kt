@@ -144,6 +144,26 @@ fun PlayerScreen(
         }
     }
 
+    fun switchIptvChannel(dir: Int) {
+        val rawList = if (playlist.isNotEmpty()) playlist else allChannels.map { it.toMediaItem() }
+        if (rawList.size <= 1) {
+            osdFeedback = "В списке только один канал"
+            return
+        }
+        val curIdx = rawList.indexOfFirst { it.id == mediaItem.id }
+        val nextIdx = if (curIdx >= 0) {
+            (curIdx + dir + rawList.size) % rawList.size
+        } else {
+            0
+        }
+        val nextItem = rawList[nextIdx]
+        playingArchiveProgram = null
+        val nextChannelObj = iptvManager.findChannelById(nextItem.id)
+        val nextProg = nextChannelObj?.let { iptvManager.getCurrentProgram(it) }
+        osdFeedback = if (nextProg != null) "${nextItem.title}  •  ${nextProg.title}" else nextItem.title
+        onPlayMediaItem?.invoke(nextItem)
+    }
+
     fun commitScrubIfPending() {
         val target = pendingCommitTargetMs
         if (target < 0L) return
@@ -385,11 +405,23 @@ fun PlayerScreen(
                     if (keyEvent.type == KeyEventType.KeyDown) {
                         when (keyEvent.key) {
                             Key.DirectionRight -> {
-                                handleScrubStep(dir = 1, repeatCount = keyEvent.nativeKeyEvent.repeatCount)
+                                if (isIptv) {
+                                    if (keyEvent.nativeKeyEvent.repeatCount == 0) {
+                                        switchIptvChannel(1)
+                                    }
+                                } else {
+                                    handleScrubStep(dir = 1, repeatCount = keyEvent.nativeKeyEvent.repeatCount)
+                                }
                                 true
                             }
                             Key.DirectionLeft -> {
-                                handleScrubStep(dir = -1, repeatCount = keyEvent.nativeKeyEvent.repeatCount)
+                                if (isIptv) {
+                                    if (keyEvent.nativeKeyEvent.repeatCount == 0) {
+                                        switchIptvChannel(-1)
+                                    }
+                                } else {
+                                    handleScrubStep(dir = -1, repeatCount = keyEvent.nativeKeyEvent.repeatCount)
+                                }
                                 true
                             }
                             Key.DirectionCenter, Key.Enter,
@@ -405,7 +437,9 @@ fun PlayerScreen(
                     } else if (keyEvent.type == KeyEventType.KeyUp &&
                         (keyEvent.key == Key.DirectionLeft || keyEvent.key == Key.DirectionRight)
                     ) {
-                        commitScrubIfPending()
+                        if (!isIptv) {
+                            commitScrubIfPending()
+                        }
                         true
                     } else {
                         false

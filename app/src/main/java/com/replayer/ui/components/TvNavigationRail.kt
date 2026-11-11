@@ -114,7 +114,6 @@ fun TvNavigationRail(
                 TvFocusCard(
                     onClick = {
                         onItemSelected(item)
-                        onEnterSection(item)
                     },
                     isSelected = isSelected,
                     cornerRadius = 14.dp,

@@ -222,7 +222,8 @@ class MainActivity : ComponentActivity() {
                                             lastPlayedMediaId = mediaItem.id
                                             activeMediaItem = mediaItem
                                         },
-                                        onPlayChannel = { channel ->
+                                        onPlayChannel = { channel, channelList ->
+                                            activePlaylist = channelList.map { it.toMediaItem() }.ifEmpty { listOf(channel.toMediaItem()) }
                                             activeMediaItem = channel.toMediaItem()
                                         },
                                         onFallbackToRail = { focusRailSelected() },
@@ -250,7 +251,8 @@ class MainActivity : ComponentActivity() {
                                         onConsumeLastPlayedMediaId = { lastPlayedMediaId = null }
                                     )
                                     NavItem.IPTV -> IptvScreen(
-                                        onPlayChannel = { channel ->
+                                        onPlayChannel = { channel, channelList ->
+                                            activePlaylist = channelList.map { it.toMediaItem() }.ifEmpty { listOf(channel.toMediaItem()) }
                                             activeMediaItem = channel.toMediaItem()
                                         },
                                         onNavigateToSettings = {

@@ -90,20 +90,19 @@ fun EpgAccordionDialog(
     }
     var focusedIndex by remember { mutableIntStateOf(currentProgIndex.coerceAtLeast(0)) }
     val initialFocusRequester = remember { FocusRequester() }
-    val closeFocusRequester = remember { FocusRequester() }
     val listState = rememberLazyListState()
 
     LaunchedEffect(Unit) {
-        delay(120)
-        try {
-            if (programs.isNotEmpty()) {
-                val scrollTarget = (currentProgIndex - 1).coerceAtLeast(0)
+        if (programs.isNotEmpty()) {
+            val scrollTarget = currentProgIndex.coerceAtLeast(0)
+            try {
                 listState.scrollToItem(scrollTarget)
+            } catch (_: Exception) {}
+            delay(16)
+            try {
                 initialFocusRequester.requestFocus()
-            } else {
-                closeFocusRequester.requestFocus()
-            }
-        } catch (_: Exception) {}
+            } catch (_: Exception) {}
+        }
     }
 
     // Ensure newly expanded accordion item's description is never clipped below the viewport
@@ -161,36 +160,19 @@ fun EpgAccordionDialog(
                     .fillMaxSize()
                     .padding(20.dp)
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = channelTitle,
-                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                            color = TextPrimary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = if (hasArchive) "Телепрограмма и архив (↑ назад / ↓ вперед)" else "Телепрограмма (без архива)",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = TextSecondary
-                        )
-                    }
-                    TvFocusCard(
-                        onClick = onDismiss,
-                        modifier = Modifier
-                            .width(100.dp)
-                            .height(36.dp)
-                            .then(if (programs.isEmpty()) Modifier.focusRequester(closeFocusRequester) else Modifier)
-                    ) {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text("Закрыть", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
-                        }
-                    }
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = channelTitle,
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                        color = TextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = if (hasArchive) "Телепрограмма и архив (↑ назад / ↓ вперед)" else "Телепрограмма (без архива)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
