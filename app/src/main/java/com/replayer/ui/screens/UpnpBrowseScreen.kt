@@ -1,10 +1,13 @@
 package com.replayer.ui.screens
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.Crossfade
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
@@ -153,7 +156,7 @@ fun UpnpBrowseScreen(
         scope.launch {
             val loaded = contentDirectory.browse(controlUrl, folderId)
             if (reqId == activeLoadRequestId) {
-                currentItems = loaded
+                currentItems = loaded.distinctBy { it.id }
                 loadedFolderId = folderId
                 isLoadingFolder = false
             }
@@ -246,7 +249,7 @@ fun UpnpBrowseScreen(
             isTransitioningFocus = false
             if (enterSectionTrigger != lastHandledEnterTrigger && enterSectionTrigger > 0) {
                 lastHandledEnterTrigger = enterSectionTrigger
-                delay(50)
+                delay(150) // Важно! Ждем отрисовки Compose
                 try {
                     settingsCtaFocusRequester.requestFocus()
                 } catch (_: Exception) {}
@@ -260,7 +263,7 @@ fun UpnpBrowseScreen(
         if (items.isEmpty()) {
             focusedItem = null
             lastFocusedFolderId = loadedFolderId
-            delay(30)
+            delay(150)
             try {
                 emptyFocusRequester.requestFocus()
             } catch (_: Exception) {}
@@ -286,7 +289,7 @@ fun UpnpBrowseScreen(
         try {
             listState.scrollToItem(resolvedIdx)
         } catch (_: Exception) {}
-        delay(45)
+        delay(150) // Важно! Ждем отрисовки Compose
         try {
             targetItemFocusRequester.requestFocus()
         } catch (_: Exception) {}
@@ -445,7 +448,7 @@ fun UpnpBrowseScreen(
                             .weight(0.56f)
                             .fillMaxHeight()
                     ) {
-                        itemsIndexed(sortedItems, key = { idx, item -> "${item.id}_$idx" }) { index, item ->
+                        itemsIndexed(sortedItems, key = { _, item -> item.id }) { index, item ->
                             val isFav = favorites.any { it.id == item.id }
                             val watchProgress = remember(item.id, item.uri, progressMap) {
                                 if (item.type != MediaType.DIRECTORY) {
@@ -790,10 +793,10 @@ private fun DlnaDetailPreviewPanel(
                     .border(1.dp, BorderSubtle, RoundedCornerShape(14.dp)),
                 contentAlignment = Alignment.Center
             ) {
-                Crossfade(
+                AnimatedContent(
                     targetState = posterUrl,
-                    animationSpec = tween(220),
-                    label = "dlna_poster_fade"
+                    transitionSpec = { fadeIn(tween(300)) togetherWith fadeOut(tween(300)) },
+                    label = "poster_fade"
                 ) { url ->
                     if (!url.isNullOrBlank()) {
                         AsyncImage(

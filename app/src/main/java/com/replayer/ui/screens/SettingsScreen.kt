@@ -3,6 +3,7 @@ package com.replayer.ui.screens
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -18,6 +19,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -77,7 +80,7 @@ fun SettingsScreen(
 
     LaunchedEffect(enterSectionTrigger) {
         if (enterSectionTrigger > 0) {
-            delay(50)
+            delay(150) // Важно! Ждем отрисовки Compose
             try {
                 entryFocusRequester.requestFocus()
             } catch (_: Exception) {}
@@ -961,11 +964,19 @@ fun SettingsScreen(
                 modifier = Modifier
                     .width(520.dp)
                     .clip(RoundedCornerShape(20.dp))
-                    .background(DarkCard)
                     .border(1.dp, AccentCyan.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
-                    .padding(28.dp)
             ) {
-                Column {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .background(Color(0xCC151B26))
+                        .then(
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                Modifier.blur(20.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
+                            } else Modifier
+                        )
+                )
+                Column(modifier = Modifier.padding(28.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1078,11 +1089,19 @@ fun SettingsScreen(
                     .width(520.dp)
                     .height(440.dp)
                     .clip(RoundedCornerShape(20.dp))
-                    .background(DarkCard)
                     .border(1.dp, AccentCyan.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
-                    .padding(24.dp)
             ) {
-                Column {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .background(Color(0xCC151B26))
+                        .then(
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                Modifier.blur(20.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
+                            } else Modifier
+                        )
+                )
+                Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1197,11 +1216,22 @@ fun SettingsScreen(
                 modifier = Modifier
                     .width(620.dp)
                     .clip(RoundedCornerShape(20.dp))
-                    .background(DarkCard)
                     .border(1.dp, AccentCyan.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
-                    .padding(24.dp)
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .background(Color(0xCC151B26))
+                        .then(
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                Modifier.blur(20.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
+                            } else Modifier
+                        )
+                )
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
                     Text(
                         text = if (target == UrlEditTarget.PLAYLIST)
                             "URL плейлиста (.m3u / .m3u8)"
@@ -1316,6 +1346,16 @@ fun SettingsScreen(
 }
 
 private fun getFriendlyChangelog(version: String, rawChangelog: String): List<String> {
+    if (version.contains("1.0")) {
+        return listOf(
+            "Стабильный релиз Re:Player v1.0.0: устранены сбои и улёты фокуса D-pad при сортировке и переключении разделов.",
+            "Надёжная ловушка фокуса в панели управления плеером — курсор пульта не уходит за края кнопок.",
+            "Новый анимированный прелоадер при запуске и радиальный градиент главного фона.",
+            "Обновлённые полупрозрачные диалоги с эффектом размытия, свечение кнопки Play/Pause и плавное появление постеров DLNA.",
+            "Полная очистка от устаревших зависимостей и ускорение сборки."
+        )
+    }
+
     if (version.contains("0.8")) {
         return listOf(
             "Стабильная загрузка телепрограммы: авто-маршрутизация CDN для epg.it999.ru и epg.one (исправлен сбой соединения).",

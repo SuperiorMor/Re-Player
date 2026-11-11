@@ -1,5 +1,6 @@
 package com.replayer.ui.components
 
+import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -38,6 +39,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -365,11 +368,22 @@ private fun TelegramSetupDialog(
             modifier = Modifier
                 .width(680.dp)
                 .clip(RoundedCornerShape(20.dp))
-                .background(DarkCard)
                 .border(1.dp, AccentCyan.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
-                .padding(24.dp)
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(Color(0xCC151B26))
+                    .then(
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            Modifier.blur(20.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
+                        } else Modifier
+                    )
+            )
+            Column(
+                modifier = Modifier.padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -651,11 +665,19 @@ private fun CrashLogsViewerDialog(
                 .fillMaxWidth(0.86f)
                 .fillMaxHeight(0.82f)
                 .clip(RoundedCornerShape(20.dp))
-                .background(DarkCard)
                 .border(1.dp, AccentCyan.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
-                .padding(22.dp)
         ) {
-            Column(modifier = Modifier.fillMaxSize()) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(Color(0xCC151B26))
+                    .then(
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            Modifier.blur(20.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
+                        } else Modifier
+                    )
+            )
+            Column(modifier = Modifier.fillMaxSize().padding(22.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,

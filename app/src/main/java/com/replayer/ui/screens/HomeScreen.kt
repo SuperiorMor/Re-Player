@@ -87,7 +87,7 @@ fun HomeScreen(
 
     LaunchedEffect(enterSectionTrigger) {
         if (enterSectionTrigger > 0) {
-            delay(50)
+            delay(150) // Важно! Ждем отрисовки Compose
             try {
                 entryFocusRequester.requestFocus()
             } catch (_: Exception) {}

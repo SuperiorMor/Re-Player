@@ -1,5 +1,6 @@
 package com.replayer
 
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -33,8 +34,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -44,6 +49,7 @@ import com.replayer.diagnostics.CrashReporter
 import com.replayer.model.FavoriteFolder
 import com.replayer.model.MediaItem
 import com.replayer.model.MediaSourceType
+import com.replayer.ui.components.AppSplashScreen
 import com.replayer.ui.components.NavItem
 import com.replayer.ui.components.TvFocusCard
 import com.replayer.ui.components.TvNavigationRail
@@ -65,7 +71,12 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             RePlayerTheme {
-                var selectedNav by remember { mutableStateOf(NavItem.HOME) }
+                var showSplash by remember { mutableStateOf(true) }
+
+                if (showSplash) {
+                    AppSplashScreen(onTimeout = { showSplash = false })
+                } else {
+                    var selectedNav by remember { mutableStateOf(NavItem.HOME) }
                 var activeMediaItem by remember { mutableStateOf<MediaItem?>(null) }
                 var activePlaylist by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
                 var showExitDialog by remember { mutableStateOf(false) }
@@ -95,7 +106,13 @@ class MainActivity : ComponentActivity() {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(DarkBackground)
+                        .background(
+                            Brush.radialGradient(
+                                colors = listOf(Color(0xFF14D4F4).copy(alpha = 0.08f), DarkBackground),
+                                center = Offset(0f, 0f),
+                                radius = 1500f
+                            )
+                        )
                 ) {
                     // TV Navigation & Main UI (always kept alive so state is preserved on player close)
                     @OptIn(ExperimentalComposeUiApi::class)
@@ -207,11 +224,20 @@ class MainActivity : ComponentActivity() {
                                 modifier = Modifier
                                     .width(440.dp)
                                     .clip(RoundedCornerShape(20.dp))
-                                    .background(DarkCard)
                                     .border(1.dp, AccentCyan.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
-                                    .padding(28.dp)
                             ) {
+                                Box(
+                                    modifier = Modifier
+                                        .matchParentSize()
+                                        .background(Color(0xCC151B26))
+                                        .then(
+                                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                                Modifier.blur(20.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
+                                            } else Modifier
+                                        )
+                                )
                                 Column(
+                                    modifier = Modifier.padding(28.dp),
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     verticalArrangement = Arrangement.Center
                                 ) {
@@ -282,6 +308,7 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     }
+                }
                 }
             }
         }

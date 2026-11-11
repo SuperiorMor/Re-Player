@@ -1,5 +1,6 @@
 package com.replayer.ui.screens
 
+import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -30,6 +31,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
@@ -98,7 +101,7 @@ fun IptvScreen(
         } catch (_: Exception) {}
         selectedFolder = pendingFolderTarget
         pendingHasSwitch = false
-        delay(45)
+        delay(150)
         try {
             entryFocusRequester.requestFocus()
         } catch (_: Exception) {}
@@ -107,7 +110,7 @@ fun IptvScreen(
 
     LaunchedEffect(enterSectionTrigger, isLoading, channels.isEmpty()) {
         if (enterSectionTrigger > 0 && !isSwitchingView) {
-            delay(50)
+            delay(150) // Важно! Ждем отрисовки Compose
             try {
                 entryFocusRequester.requestFocus()
             } catch (_: Exception) {}
@@ -551,7 +554,7 @@ fun IptvScreen(
                     contentPadding = PaddingValues(bottom = 24.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    itemsIndexed(sortedList, key = { idx, ch -> "${ch.id}_$idx" }) { idx, channel ->
+                    itemsIndexed(sortedList, key = { _, ch -> ch.id }) { idx, channel ->
                         val isFav = favoriteIds.contains(channel.id)
                         val currentProg = remember(channel, epgMap) {
                             iptvManager.getCurrentProgram(channel)
@@ -736,11 +739,19 @@ fun IptvScreen(
                     .width(520.dp)
                     .height(440.dp)
                     .clip(RoundedCornerShape(20.dp))
-                    .background(DarkCard)
                     .border(1.dp, AccentCyan.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
-                    .padding(24.dp)
             ) {
-                Column {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .background(Color(0xCC151B26))
+                        .then(
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                Modifier.blur(20.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
+                            } else Modifier
+                        )
+                )
+                Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
