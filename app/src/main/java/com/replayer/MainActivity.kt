@@ -35,6 +35,7 @@ import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -82,6 +83,7 @@ class MainActivity : ComponentActivity() {
                 var showExitDialog by remember { mutableStateOf(false) }
                 var initialUpnpFolder by remember { mutableStateOf<Pair<String, String>?>(null) }
                 var lastPlayedMediaId by remember { mutableStateOf<String?>(null) }
+                var isFocusInContent by remember { mutableStateOf(false) }
 
                 val activeScreenFocusRequester = when (selectedNav) {
                     NavItem.HOME -> homeFirstItemFocus
@@ -103,10 +105,14 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // Exit confirmation dialog on Home screen
-                if (!showSplash && activeMediaItem == null && selectedNav == NavItem.HOME && !showExitDialog) {
+                // Back when cursor is already on Left Menu on a sub-tab -> return to Home; on Home -> Exit confirmation dialog
+                if (!showSplash && activeMediaItem == null && !showExitDialog && !isFocusInContent) {
                     BackHandler(enabled = true) {
-                        showExitDialog = true
+                        if (selectedNav != NavItem.HOME) {
+                            selectedNav = NavItem.HOME
+                        } else {
+                            showExitDialog = true
+                        }
                     }
                 }
 
@@ -139,6 +145,7 @@ class MainActivity : ComponentActivity() {
                             modifier = Modifier
                                 .weight(1f)
                                 .fillMaxSize()
+                                .onFocusChanged { isFocusInContent = it.hasFocus }
                         ) {
                             when (selectedNav) {
                                 NavItem.HOME -> HomeScreen(
@@ -174,7 +181,6 @@ class MainActivity : ComponentActivity() {
                                         } catch (_: Exception) {}
                                     },
                                     onBackToHome = {
-                                        selectedNav = NavItem.HOME
                                         try {
                                             navMenuFocusRequester.requestFocus()
                                         } catch (_: Exception) {}
@@ -199,7 +205,6 @@ class MainActivity : ComponentActivity() {
                                         } catch (_: Exception) {}
                                     },
                                     onBackToHome = {
-                                        selectedNav = NavItem.HOME
                                         try {
                                             navMenuFocusRequester.requestFocus()
                                         } catch (_: Exception) {}
@@ -209,7 +214,6 @@ class MainActivity : ComponentActivity() {
                                     firstItemFocusRequester = settingsFirstItemFocus,
                                     navMenuFocusRequester = navMenuFocusRequester,
                                     onBack = {
-                                        selectedNav = NavItem.HOME
                                         try {
                                             navMenuFocusRequester.requestFocus()
                                         } catch (_: Exception) {}

@@ -92,28 +92,29 @@ class RecentMediaManager private constructor(context: Context) {
         } catch (_: Exception) {}
     }
 
-    private fun recordFolderSelectionLocked(folderId: String?, itemId: String, itemUri: String) {
+    private fun recordFolderSelectionLocked(folderId: String?, itemId: String, itemUri: String, itemTitle: String = "") {
         val cleanFolder = folderId?.ifBlank { null } ?: return
         if (itemId.isBlank()) return
         // Re-insert so LinkedHashMap preserves most-recently-used ordering at the tail
         folderLastOpened.remove(cleanFolder)
-        folderLastOpened[cleanFolder] = "$itemId\n$itemUri"
+        folderLastOpened[cleanFolder] = "$itemId\n$itemUri\n$itemTitle"
         saveFolderLastOpenedLocked()
     }
 
-    fun recordFolderSelection(folderId: String?, itemId: String, itemUri: String) {
+    fun recordFolderSelection(folderId: String?, itemId: String, itemUri: String, itemTitle: String = "") {
         synchronized(listLock) {
-            recordFolderSelectionLocked(folderId, itemId, itemUri)
+            recordFolderSelectionLocked(folderId, itemId, itemUri, itemTitle)
         }
     }
 
-    fun getLastOpenedKeyInFolder(folderId: String?): Pair<String, String>? {
+    fun getLastOpenedKeyInFolder(folderId: String?): Triple<String, String, String>? {
         val cleanFolder = folderId?.ifBlank { null } ?: return null
         val stored = synchronized(listLock) { folderLastOpened[cleanFolder] } ?: return null
-        val parts = stored.split('\n', limit = 2)
+        val parts = stored.split('\n', limit = 3)
         val id = parts.getOrNull(0)?.ifBlank { null } ?: return null
         val uri = parts.getOrNull(1) ?: ""
-        return Pair(id, uri)
+        val title = parts.getOrNull(2) ?: ""
+        return Triple(id, uri, title)
     }
 
     private fun loadRecent(): List<RecentMedia> {
@@ -205,7 +206,7 @@ class RecentMediaManager private constructor(context: Context) {
             )
             // Remember last played file inside its DLNA folder for smart cursor restoration
             if (cleanParent != null) {
-                recordFolderSelectionLocked(cleanParent, id, uri)
+                recordFolderSelectionLocked(cleanParent, id, uri, title)
             }
             // Limit section strictly to 2 folders
             saveRecent(current.take(2))

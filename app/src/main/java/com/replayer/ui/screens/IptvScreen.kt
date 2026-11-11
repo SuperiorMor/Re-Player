@@ -13,6 +13,7 @@ import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.itemsIndexed
@@ -101,12 +102,68 @@ fun IptvScreen(
         iptvManager.getSortedChannels(folderChannels, sortMode)
     }
 
+    var lastFocusedFolder by remember { mutableStateOf<String?>(null) }
+    val lastChannelByFolder = remember { mutableStateMapOf<String, String>() }
+    var pendingIptvFocus by remember { mutableStateOf(false) }
+    val targetFocusRequester = remember { FocusRequester() }
+
+    val targetFolderIdx = remember(folders, lastFocusedFolder) {
+        if (folders.isEmpty() || lastFocusedFolder == null) 0
+        else folders.indexOf(lastFocusedFolder).takeIf { it >= 0 } ?: 0
+    }
+    val rememberedChannelId = lastChannelByFolder[currentFolderName]
+    val targetChannelIdx = remember(sortedList, rememberedChannelId) {
+        if (sortedList.isEmpty() || rememberedChannelId == null) 0
+        else sortedList.indexOfFirst { it.id == rememberedChannelId }.takeIf { it >= 0 } ?: 0
+    }
+
     val folderGridState = rememberLazyGridState()
-    val channelGridState = rememberLazyGridState()
+    val channelGridState = remember(currentFolderName) {
+        LazyGridState(firstVisibleItemIndex = targetChannelIdx)
+    }
     var handledBackKeyDown by remember { mutableStateOf(false) }
 
     fun switchCategory(targetFolder: String?) {
+        if (targetFolder != null) {
+            lastFocusedFolder = targetFolder
+        }
+        pendingIptvFocus = true
         selectedFolder = targetFolder
+    }
+
+    LaunchedEffect(selectedFolder, pendingIptvFocus, channels.isEmpty(), folders.size, sortedList.size) {
+        if (channels.isNotEmpty() && pendingIptvFocus) {
+            val isLevel1 = selectedFolder == null && folders.size > 1
+            if (isLevel1) {
+                val isTargetVisible = folderGridState.layoutInfo.visibleItemsInfo.any { it.index == targetFolderIdx }
+                if (!isTargetVisible && folders.isNotEmpty()) {
+                    folderGridState.scrollToItem(targetFolderIdx)
+                }
+                withFrameNanos { }
+                val ok = runCatching { targetFocusRequester.requestFocus() }.isSuccess
+                if (!ok) {
+                    delay(50)
+                    withFrameNanos { }
+                    runCatching { targetFocusRequester.requestFocus() }
+                }
+            } else if (sortedList.isNotEmpty()) {
+                val isTargetVisible = channelGridState.layoutInfo.visibleItemsInfo.any { it.index == targetChannelIdx }
+                if (!isTargetVisible) {
+                    channelGridState.scrollToItem(targetChannelIdx)
+                }
+                withFrameNanos { }
+                val ok = runCatching { targetFocusRequester.requestFocus() }.isSuccess
+                if (!ok) {
+                    delay(50)
+                    withFrameNanos { }
+                    runCatching { targetFocusRequester.requestFocus() }
+                }
+            } else {
+                withFrameNanos { }
+                runCatching { firstItemFocusRequester.requestFocus() }
+            }
+            pendingIptvFocus = false
+        }
     }
 
     var showLocalFileDialog by remember { mutableStateOf(false) }
@@ -471,9 +528,18 @@ fun IptvScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .focusRequester(firstItemFocusRequester)
-                    .focusRestorer()
+                    .focusRestorer {
+                        val isTargetVisible = folderGridState.layoutInfo.visibleItemsInfo.any {
+                            it.index == targetFolderIdx
+                        }
+                        if (folders.isNotEmpty() && isTargetVisible) {
+                            targetFocusRequester
+                        } else {
+                            FocusRequester.Default
+                        }
+                    }
             ) {
-                items(folders, key = { folder -> folder }) { folder ->
+                itemsIndexed(folders, key = { _, folder -> folder }) { idx, folder ->
                     val count = remember(channels, folder) {
                         iptvManager.getChannelsInFolder(folder).size
                     }
@@ -483,6 +549,16 @@ fun IptvScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(84.dp)
+                            .then(
+                                if (idx == targetFolderIdx) {
+                                    Modifier.focusRequester(targetFocusRequester)
+                                } else Modifier
+                            )
+                            .onFocusChanged { state ->
+                                if (state.hasFocus) {
+                                    lastFocusedFolder = folder
+                                }
+                            }
                     ) {
                         Row(
                             modifier = Modifier
@@ -545,7 +621,7 @@ fun IptvScreen(
                     )
                 }
             } else {
-                key(selectedFolder) {
+                key(currentFolderName) {
                 LazyVerticalGrid(
                     state = channelGridState,
                     columns = GridCells.Fixed(2),
@@ -555,7 +631,16 @@ fun IptvScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .focusRequester(firstItemFocusRequester)
-                        .focusRestorer()
+                        .focusRestorer {
+                            val isTargetVisible = channelGridState.layoutInfo.visibleItemsInfo.any {
+                                it.index == targetChannelIdx
+                            }
+                            if (sortedList.isNotEmpty() && isTargetVisible) {
+                                targetFocusRequester
+                            } else {
+                                FocusRequester.Default
+                            }
+                        }
                 ) {
                     itemsIndexed(sortedList, key = { _, ch -> ch.id }) { idx, channel ->
                         val isFav = favoriteIds.contains(channel.id)
@@ -567,11 +652,24 @@ fun IptvScreen(
                         val isStarFocused by starInteraction.collectIsFocusedAsState()
 
                         TvFocusCard(
-                            onClick = { onPlayChannel(channel, sortedList) },
+                            onClick = {
+                                lastChannelByFolder[currentFolderName] = channel.id
+                                onPlayChannel(channel, sortedList)
+                            },
                             isSelected = isStarFocused,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(48.dp)
+                                .then(
+                                    if (idx == targetChannelIdx) {
+                                        Modifier.focusRequester(targetFocusRequester)
+                                    } else Modifier
+                                )
+                                .onFocusChanged { state ->
+                                    if (state.hasFocus) {
+                                        lastChannelByFolder[currentFolderName] = channel.id
+                                    }
+                                }
                                 .then(
                                     if (idx % 2 == 0) {
                                         Modifier.focusProperties { left = navMenuFocusRequester }

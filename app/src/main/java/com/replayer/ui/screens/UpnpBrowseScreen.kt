@@ -31,8 +31,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AudioFile
@@ -51,6 +51,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -58,6 +59,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
@@ -142,7 +144,8 @@ fun UpnpBrowseScreen(
     var activeLoadRequestId by remember { mutableIntStateOf(0) }
     var sortMode by remember { mutableStateOf(SortMode.BY_NAME) }
 
-    val listState = rememberLazyListState()
+    val targetItemFocusRequester = remember { FocusRequester() }
+    var pendingFolderFocusMove by remember { mutableStateOf(initialFolder != null) }
     var focusedItem by remember { mutableStateOf<MediaItem?>(null) }
     var lastExitTimestamp by remember { mutableLongStateOf(0L) }
     var handledBackKeyDown by remember { mutableStateOf(false) }
@@ -169,8 +172,10 @@ fun UpnpBrowseScreen(
 
     fun openFolder(controlUrl: String, folderItem: MediaItem) {
         CrashReporter.breadcrumb("DLNA", "openFolder: ${folderItem.title} (${folderItem.id})")
-        recentManager.recordFolderSelection(currentFolderId, folderItem.id, folderItem.uri)
+        recentManager.recordFolderSelection(currentFolderId, folderItem.id, folderItem.uri, folderItem.title)
         onConsumeLastPlayedMediaId()
+        focusedItem = null
+        pendingFolderFocusMove = true
         folderStack = folderStack + Pair(folderItem.id, folderItem.title)
         loadFolder(controlUrl, folderItem.id)
     }
@@ -187,6 +192,8 @@ fun UpnpBrowseScreen(
             val controlUrl = connectedDevice!!.contentDirectoryControlUrl ?: return@LaunchedEffect
             if (initialFolder != null) {
                 if (folderStack.lastOrNull()?.first != initialFolder.first) {
+                    focusedItem = null
+                    pendingFolderFocusMove = true
                     folderStack = listOf(Pair("0", connectedDevice!!.friendlyName), initialFolder)
                     loadFolder(controlUrl, initialFolder.first)
                     onFolderLoaded()
@@ -209,6 +216,8 @@ fun UpnpBrowseScreen(
             val parentIdx = folderStack.size - 2
             val parentFolder = folderStack[parentIdx]
             folderStack = folderStack.take(parentIdx + 1)
+            focusedItem = null
+            pendingFolderFocusMove = true
             val cached = folderCache[parentFolder.first]
             if (cached != null) {
                 activeLoadRequestId++
@@ -269,6 +278,93 @@ fun UpnpBrowseScreen(
     }
 
     val latestSortedItems by rememberUpdatedState(sortedItems)
+
+    val targetHistory = remember(loadedFolderId, sortedItems, lastPlayedMediaId) {
+        recentManager.getLastOpenedKeyInFolder(loadedFolderId)
+    }
+    val resolvedTargetIdx = remember(loadedFolderId, sortedItems, targetHistory, lastPlayedMediaId, progressMap) {
+        if (sortedItems.isEmpty()) {
+            0
+        } else {
+            val idxFromLastPlayed = if (!lastPlayedMediaId.isNullOrBlank()) {
+                sortedItems.indexOfFirst { it.id == lastPlayedMediaId }
+            } else {
+                -1
+            }
+            val idxFromHistory = if (idxFromLastPlayed < 0 && targetHistory != null) {
+                val (savedId, savedUri, savedTitle) = targetHistory
+                val byId = sortedItems.indexOfFirst { it.id == savedId }
+                val byUri = if (byId < 0 && savedUri.isNotBlank()) {
+                    sortedItems.indexOfFirst { it.uri == savedUri }
+                } else {
+                    -1
+                }
+                val byTitle = if (byId < 0 && byUri < 0 && savedTitle.isNotBlank()) {
+                    sortedItems.indexOfFirst { it.title.equals(savedTitle, ignoreCase = true) }
+                } else {
+                    -1
+                }
+                maxOf(byId, byUri, byTitle)
+            } else {
+                -1
+            }
+            val idxFromProgress = if (idxFromLastPlayed < 0 && idxFromHistory < 0) {
+                var bestIdx = -1
+                var bestUpdatedAt = Long.MIN_VALUE
+                sortedItems.forEachIndexed { index, mediaItem ->
+                    val prog = progressMap[mediaItem.id] ?: progressMap[mediaItem.uri]
+                    if (prog != null && prog.positionMs > 0L && prog.updatedAt > bestUpdatedAt) {
+                        bestUpdatedAt = prog.updatedAt
+                        bestIdx = index
+                    }
+                }
+                bestIdx
+            } else {
+                -1
+            }
+            when {
+                idxFromLastPlayed >= 0 -> idxFromLastPlayed
+                idxFromHistory >= 0 -> idxFromHistory
+                idxFromProgress >= 0 -> idxFromProgress
+                else -> 0
+            }
+        }
+    }
+    val folderListState = remember(loadedFolderId) {
+        LazyListState(firstVisibleItemIndex = resolvedTargetIdx)
+    }
+
+    LaunchedEffect(loadedFolderId, isLoadingFolder, pendingFolderFocusMove, sortedItems.size) {
+        if (loadedFolderId != null && !isLoadingFolder) {
+            if (sortedItems.isNotEmpty()) {
+                val safeIdx = resolvedTargetIdx.coerceIn(0, sortedItems.lastIndex)
+                if (pendingFolderFocusMove || focusedItem == null) {
+                    focusedItem = sortedItems[safeIdx]
+                }
+                val isTargetVisible = folderListState.layoutInfo.visibleItemsInfo.any { it.index == safeIdx }
+                if (!isTargetVisible) {
+                    folderListState.scrollToItem(safeIdx)
+                }
+                if (pendingFolderFocusMove) {
+                    withFrameNanos { }
+                    val focused = runCatching { targetItemFocusRequester.requestFocus() }.isSuccess
+                    if (!focused) {
+                        delay(50)
+                        withFrameNanos { }
+                        runCatching { targetItemFocusRequester.requestFocus() }
+                    }
+                    pendingFolderFocusMove = false
+                }
+            } else {
+                focusedItem = null
+                if (pendingFolderFocusMove) {
+                    withFrameNanos { }
+                    runCatching { firstItemFocusRequester.requestFocus() }
+                    pendingFolderFocusMove = false
+                }
+            }
+        }
+    }
 
     if (connectedDevice == null) {
         Box(
@@ -421,78 +517,93 @@ fun UpnpBrowseScreen(
                     modifier = Modifier.fillMaxSize(),
                     horizontalArrangement = Arrangement.spacedBy(20.dp)
                 ) {
-                    LazyColumn(
-                        state = listState,
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        contentPadding = PaddingValues(top = 6.dp, bottom = 24.dp, start = 14.dp, end = 14.dp),
-                        modifier = Modifier
-                            .weight(0.56f)
-                            .fillMaxHeight()
-                            .focusRequester(firstItemFocusRequester)
-                            .focusRestorer()
-                            .focusProperties {
-                                left = navMenuFocusRequester
-                            }
-                    ) {
-                        items(sortedItems, key = { item -> item.id }) { item ->
-                            val isFav = favorites.any { it.id == item.id }
-                            val watchProgress = remember(item.id, item.uri, progressMap) {
-                                if (item.type != MediaType.DIRECTORY) {
-                                    (progressMap[item.id]?.progress()
-                                        ?: progressMap[item.uri]?.progress()
-                                        ?: 0f).coerceIn(0f, 1f)
-                                } else 0f
-                            }
-
-                            var isRowFocused by remember { mutableStateOf(false) }
-                            val starInteraction = remember { MutableInteractionSource() }
-                            val isStarFocused by starInteraction.collectIsFocusedAsState()
-                            val isAnyPartFocused = isRowFocused || isStarFocused
-
-                            TvFocusCard(
-                                onClick = {
-                                    if (item.type == MediaType.DIRECTORY) {
-                                        connectedDevice?.contentDirectoryControlUrl?.let { url ->
-                                            openFolder(url, item)
-                                        }
+                    key(loadedFolderId) {
+                        LazyColumn(
+                            state = folderListState,
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            contentPadding = PaddingValues(top = 6.dp, bottom = 24.dp, start = 14.dp, end = 14.dp),
+                            modifier = Modifier
+                                .weight(0.56f)
+                                .fillMaxHeight()
+                                .focusRequester(firstItemFocusRequester)
+                                .focusRestorer {
+                                    val isTargetVisible = folderListState.layoutInfo.visibleItemsInfo.any {
+                                        it.index == resolvedTargetIdx
+                                    }
+                                    if (sortedItems.isNotEmpty() && isTargetVisible) {
+                                        targetItemFocusRequester
                                     } else {
-                                        recentManager.recordFolderSelection(currentFolderId, item.id, item.uri)
-                                        val folderTitle = folderStack.lastOrNull()?.second
-                                        if (item.type == MediaType.VIDEO || item.type == MediaType.AUDIO) {
-                                            recentManager.addRecent(
-                                                id = item.id,
-                                                title = item.title,
-                                                uri = item.uri,
-                                                parentId = item.parentId ?: currentFolderId,
-                                                folderTitle = folderTitle
-                                            )
-                                            recentManager.resolveVerticalPoster(
-                                                targetItem = item,
-                                                folderItems = currentItems,
-                                                controlUrl = connectedDevice?.contentDirectoryControlUrl,
-                                                folderTitle = folderTitle
-                                            )
+                                        FocusRequester.Default
+                                    }
+                                }
+                                .focusProperties {
+                                    left = navMenuFocusRequester
+                                }
+                        ) {
+                            itemsIndexed(sortedItems, key = { _, item -> item.id }) { index, item ->
+                                val isFav = favorites.any { it.id == item.id }
+                                val watchProgress = remember(item.id, item.uri, progressMap) {
+                                    if (item.type != MediaType.DIRECTORY) {
+                                        (progressMap[item.id]?.progress()
+                                            ?: progressMap[item.uri]?.progress()
+                                            ?: 0f).coerceIn(0f, 1f)
+                                    } else 0f
+                                }
+
+                                var isRowFocused by remember { mutableStateOf(false) }
+                                val starInteraction = remember { MutableInteractionSource() }
+                                val isStarFocused by starInteraction.collectIsFocusedAsState()
+                                val isAnyPartFocused = isRowFocused || isStarFocused
+
+                                TvFocusCard(
+                                    onClick = {
+                                        if (item.type == MediaType.DIRECTORY) {
+                                            connectedDevice?.contentDirectoryControlUrl?.let { url ->
+                                                openFolder(url, item)
+                                            }
+                                        } else {
+                                            recentManager.recordFolderSelection(currentFolderId, item.id, item.uri, item.title)
+                                            val folderTitle = folderStack.lastOrNull()?.second
+                                            if (item.type == MediaType.VIDEO || item.type == MediaType.AUDIO) {
+                                                recentManager.addRecent(
+                                                    id = item.id,
+                                                    title = item.title,
+                                                    uri = item.uri,
+                                                    parentId = item.parentId ?: currentFolderId,
+                                                    folderTitle = folderTitle
+                                                )
+                                                recentManager.resolveVerticalPoster(
+                                                    targetItem = item,
+                                                    folderItems = currentItems,
+                                                    controlUrl = connectedDevice?.contentDirectoryControlUrl,
+                                                    folderTitle = folderTitle
+                                                )
+                                            }
+                                            val playables = sortedItems.filter {
+                                                it.type == MediaType.VIDEO || it.type == MediaType.AUDIO
+                                            }.ifEmpty { listOf(item) }
+                                            onPlayMedia(item, playables)
                                         }
-                                        val playables = sortedItems.filter {
-                                            it.type == MediaType.VIDEO || it.type == MediaType.AUDIO
-                                        }.ifEmpty { listOf(item) }
-                                        onPlayMedia(item, playables)
-                                    }
-                                },
-                                isSelected = isStarFocused,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(52.dp)
-                                    .focusProperties {
-                                        left = navMenuFocusRequester
-                                    }
-                                    .onFocusChanged { state ->
-                                        isRowFocused = state.hasFocus
-                                        if (state.hasFocus) {
-                                            focusedItem = item
+                                    },
+                                    isSelected = isStarFocused,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(52.dp)
+                                        .then(
+                                            if (index == resolvedTargetIdx) {
+                                                Modifier.focusRequester(targetItemFocusRequester)
+                                            } else Modifier
+                                        )
+                                        .focusProperties {
+                                            left = navMenuFocusRequester
                                         }
-                                    }
-                            ) {
+                                        .onFocusChanged { state ->
+                                            isRowFocused = state.hasFocus
+                                            if (state.hasFocus) {
+                                                focusedItem = item
+                                            }
+                                        }
+                                ) {
                                 Box(modifier = Modifier.fillMaxSize()) {
                                     if (watchProgress > 0f) {
                                         Box(
@@ -640,6 +751,7 @@ fun UpnpBrowseScreen(
                                 }
                             }
                         }
+                    }
                     }
 
                     // Right column: Movie/Series Poster Preview + Full Metadata at the bottom

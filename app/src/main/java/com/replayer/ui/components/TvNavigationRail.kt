@@ -101,7 +101,7 @@ fun TvNavigationRail(
                         .onFocusChanged { isItemFocused = it.isFocused }
                         .focusProperties {
                             left = FocusRequester.Cancel
-                            right = if (isSelected) activeScreenFocusRequester else FocusRequester.Cancel
+                            right = activeScreenFocusRequester
                             if (idx == 0) up = FocusRequester.Cancel
                             if (idx == NavItem.entries.lastIndex) down = FocusRequester.Cancel
                         }
