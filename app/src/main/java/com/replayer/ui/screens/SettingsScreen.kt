@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.os.Build
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -26,14 +27,20 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import coil.compose.AsyncImage
+import com.replayer.R
 import com.replayer.data.IptvManager
 import com.replayer.data.ServerConfigManager
 import com.replayer.model.UpnpDevice
@@ -146,6 +153,21 @@ fun SettingsScreen(
     var showChangelogDialog by remember { mutableStateOf(false) }
     var changelogRelease by remember { mutableStateOf<ReleaseInfo?>(null) }
     val updateActionFocusRequester = remember { FocusRequester() }
+    var showSupportQrDialog by remember { mutableStateOf(false) }
+    val feedbackQrFocusRequester = remember { FocusRequester() }
+    var hadQrDialogOpen by remember { mutableStateOf(false) }
+
+    LaunchedEffect(showSupportQrDialog) {
+        if (showSupportQrDialog) {
+            hadQrDialogOpen = true
+        } else if (hadQrDialogOpen) {
+            hadQrDialogOpen = false
+            delay(80)
+            try {
+                feedbackQrFocusRequester.requestFocus()
+            } catch (_: Exception) {}
+        }
+    }
 
     LaunchedEffect(updateUiState) {
         if (updateUiState is UpdateUiState.ReadyToInstall) {
@@ -951,7 +973,237 @@ fun SettingsScreen(
             }
         }
 
+        Spacer(modifier = Modifier.height(28.dp))
+
+        // ---------------------------------------------------------
+        // 4. Обратная связь и поддержка
+        // ---------------------------------------------------------
+        Text(
+            text = "Обратная связь",
+            style = MaterialTheme.typography.titleLarge,
+            color = TextPrimary,
+            modifier = Modifier.padding(bottom = 12.dp)
+        )
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(DarkCard)
+                .border(
+                    width = 1.dp,
+                    brush = Brush.horizontalGradient(
+                        colors = listOf(AccentCyan.copy(alpha = 0.28f), AccentOrange.copy(alpha = 0.28f))
+                    ),
+                    shape = RoundedCornerShape(14.dp)
+                )
+                .padding(horizontal = 20.dp, vertical = 18.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(24.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Outlined.Email,
+                            contentDescription = null,
+                            tint = AccentCyan,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = "Связаться с разработчиком и поддержать проект",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = TextPrimary
+                        )
+                    }
+
+                    Text(
+                        text = buildAnnotatedString {
+                            append("Если у тебя возникли трудности с использованием приложения, отправь лог мне в ТГ или напиши на ")
+                            withStyle(SpanStyle(color = AccentCyanBright, fontWeight = FontWeight.SemiBold)) {
+                                append("morganism@yandex.ru")
+                            }
+                            append(" с темой ")
+                            withStyle(SpanStyle(color = AccentOrange, fontWeight = FontWeight.SemiBold)) {
+                                append("\"Re:Player\"")
+                            }
+                            append(". Я постараюсь решить эту проблему.")
+                        },
+                        style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 21.sp),
+                        color = TextSecondary
+                    )
+
+                    Text(
+                        text = "Если захочешь поблагодарить словом или копеечкой, также пиши на почту или воспользуйся этим QR.",
+                        style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 21.sp),
+                        color = TextSecondary
+                    )
+
+                    Text(
+                        text = "Приятного пользования!",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                        color = AccentCyanBright
+                    )
+                }
+
+                TvFocusCard(
+                    onClick = { showSupportQrDialog = true },
+                    focusBorderColor = AccentOrange,
+                    cornerRadius = 16.dp,
+                    modifier = Modifier
+                        .width(166.dp)
+                        .focusRequester(feedbackQrFocusRequester)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(10.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(136.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color.White)
+                                .border(
+                                    width = 2.dp,
+                                    brush = Brush.linearGradient(
+                                        colors = listOf(AccentCyan, AccentGold, AccentOrange)
+                                    ),
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                                .padding(4.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Image(
+                                painter = painterResource(id = R.drawable.qr_support_donate),
+                                contentDescription = "QR-код обратной связи и поддержки",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Fit
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Увеличить QR",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = AccentOrange,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            }
+        }
+
         DiagnosticsSection()
+    }
+
+    // ---------------------------------------------------------
+    // Feedback / Donate Large QR Dialog
+    // ---------------------------------------------------------
+    if (showSupportQrDialog) {
+        val qrCloseFocusRequester = remember { FocusRequester() }
+        LaunchedEffect(Unit) {
+            delay(80)
+            try {
+                qrCloseFocusRequester.requestFocus()
+            } catch (_: Exception) {}
+        }
+
+        Dialog(onDismissRequest = { showSupportQrDialog = false }) {
+            Box(
+                modifier = Modifier
+                    .width(460.dp)
+                    .clip(RoundedCornerShape(22.dp))
+                    .border(
+                        width = 1.dp,
+                        brush = Brush.horizontalGradient(
+                            colors = listOf(AccentCyan.copy(alpha = 0.6f), AccentOrange.copy(alpha = 0.6f))
+                        ),
+                        shape = RoundedCornerShape(22.dp)
+                    )
+            ) {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .background(Color(0xCC151B26))
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    AccentCyan.copy(alpha = 0.12f),
+                                    Color.Transparent,
+                                    AccentOrange.copy(alpha = 0.08f)
+                                )
+                            )
+                        )
+                        .then(
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                Modifier.blur(20.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
+                            } else Modifier
+                        )
+                )
+                Column(
+                    modifier = Modifier.padding(28.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "Обратная связь • Re:Player",
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                        color = TextPrimary,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Наведите камеру телефона на QR-код или напишите на morganism@yandex.ru с темой \"Re:Player\"",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Box(
+                        modifier = Modifier
+                            .size(270.dp)
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(Color.White)
+                            .border(
+                                width = 2.5.dp,
+                                brush = Brush.linearGradient(
+                                    colors = listOf(AccentCyan, AccentGold, AccentOrange)
+                                ),
+                                shape = RoundedCornerShape(18.dp)
+                            )
+                            .padding(8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Image(
+                            painter = painterResource(id = R.drawable.qr_support_donate),
+                            contentDescription = "QR-код поддержки Re:Player",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Fit
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(22.dp))
+                    TvFocusCard(
+                        onClick = { showSupportQrDialog = false },
+                        modifier = Modifier
+                            .width(180.dp)
+                            .height(44.dp)
+                            .focusRequester(qrCloseFocusRequester)
+                    ) {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text(
+                                text = "Закрыть",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                color = AccentCyanBright
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // ---------------------------------------------------------
@@ -1346,6 +1598,13 @@ fun SettingsScreen(
 }
 
 private fun getFriendlyChangelog(version: String, rawChangelog: String): List<String> {
+    if (version.contains("1.0.2")) {
+        return listOf(
+            "Полностью переработана логика фокуса D-pad: курсор сразу виден при старте и сохраняется при переходе в меню, диалоги, плеер и обратно в окно.",
+            "Добавлен новый раздел в настройках «Обратная связь» с контактами разработчика и читаемым QR-кодом поддержки в стиле Re:Player."
+        )
+    }
+
     if (version.contains("1.0.1")) {
         return listOf(
             "Исправлен фокус D-pad через focusRestorer: курсор больше не улетает на Домик при сортировке и возврате из меню.",

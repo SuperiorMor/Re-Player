@@ -59,13 +59,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -103,7 +101,6 @@ import com.replayer.ui.theme.TextSecondary
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun UpnpBrowseScreen(
     onPlayMedia: (MediaItem, List<MediaItem>) -> Unit,
@@ -450,7 +447,6 @@ fun UpnpBrowseScreen(
                         modifier = Modifier
                             .weight(0.56f)
                             .fillMaxHeight()
-                            .focusRestorer(fallback = targetItemFocusRequester)
                     ) {
                         itemsIndexed(sortedItems, key = { _, item -> item.id }) { index, item ->
                             val isFav = favorites.any { it.id == item.id }

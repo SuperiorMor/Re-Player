@@ -2,7 +2,6 @@ package com.replayer.ui.components
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,14 +20,17 @@ import androidx.compose.material.icons.outlined.LiveTv
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.focusRestorer
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
@@ -41,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import com.replayer.ui.theme.AccentCyanBright
 import com.replayer.ui.theme.SurfaceDark
 import com.replayer.ui.theme.TextSecondary
+import kotlinx.coroutines.launch
 
 enum class NavItem(val label: String, val icon: ImageVector) {
     HOME("Главная", Icons.Outlined.Home),
@@ -49,31 +52,47 @@ enum class NavItem(val label: String, val icon: ImageVector) {
     SETTINGS("Настройки", Icons.Outlined.Settings)
 }
 
-@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun TvNavigationRail(
     selectedItem: NavItem,
     onItemSelected: (NavItem) -> Unit,
     onEnterSection: (NavItem) -> Unit = onItemSelected,
+    itemFocusRequesters: Map<NavItem, FocusRequester> = emptyMap(),
     modifier: Modifier = Modifier
 ) {
-    val itemFocusRequesters = remember {
-        NavItem.entries.associateWith { FocusRequester() }
+    val scope = rememberCoroutineScope()
+    val localRequesters = remember { NavItem.entries.associateWith { FocusRequester() } }
+    val resolvedRequesters = remember(itemFocusRequesters) {
+        NavItem.entries.associateWith { item -> itemFocusRequesters[item] ?: localRequesters.getValue(item) }
     }
+    var railHasFocus by remember { mutableStateOf(false) }
+    var focusedItem by remember { mutableStateOf<NavItem?>(null) }
+    val latestSelected by rememberUpdatedState(selectedItem)
 
     Row(
         modifier = modifier
             .fillMaxHeight()
             .width(92.dp)
             .background(SurfaceDark.copy(alpha = 0.72f))
+            .onFocusChanged { state ->
+                val enteringFromOutside = !railHasFocus && state.hasFocus
+                railHasFocus = state.hasFocus
+                if (!state.hasFocus) {
+                    focusedItem = null
+                } else if (enteringFromOutside && focusedItem != latestSelected) {
+                    scope.launch {
+                        try {
+                            resolvedRequesters[latestSelected]?.requestFocus()
+                        } catch (_: Exception) {}
+                    }
+                }
+            }
     ) {
         Column(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxHeight()
-                .padding(top = 24.dp, bottom = 24.dp)
-                .focusGroup()
-                .focusRestorer(fallback = itemFocusRequesters.getValue(selectedItem)),
+                .padding(top = 24.dp, bottom = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Top
         ) {
@@ -98,17 +117,18 @@ fun TvNavigationRail(
                     modifier = Modifier
                         .padding(vertical = 7.dp)
                         .size(50.dp)
-                        .focusRequester(itemFocusRequesters.getValue(item))
-                        .focusProperties {
-                            right = if (isSelected) FocusRequester.Default else FocusRequester.Cancel
+                        .focusRequester(resolvedRequesters.getValue(item))
+                        .onFocusChanged { state ->
+                            if (state.isFocused) {
+                                focusedItem = item
+                            }
                         }
                         .onPreviewKeyEvent { keyEvent ->
-                            // Allow pressing Right from the currently open section icon to jump straight inside
-                            if (keyEvent.type == KeyEventType.KeyDown &&
-                                keyEvent.key == Key.DirectionRight &&
-                                item == selectedItem
-                            ) {
-                                onEnterSection(item)
+                            if (keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.DirectionRight) {
+                                if (item == selectedItem) {
+                                    onEnterSection(item)
+                                }
+                                // Absorb Right on non-selected items so cursor never leaks or vanishes
                                 true
                             } else {
                                 false
