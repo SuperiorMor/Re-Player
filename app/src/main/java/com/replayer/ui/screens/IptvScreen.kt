@@ -4,10 +4,13 @@ import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.*
@@ -42,13 +45,19 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -57,6 +66,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
 import com.replayer.data.ChannelSortMode
 import com.replayer.data.IptvManager
@@ -105,7 +115,9 @@ fun IptvScreen(
     var lastFocusedFolder by remember { mutableStateOf<String?>(null) }
     val lastChannelByFolder = remember { mutableStateMapOf<String, String>() }
     var pendingIptvFocus by remember { mutableStateOf(false) }
+    var holdTransitionFocus by remember { mutableStateOf(false) }
     val targetFocusRequester = remember { FocusRequester() }
+    val transitionFocusRequester = remember { FocusRequester() }
 
     val targetFolderIdx = remember(folders, lastFocusedFolder) {
         if (folders.isEmpty() || lastFocusedFolder == null) 0
@@ -117,13 +129,18 @@ fun IptvScreen(
         else sortedList.indexOfFirst { it.id == rememberedChannelId }.takeIf { it >= 0 } ?: 0
     }
 
-    val folderGridState = rememberLazyGridState()
+    val isLevel1Grid = selectedFolder == null && folders.size > 1
+    val folderGridState = remember(isLevel1Grid) {
+        LazyGridState(firstVisibleItemIndex = (targetFolderIdx - 2).coerceAtLeast(0))
+    }
     val channelGridState = remember(currentFolderName) {
-        LazyGridState(firstVisibleItemIndex = targetChannelIdx)
+        LazyGridState(firstVisibleItemIndex = (targetChannelIdx - 2).coerceAtLeast(0))
     }
     var handledBackKeyDown by remember { mutableStateOf(false) }
 
     fun switchCategory(targetFolder: String?) {
+        holdTransitionFocus = true
+        runCatching { transitionFocusRequester.requestFocus() }
         if (targetFolder != null) {
             lastFocusedFolder = targetFolder
         }
@@ -135,34 +152,49 @@ fun IptvScreen(
         if (channels.isNotEmpty() && pendingIptvFocus) {
             val isLevel1 = selectedFolder == null && folders.size > 1
             if (isLevel1) {
-                val isTargetVisible = folderGridState.layoutInfo.visibleItemsInfo.any { it.index == targetFolderIdx }
-                if (!isTargetVisible && folders.isNotEmpty()) {
-                    folderGridState.scrollToItem(targetFolderIdx)
-                }
-                withFrameNanos { }
-                val ok = runCatching { targetFocusRequester.requestFocus() }.isSuccess
-                if (!ok) {
-                    delay(50)
-                    withFrameNanos { }
-                    runCatching { targetFocusRequester.requestFocus() }
+                if (folders.isNotEmpty()) {
+                    val safeFolderIdx = targetFolderIdx.coerceIn(0, folders.lastIndex)
+                    val isTargetVisible = folderGridState.layoutInfo.visibleItemsInfo.any { it.index == safeFolderIdx }
+                    if (!isTargetVisible) {
+                        folderGridState.scrollToItem((safeFolderIdx - 2).coerceAtLeast(0))
+                    }
+                    repeat(8) {
+                        withFrameNanos { }
+                        if (runCatching { targetFocusRequester.requestFocus() }.isSuccess) {
+                            holdTransitionFocus = false
+                            pendingIptvFocus = false
+                            return@LaunchedEffect
+                        }
+                    }
                 }
             } else if (sortedList.isNotEmpty()) {
-                val isTargetVisible = channelGridState.layoutInfo.visibleItemsInfo.any { it.index == targetChannelIdx }
+                val safeChannelIdx = targetChannelIdx.coerceIn(0, sortedList.lastIndex)
+                val isTargetVisible = channelGridState.layoutInfo.visibleItemsInfo.any { it.index == safeChannelIdx }
                 if (!isTargetVisible) {
-                    channelGridState.scrollToItem(targetChannelIdx)
+                    channelGridState.scrollToItem((safeChannelIdx - 2).coerceAtLeast(0))
                 }
-                withFrameNanos { }
-                val ok = runCatching { targetFocusRequester.requestFocus() }.isSuccess
-                if (!ok) {
-                    delay(50)
+                repeat(8) {
                     withFrameNanos { }
-                    runCatching { targetFocusRequester.requestFocus() }
+                    if (runCatching { targetFocusRequester.requestFocus() }.isSuccess) {
+                        holdTransitionFocus = false
+                        pendingIptvFocus = false
+                        return@LaunchedEffect
+                    }
                 }
             } else {
-                withFrameNanos { }
-                runCatching { firstItemFocusRequester.requestFocus() }
+                repeat(4) {
+                    withFrameNanos { }
+                    if (runCatching { firstItemFocusRequester.requestFocus() }.isSuccess) {
+                        holdTransitionFocus = false
+                        pendingIptvFocus = false
+                        return@LaunchedEffect
+                    }
+                }
             }
+            holdTransitionFocus = false
             pendingIptvFocus = false
+        } else if (!pendingIptvFocus) {
+            holdTransitionFocus = false
         }
     }
 
@@ -402,6 +434,22 @@ fun IptvScreen(
         Spacer(modifier = Modifier.height(if (isInsideFolder) 10.dp else 16.dp))
 
         // MAIN CONTENT
+        Box(modifier = Modifier.fillMaxSize()) {
+            // Invisible focus anchor preventing focus escape to Left Menu Home icon during category transitions
+            Box(
+                modifier = Modifier
+                    .size(1.dp)
+                    .focusRequester(transitionFocusRequester)
+                    .focusProperties {
+                        canFocus = holdTransitionFocus
+                        left = navMenuFocusRequester
+                        up = FocusRequester.Cancel
+                        down = FocusRequester.Cancel
+                        right = FocusRequester.Cancel
+                    }
+                    .focusable()
+            )
+
         if (channels.isEmpty()) {
             if (isLoading) {
                 Box(
@@ -554,6 +602,9 @@ fun IptvScreen(
                                     Modifier.focusRequester(targetFocusRequester)
                                 } else Modifier
                             )
+                            .focusProperties {
+                                canFocus = !holdTransitionFocus || idx == targetFolderIdx
+                            }
                             .onFocusChanged { state ->
                                 if (state.hasFocus) {
                                     lastFocusedFolder = folder
@@ -648,61 +699,66 @@ fun IptvScreen(
                             iptvManager.getCurrentProgram(channel)
                         }
                         val progress = currentProg?.progress()?.coerceIn(0f, 1f) ?: 0f
+                        val rowFocusRequester = remember { FocusRequester() }
+                        val starFocusRequester = remember { FocusRequester() }
                         val starInteraction = remember { MutableInteractionSource() }
                         val isStarFocused by starInteraction.collectIsFocusedAsState()
+                        var isStarKeyPressed by remember { mutableStateOf(false) }
 
-                        TvFocusCard(
-                            onClick = {
-                                lastChannelByFolder[currentFolderName] = channel.id
-                                onPlayChannel(channel, sortedList)
-                            },
-                            isSelected = isStarFocused,
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(48.dp)
-                                .then(
-                                    if (idx == targetChannelIdx) {
-                                        Modifier.focusRequester(targetFocusRequester)
-                                    } else Modifier
-                                )
-                                .onFocusChanged { state ->
-                                    if (state.hasFocus) {
-                                        lastChannelByFolder[currentFolderName] = channel.id
-                                    }
-                                }
-                                .then(
-                                    if (idx % 2 == 0) {
-                                        Modifier.focusProperties { left = navMenuFocusRequester }
-                                    } else Modifier
-                                )
                         ) {
-                            Box(modifier = Modifier.fillMaxSize()) {
-                                // Subtle full-card gradient timebar fill on background
-                                if (currentProg != null && progress > 0f) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxHeight()
-                                            .fillMaxWidth(fraction = progress)
-                                            .background(
-                                                Brush.horizontalGradient(
-                                                    colors = listOf(
-                                                        AccentCyan.copy(alpha = 0.06f),
-                                                        AccentOrange.copy(alpha = 0.16f)
+                            TvFocusCard(
+                                onClick = {
+                                    lastChannelByFolder[currentFolderName] = channel.id
+                                    onPlayChannel(channel, sortedList)
+                                },
+                                isSelected = isStarFocused,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .focusRequester(rowFocusRequester)
+                                    .then(
+                                        if (idx == targetChannelIdx) {
+                                            Modifier.focusRequester(targetFocusRequester)
+                                        } else Modifier
+                                    )
+                                    .onFocusChanged { state ->
+                                        if (state.hasFocus) {
+                                            lastChannelByFolder[currentFolderName] = channel.id
+                                        }
+                                    }
+                                    .focusProperties {
+                                        canFocus = !holdTransitionFocus || idx == targetChannelIdx
+                                        right = starFocusRequester
+                                        if (idx % 2 == 0) {
+                                            left = navMenuFocusRequester
+                                        }
+                                    }
+                            ) {
+                                Box(modifier = Modifier.fillMaxSize()) {
+                                    // Subtle full-card gradient timebar fill on background
+                                    if (currentProg != null && progress > 0f) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxHeight()
+                                                .fillMaxWidth(fraction = progress)
+                                                .background(
+                                                    Brush.horizontalGradient(
+                                                        colors = listOf(
+                                                            AccentCyan.copy(alpha = 0.06f),
+                                                            AccentOrange.copy(alpha = 0.16f)
+                                                        )
                                                     )
                                                 )
-                                            )
-                                    )
-                                }
+                                        )
+                                    }
 
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .padding(horizontal = 10.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
                                     Row(
-                                        modifier = Modifier.weight(1f),
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .padding(start = 10.dp, end = 40.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Box(
@@ -751,20 +807,10 @@ fun IptvScreen(
                                                 )
                                                 if (channel.hasArchive) {
                                                     Spacer(modifier = Modifier.width(6.dp))
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .clip(RoundedCornerShape(4.dp))
-                                                            .background(AccentOrange.copy(alpha = 0.08f))
-                                                            .border(0.75.dp, AccentOrange.copy(alpha = 0.50f), RoundedCornerShape(4.dp))
-                                                            .padding(horizontal = 5.dp, vertical = 1.dp)
-                                                    ) {
-                                                        Text(
-                                                            text = if (channel.catchupDays > 0) "↺ ${channel.catchupDays}д" else "↺",
-                                                            fontSize = 9.sp,
-                                                            fontWeight = FontWeight.Medium,
-                                                            color = AccentOrange
-                                                        )
-                                                    }
+                                                    VhsArchiveIcon(
+                                                        color = AccentOrange,
+                                                        modifier = Modifier.size(width = 19.dp, height = 13.dp)
+                                                    )
                                                 }
                                             }
                                             Text(
@@ -779,62 +825,83 @@ fun IptvScreen(
                                             )
                                         }
                                     }
-
-                                    // Compact TV-Focusable Favorite Toggle Button with explicit FocusBorder
-                                    val starScale by animateFloatAsState(if (isStarFocused) 1.12f else 1.0f, label = "star_scale")
-                                    val starBg by animateColorAsState(
-                                        targetValue = when {
-                                            isStarFocused && isFav -> AccentGold.copy(alpha = 0.24f)
-                                            isStarFocused -> AccentCyan.copy(alpha = 0.22f)
-                                            isFav -> AccentGold.copy(alpha = 0.12f)
-                                            else -> Color.Transparent
-                                        },
-                                        label = "star_bg"
-                                    )
-                                    val starBorder = when {
-                                        isStarFocused && isFav -> AccentGold
-                                        isStarFocused -> FocusBorder
-                                        isFav -> AccentGold.copy(alpha = 0.45f)
-                                        else -> Color.Transparent
-                                    }
-                                    Box(
-                                        modifier = Modifier
-                                            .padding(start = 4.dp)
-                                            .size(30.dp)
-                                            .scale(starScale)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(starBg)
-                                            .then(
-                                                if (starBorder != Color.Transparent) {
-                                                    Modifier.border(if (isStarFocused) 2.dp else 1.dp, starBorder, RoundedCornerShape(8.dp))
-                                                } else Modifier
-                                            )
-                                            .clickable(
-                                                interactionSource = starInteraction,
-                                                indication = null
-                                            ) {
-                                                iptvManager.toggleFavorite(channel.id)
-                                            },
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = if (isFav) Icons.Rounded.Star else Icons.Outlined.StarOutline,
-                                            contentDescription = if (isFav) "В избранном" else "Добавить в избранное",
-                                            tint = when {
-                                                isFav -> AccentGold
-                                                isStarFocused -> AccentCyanBright
-                                                else -> TextSecondary
-                                            },
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    }
                                 }
+                            }
+
+                            val starScale by animateFloatAsState(
+                                targetValue = when {
+                                    isStarKeyPressed -> 0.85f
+                                    isStarFocused -> 1.32f
+                                    else -> 1.0f
+                                },
+                                animationSpec = tween(durationMillis = 120),
+                                label = "iptv_star_scale"
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.CenterEnd)
+                                    .padding(end = 6.dp)
+                                    .size(30.dp)
+                                    .zIndex(20f)
+                                    .focusRequester(starFocusRequester)
+                                    .focusProperties {
+                                        canFocus = !holdTransitionFocus
+                                        left = rowFocusRequester
+                                        if (idx % 2 == 1) {
+                                            right = FocusRequester.Cancel
+                                        }
+                                    }
+                                    .onFocusChanged { state ->
+                                        if (!state.isFocused) {
+                                            isStarKeyPressed = false
+                                        } else {
+                                            lastChannelByFolder[currentFolderName] = channel.id
+                                        }
+                                    }
+                                    .onKeyEvent { keyEvent ->
+                                        val isConfirm = keyEvent.key == Key.DirectionCenter ||
+                                            keyEvent.key == Key.Enter ||
+                                            keyEvent.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER
+                                        if (!isConfirm) return@onKeyEvent false
+                                        when (keyEvent.type) {
+                                            KeyEventType.KeyDown -> {
+                                                if (keyEvent.nativeKeyEvent.repeatCount == 0) {
+                                                    isStarKeyPressed = true
+                                                }
+                                                true
+                                            }
+                                            KeyEventType.KeyUp -> {
+                                                val startedHere = isStarKeyPressed
+                                                isStarKeyPressed = false
+                                                if (startedHere) {
+                                                    iptvManager.toggleFavorite(channel.id)
+                                                }
+                                                true
+                                            }
+                                            else -> false
+                                        }
+                                    }
+                                    .pointerInput(channel.id) {
+                                        detectTapGestures(onTap = { iptvManager.toggleFavorite(channel.id) })
+                                    }
+                                    .focusable(interactionSource = starInteraction),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = if (isFav) Icons.Rounded.Star else Icons.Outlined.StarOutline,
+                                    contentDescription = if (isFav) "В избранном" else "Добавить в избранное",
+                                    tint = if (isFav || isStarFocused) AccentOrange else TextSecondary.copy(alpha = 0.65f),
+                                    modifier = Modifier
+                                        .size(18.dp)
+                                        .scale(starScale)
+                                )
                             }
                         }
                     }
                 }
                 }
             }
+        }
         }
     }
 
@@ -944,5 +1011,62 @@ fun IptvScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun VhsArchiveIcon(
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val stroke = (h * 0.12f).coerceAtLeast(1.3f)
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(stroke * 0.5f, stroke * 0.5f),
+            size = Size(w - stroke, h - stroke),
+            cornerRadius = CornerRadius(h * 0.16f, h * 0.16f),
+            style = Stroke(width = stroke)
+        )
+        drawLine(
+            color = color,
+            start = Offset(stroke, h * 0.30f),
+            end = Offset(w - stroke, h * 0.30f),
+            strokeWidth = stroke * 0.85f
+        )
+        val spoolY = h * 0.64f
+        val leftX = w * 0.29f
+        val rightX = w * 0.71f
+        val spoolRadius = h * 0.16f
+        drawCircle(
+            color = color,
+            radius = spoolRadius,
+            center = Offset(leftX, spoolY),
+            style = Stroke(width = stroke * 0.85f)
+        )
+        drawCircle(
+            color = color,
+            radius = spoolRadius * 0.36f,
+            center = Offset(leftX, spoolY)
+        )
+        drawCircle(
+            color = color,
+            radius = spoolRadius,
+            center = Offset(rightX, spoolY),
+            style = Stroke(width = stroke * 0.85f)
+        )
+        drawCircle(
+            color = color,
+            radius = spoolRadius * 0.36f,
+            center = Offset(rightX, spoolY)
+        )
+        drawRect(
+            color = color.copy(alpha = 0.65f),
+            topLeft = Offset(w * 0.43f, h * 0.50f),
+            size = Size(w * 0.14f, h * 0.28f),
+            style = Stroke(width = stroke * 0.7f)
+        )
     }
 }

@@ -24,6 +24,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -56,6 +57,7 @@ import com.replayer.ui.theme.CardBackground
 import com.replayer.ui.theme.CardFocusedBackground
 import com.replayer.ui.theme.FocusBorder
 import com.replayer.ui.theme.TextSecondary
+import kotlinx.coroutines.delay
 
 @Composable
 fun TvFocusCard(
@@ -68,15 +70,27 @@ fun TvFocusCard(
     cornerRadius: Dp = 12.dp,
     enabled: Boolean = true,
     focusedScale: Float = 1.05f,
+    onLongClick: (() -> Unit)? = null,
     content: @Composable BoxScope.() -> Unit
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
     var isKeyPressed by remember { mutableStateOf(false) }
     var isPointerPressed by remember { mutableStateOf(false) }
+    var isLongPressTriggered by remember { mutableStateOf(false) }
     val isPressed = isKeyPressed || isPointerPressed
     val latestOnClick by rememberUpdatedState(onClick)
+    val latestOnLongClick by rememberUpdatedState(onLongClick)
     val latestEnabled by rememberUpdatedState(enabled)
+
+    LaunchedEffect(isPressed, latestEnabled, onLongClick != null) {
+        val longClick = latestOnLongClick
+        if (isPressed && latestEnabled && longClick != null) {
+            delay(450)
+            isLongPressTriggered = true
+            longClick()
+        }
+    }
 
     val scale by animateFloatAsState(
         targetValue = when {
@@ -154,6 +168,7 @@ fun TvFocusCard(
             .onFocusChanged { state ->
                 if (!state.isFocused) {
                     isKeyPressed = false
+                    isLongPressTriggered = false
                 }
             }
             .onKeyEvent { keyEvent ->
@@ -166,13 +181,16 @@ fun TvFocusCard(
                     KeyEventType.KeyDown -> {
                         if (keyEvent.nativeKeyEvent.repeatCount == 0) {
                             isKeyPressed = true
+                            isLongPressTriggered = false
                         }
                         true
                     }
                     KeyEventType.KeyUp -> {
                         val startedHere = isKeyPressed
+                        val didLongPress = isLongPressTriggered
                         isKeyPressed = false
-                        if (startedHere) {
+                        isLongPressTriggered = false
+                        if (startedHere && !didLongPress) {
                             latestOnClick()
                         }
                         true
@@ -180,15 +198,24 @@ fun TvFocusCard(
                     else -> false
                 }
             }
-            .pointerInput(enabled) {
+            .pointerInput(enabled, onLongClick != null) {
                 if (enabled) {
                     detectTapGestures(
                         onPress = {
                             isPointerPressed = true
-                            tryAwaitRelease()
-                            isPointerPressed = false
+                            isLongPressTriggered = false
+                            try {
+                                tryAwaitRelease()
+                            } finally {
+                                isPointerPressed = false
+                            }
                         },
-                        onTap = { latestOnClick() }
+                        onTap = {
+                            if (!isLongPressTriggered) {
+                                latestOnClick()
+                            }
+                            isLongPressTriggered = false
+                        }
                     )
                 }
             }

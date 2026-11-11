@@ -47,9 +47,11 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
@@ -101,6 +103,7 @@ fun EpgAccordionDialog(
     }
     val initialIndex = currentProgIndex.coerceAtLeast(0)
     var focusedIndex by remember { mutableIntStateOf(initialIndex) }
+    var isInitialSettled by remember { mutableStateOf(programs.isEmpty()) }
     val initialFocusRequester = remember { FocusRequester() }
     val listState = rememberLazyListState(
         initialFirstVisibleItemIndex = initialIndex,
@@ -109,31 +112,29 @@ fun EpgAccordionDialog(
 
     LaunchedEffect(initialIndex, programs.size) {
         if (programs.isNotEmpty()) {
+            isInitialSettled = false
+            focusedIndex = initialIndex
             try {
                 listState.scrollToItem(initialIndex, 0)
             } catch (_: Exception) {}
             withFrameNanos { }
-            delay(32)
-            try {
-                initialFocusRequester.requestFocus()
-            } catch (_: Exception) {}
-            withFrameNanos { }
-            try {
-                listState.scrollToItem(initialIndex, 0)
-            } catch (_: Exception) {}
+            runCatching { initialFocusRequester.requestFocus() }
+            // Cancel any PivotBringIntoViewSpec animation triggered on focus before revealing
+            repeat(3) {
+                withFrameNanos { }
+                try {
+                    listState.scrollToItem(initialIndex, 0)
+                } catch (_: Exception) {}
+            }
+            isInitialSettled = true
+        } else {
+            isInitialSettled = true
         }
     }
 
     // Ensure newly expanded accordion item's description is never clipped below the viewport
-    LaunchedEffect(focusedIndex) {
-        if (focusedIndex == initialIndex) {
-            delay(80)
-            try {
-                val visibleInfo = listState.layoutInfo.visibleItemsInfo.find { it.index == focusedIndex }
-                if (visibleInfo != null && visibleInfo.offset != 0) {
-                    listState.scrollToItem(initialIndex, 0)
-                }
-            } catch (_: Exception) {}
+    LaunchedEffect(focusedIndex, isInitialSettled) {
+        if (!isInitialSettled || focusedIndex == initialIndex) {
             return@LaunchedEffect
         }
         delay(235)
@@ -158,6 +159,7 @@ fun EpgAccordionDialog(
     ) {
         Box(
             modifier = Modifier
+                .alpha(if (isInitialSettled) 1f else 0f)
                 .fillMaxWidth(0.72f)
                 .widthIn(min = 520.dp, max = 680.dp)
                 .fillMaxHeight(0.88f)
@@ -279,6 +281,9 @@ fun EpgAccordionDialog(
                                         shape = RoundedCornerShape(12.dp)
                                     )
                                     .then(if (isInitialTarget) Modifier.focusRequester(initialFocusRequester) else Modifier)
+                                    .focusProperties {
+                                        canFocus = isInitialSettled || isInitialTarget
+                                    }
                                     .onFocusChanged { focusState ->
                                         if (focusState.isFocused) {
                                             focusedIndex = index

@@ -438,7 +438,7 @@ fun HomeScreen(
                                         Icon(
                                             imageVector = Icons.Rounded.Star,
                                             contentDescription = "В избранном",
-                                            tint = AccentGold,
+                                            tint = AccentOrange,
                                             modifier = Modifier.size(18.dp)
                                         )
                                     }

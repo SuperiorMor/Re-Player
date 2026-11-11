@@ -13,6 +13,7 @@ import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -76,14 +77,17 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
 import com.replayer.data.FavoritesManager
 import com.replayer.data.MediaWatchProgress
@@ -145,6 +149,8 @@ fun UpnpBrowseScreen(
     var sortMode by remember { mutableStateOf(SortMode.BY_NAME) }
 
     val targetItemFocusRequester = remember { FocusRequester() }
+    val transitionFocusRequester = remember { FocusRequester() }
+    var holdTransitionFocus by remember { mutableStateOf(false) }
     var pendingFolderFocusMove by remember { mutableStateOf(initialFolder != null) }
     var focusedItem by remember { mutableStateOf<MediaItem?>(null) }
     var lastExitTimestamp by remember { mutableLongStateOf(0L) }
@@ -153,6 +159,11 @@ fun UpnpBrowseScreen(
     val folderCache = remember { mutableMapOf<String, List<MediaItem>>() }
 
     val currentFolderId = folderStack.lastOrNull()?.first
+
+    fun holdFocusForTransition() {
+        holdTransitionFocus = true
+        runCatching { transitionFocusRequester.requestFocus() }
+    }
 
     fun loadFolder(controlUrl: String, folderId: String, showOverlay: Boolean = true) {
         val reqId = ++activeLoadRequestId
@@ -174,6 +185,7 @@ fun UpnpBrowseScreen(
         CrashReporter.breadcrumb("DLNA", "openFolder: ${folderItem.title} (${folderItem.id})")
         recentManager.recordFolderSelection(currentFolderId, folderItem.id, folderItem.uri, folderItem.title)
         onConsumeLastPlayedMediaId()
+        holdFocusForTransition()
         focusedItem = null
         pendingFolderFocusMove = true
         folderStack = folderStack + Pair(folderItem.id, folderItem.title)
@@ -192,6 +204,7 @@ fun UpnpBrowseScreen(
             val controlUrl = connectedDevice!!.contentDirectoryControlUrl ?: return@LaunchedEffect
             if (initialFolder != null) {
                 if (folderStack.lastOrNull()?.first != initialFolder.first) {
+                    holdFocusForTransition()
                     focusedItem = null
                     pendingFolderFocusMove = true
                     folderStack = listOf(Pair("0", connectedDevice!!.friendlyName), initialFolder)
@@ -213,6 +226,7 @@ fun UpnpBrowseScreen(
         lastBackHandledMs = now
         onConsumeLastPlayedMediaId()
         if (folderStack.size > 1) {
+            holdFocusForTransition()
             val parentIdx = folderStack.size - 2
             val parentFolder = folderStack[parentIdx]
             folderStack = folderStack.take(parentIdx + 1)
@@ -331,7 +345,7 @@ fun UpnpBrowseScreen(
         }
     }
     val folderListState = remember(loadedFolderId) {
-        LazyListState(firstVisibleItemIndex = resolvedTargetIdx)
+        LazyListState(firstVisibleItemIndex = (resolvedTargetIdx - 2).coerceAtLeast(0))
     }
 
     LaunchedEffect(loadedFolderId, isLoadingFolder, pendingFolderFocusMove, sortedItems.size) {
@@ -343,25 +357,34 @@ fun UpnpBrowseScreen(
                 }
                 val isTargetVisible = folderListState.layoutInfo.visibleItemsInfo.any { it.index == safeIdx }
                 if (!isTargetVisible) {
-                    folderListState.scrollToItem(safeIdx)
+                    folderListState.scrollToItem((safeIdx - 2).coerceAtLeast(0))
                 }
                 if (pendingFolderFocusMove) {
-                    withFrameNanos { }
-                    val focused = runCatching { targetItemFocusRequester.requestFocus() }.isSuccess
-                    if (!focused) {
-                        delay(50)
+                    repeat(8) {
                         withFrameNanos { }
-                        runCatching { targetItemFocusRequester.requestFocus() }
+                        if (runCatching { targetItemFocusRequester.requestFocus() }.isSuccess) {
+                            holdTransitionFocus = false
+                            pendingFolderFocusMove = false
+                            return@LaunchedEffect
+                        }
                     }
-                    pendingFolderFocusMove = false
                 }
+                holdTransitionFocus = false
+                pendingFolderFocusMove = false
             } else {
                 focusedItem = null
                 if (pendingFolderFocusMove) {
-                    withFrameNanos { }
-                    runCatching { firstItemFocusRequester.requestFocus() }
-                    pendingFolderFocusMove = false
+                    repeat(4) {
+                        withFrameNanos { }
+                        if (runCatching { firstItemFocusRequester.requestFocus() }.isSuccess) {
+                            holdTransitionFocus = false
+                            pendingFolderFocusMove = false
+                            return@LaunchedEffect
+                        }
+                    }
                 }
+                holdTransitionFocus = false
+                pendingFolderFocusMove = false
             }
         }
     }
@@ -467,6 +490,7 @@ fun UpnpBrowseScreen(
                     .width(180.dp)
                     .height(42.dp)
                     .focusProperties {
+                        canFocus = !holdTransitionFocus
                         left = navMenuFocusRequester
                     }
             ) {
@@ -494,6 +518,21 @@ fun UpnpBrowseScreen(
         Spacer(modifier = Modifier.height(14.dp))
 
         Box(modifier = Modifier.fillMaxSize()) {
+            // Invisible focus anchor preventing focus escape to Left Menu Home icon during folder swaps
+            Box(
+                modifier = Modifier
+                    .size(1.dp)
+                    .focusRequester(transitionFocusRequester)
+                    .focusProperties {
+                        canFocus = holdTransitionFocus
+                        left = navMenuFocusRequester
+                        up = FocusRequester.Cancel
+                        down = FocusRequester.Cancel
+                        right = FocusRequester.Cancel
+                    }
+                    .focusable()
+            )
+
             if (sortedItems.isEmpty() && !isLoadingFolder) {
                 Box(
                     modifier = Modifier
@@ -550,208 +589,242 @@ fun UpnpBrowseScreen(
                                     } else 0f
                                 }
 
+                                val rowFocusRequester = remember { FocusRequester() }
+                                val starFocusRequester = remember { FocusRequester() }
                                 var isRowFocused by remember { mutableStateOf(false) }
                                 val starInteraction = remember { MutableInteractionSource() }
                                 val isStarFocused by starInteraction.collectIsFocusedAsState()
+                                var isStarKeyPressed by remember { mutableStateOf(false) }
                                 val isAnyPartFocused = isRowFocused || isStarFocused
 
-                                TvFocusCard(
-                                    onClick = {
-                                        if (item.type == MediaType.DIRECTORY) {
-                                            connectedDevice?.contentDirectoryControlUrl?.let { url ->
-                                                openFolder(url, item)
-                                            }
-                                        } else {
-                                            recentManager.recordFolderSelection(currentFolderId, item.id, item.uri, item.title)
-                                            val folderTitle = folderStack.lastOrNull()?.second
-                                            if (item.type == MediaType.VIDEO || item.type == MediaType.AUDIO) {
-                                                recentManager.addRecent(
-                                                    id = item.id,
-                                                    title = item.title,
-                                                    uri = item.uri,
-                                                    parentId = item.parentId ?: currentFolderId,
-                                                    folderTitle = folderTitle
-                                                )
-                                                recentManager.resolveVerticalPoster(
-                                                    targetItem = item,
-                                                    folderItems = currentItems,
-                                                    controlUrl = connectedDevice?.contentDirectoryControlUrl,
-                                                    folderTitle = folderTitle
-                                                )
-                                            }
-                                            val playables = sortedItems.filter {
-                                                it.type == MediaType.VIDEO || it.type == MediaType.AUDIO
-                                            }.ifEmpty { listOf(item) }
-                                            onPlayMedia(item, playables)
-                                        }
-                                    },
-                                    isSelected = isStarFocused,
+                                val toggleFavoriteFolder = {
+                                    favoritesManager.toggleFavorite(
+                                        FavoriteFolder(
+                                            id = item.id,
+                                            title = item.title,
+                                            sourceType = MediaSourceType.UPNP_DLNA,
+                                            serverControlUrl = connectedDevice?.contentDirectoryControlUrl,
+                                            parentId = item.parentId
+                                        )
+                                    )
+                                }
+
+                                Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(52.dp)
-                                        .then(
-                                            if (index == resolvedTargetIdx) {
-                                                Modifier.focusRequester(targetItemFocusRequester)
-                                            } else Modifier
-                                        )
-                                        .focusProperties {
-                                            left = navMenuFocusRequester
-                                        }
-                                        .onFocusChanged { state ->
-                                            isRowFocused = state.hasFocus
-                                            if (state.hasFocus) {
-                                                focusedItem = item
-                                            }
-                                        }
                                 ) {
-                                Box(modifier = Modifier.fillMaxSize()) {
-                                    if (watchProgress > 0f) {
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxHeight()
-                                                .fillMaxWidth(fraction = watchProgress)
-                                                .background(
-                                                    Brush.horizontalGradient(
-                                                        colors = listOf(
-                                                            AccentCyan.copy(alpha = 0.06f),
-                                                            AccentOrange.copy(alpha = 0.16f)
-                                                        )
+                                    TvFocusCard(
+                                        onClick = {
+                                            if (item.type == MediaType.DIRECTORY) {
+                                                connectedDevice?.contentDirectoryControlUrl?.let { url ->
+                                                    openFolder(url, item)
+                                                }
+                                            } else {
+                                                recentManager.recordFolderSelection(currentFolderId, item.id, item.uri, item.title)
+                                                val folderTitle = folderStack.lastOrNull()?.second
+                                                if (item.type == MediaType.VIDEO || item.type == MediaType.AUDIO) {
+                                                    recentManager.addRecent(
+                                                        id = item.id,
+                                                        title = item.title,
+                                                        uri = item.uri,
+                                                        parentId = item.parentId ?: currentFolderId,
+                                                        folderTitle = folderTitle
                                                     )
-                                                )
-                                        )
-                                    }
-
-                                    Row(
+                                                    recentManager.resolveVerticalPoster(
+                                                        targetItem = item,
+                                                        folderItems = currentItems,
+                                                        controlUrl = connectedDevice?.contentDirectoryControlUrl,
+                                                        folderTitle = folderTitle
+                                                    )
+                                                }
+                                                val playables = sortedItems.filter {
+                                                    it.type == MediaType.VIDEO || it.type == MediaType.AUDIO
+                                                }.ifEmpty { listOf(item) }
+                                                onPlayMedia(item, playables)
+                                            }
+                                        },
+                                        onLongClick = if (item.type == MediaType.DIRECTORY) toggleFavoriteFolder else null,
+                                        isSelected = isStarFocused,
                                         modifier = Modifier
                                             .fillMaxSize()
-                                            .padding(horizontal = 10.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.weight(1f),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            val icon = mediaTypeIcon(item.type)
-                                            val iconTint = mediaTypeTint(item.type)
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(32.dp)
-                                                    .clip(RoundedCornerShape(8.dp))
-                                                    .background(DarkSurface.copy(alpha = 0.85f)),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Icon(
-                                                    imageVector = icon,
-                                                    contentDescription = null,
-                                                    tint = iconTint,
-                                                    modifier = Modifier.size(18.dp)
-                                                )
-                                            }
-
-                                            Spacer(modifier = Modifier.width(10.dp))
-
-                                            Column(
-                                                modifier = Modifier.weight(1f),
-                                                verticalArrangement = Arrangement.Center
-                                            ) {
-                                                Text(
-                                                    text = item.title,
-                                                    style = MaterialTheme.typography.bodyMedium.copy(
-                                                        fontSize = 13.5.sp,
-                                                        fontWeight = FontWeight.SemiBold,
-                                                        lineHeight = 16.sp
-                                                    ),
-                                                    color = TextPrimary,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis,
-                                                    modifier = Modifier.then(
-                                                        if (isAnyPartFocused) {
-                                                            Modifier.basicMarquee(
-                                                                iterations = Int.MAX_VALUE,
-                                                                initialDelayMillis = 250,
-                                                                repeatDelayMillis = 800,
-                                                                velocity = 40.dp
-                                                            )
-                                                        } else Modifier
-                                                    )
-                                                )
-                                                val secondaryLine = buildListSecondaryText(item, watchProgress)
-                                                Text(
-                                                    text = secondaryLine,
-                                                    style = MaterialTheme.typography.bodySmall.copy(
-                                                        fontSize = 11.sp,
-                                                        lineHeight = 13.sp
-                                                    ),
-                                                    color = if (watchProgress > 0.01f) AccentGold else TextSecondary,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                            }
-                                        }
-
-                                        if (item.type == MediaType.DIRECTORY) {
-                                            val starScale by animateFloatAsState(if (isStarFocused) 1.12f else 1.0f, label = "dlna_star_scale")
-                                            val starBg by animateColorAsState(
-                                                targetValue = when {
-                                                    isStarFocused && isFav -> AccentGold.copy(alpha = 0.24f)
-                                                    isStarFocused -> AccentCyan.copy(alpha = 0.22f)
-                                                    isFav -> AccentGold.copy(alpha = 0.12f)
-                                                    else -> Color.Transparent
-                                                },
-                                                label = "dlna_star_bg"
+                                            .focusRequester(rowFocusRequester)
+                                            .then(
+                                                if (index == resolvedTargetIdx) {
+                                                    Modifier.focusRequester(targetItemFocusRequester)
+                                                } else Modifier
                                             )
-                                            val starBorder = when {
-                                                isStarFocused && isFav -> AccentGold
-                                                isStarFocused -> FocusBorder
-                                                isFav -> AccentGold.copy(alpha = 0.45f)
-                                                else -> Color.Transparent
+                                            .focusProperties {
+                                                canFocus = !holdTransitionFocus || index == resolvedTargetIdx
+                                                left = navMenuFocusRequester
+                                                if (item.type == MediaType.DIRECTORY) {
+                                                    right = starFocusRequester
+                                                }
                                             }
-                                            Box(
-                                                modifier = Modifier
-                                                    .padding(start = 6.dp)
-                                                    .size(30.dp)
-                                                    .scale(starScale)
-                                                    .clip(RoundedCornerShape(8.dp))
-                                                    .background(starBg)
-                                                    .then(
-                                                        if (starBorder != Color.Transparent) {
-                                                            Modifier.border(if (isStarFocused) 2.dp else 1.dp, starBorder, RoundedCornerShape(8.dp))
-                                                        } else Modifier
-                                                    )
-                                                    .clickable(
-                                                        interactionSource = starInteraction,
-                                                        indication = null
-                                                    ) {
-                                                        favoritesManager.toggleFavorite(
-                                                            FavoriteFolder(
-                                                                id = item.id,
-                                                                title = item.title,
-                                                                sourceType = MediaSourceType.UPNP_DLNA,
-                                                                serverControlUrl = connectedDevice?.contentDirectoryControlUrl,
-                                                                parentId = item.parentId
+                                            .onFocusChanged { state ->
+                                                isRowFocused = state.hasFocus
+                                                if (state.hasFocus) {
+                                                    focusedItem = item
+                                                }
+                                            }
+                                    ) {
+                                        Box(modifier = Modifier.fillMaxSize()) {
+                                            if (watchProgress > 0f) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxHeight()
+                                                        .fillMaxWidth(fraction = watchProgress)
+                                                        .background(
+                                                            Brush.horizontalGradient(
+                                                                colors = listOf(
+                                                                    AccentCyan.copy(alpha = 0.06f),
+                                                                    AccentOrange.copy(alpha = 0.16f)
+                                                                )
                                                             )
                                                         )
-                                                    },
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Icon(
-                                                    imageVector = if (isFav) Icons.Rounded.Star else Icons.Outlined.StarOutline,
-                                                    contentDescription = "Избранное",
-                                                    tint = when {
-                                                        isFav -> AccentGold
-                                                        isStarFocused -> AccentCyanBright
-                                                        else -> TextSecondary
-                                                    },
-                                                    modifier = Modifier.size(16.dp)
                                                 )
                                             }
+
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .padding(
+                                                        start = 10.dp,
+                                                        end = if (item.type == MediaType.DIRECTORY) 42.dp else 10.dp
+                                                    ),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                val icon = mediaTypeIcon(item.type)
+                                                val iconTint = mediaTypeTint(item.type)
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(32.dp)
+                                                        .clip(RoundedCornerShape(8.dp))
+                                                        .background(DarkSurface.copy(alpha = 0.85f)),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Icon(
+                                                        imageVector = icon,
+                                                        contentDescription = null,
+                                                        tint = iconTint,
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
+
+                                                Spacer(modifier = Modifier.width(10.dp))
+
+                                                Column(
+                                                    modifier = Modifier.weight(1f),
+                                                    verticalArrangement = Arrangement.Center
+                                                ) {
+                                                    Text(
+                                                        text = item.title,
+                                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                                            fontSize = 13.5.sp,
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            lineHeight = 16.sp
+                                                        ),
+                                                        color = TextPrimary,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                        modifier = Modifier.then(
+                                                            if (isAnyPartFocused) {
+                                                                Modifier.basicMarquee(
+                                                                    iterations = Int.MAX_VALUE,
+                                                                    initialDelayMillis = 250,
+                                                                    repeatDelayMillis = 800,
+                                                                    velocity = 40.dp
+                                                                )
+                                                            } else Modifier
+                                                        )
+                                                    )
+                                                    val secondaryLine = buildListSecondaryText(item, watchProgress)
+                                                    Text(
+                                                        text = secondaryLine,
+                                                        style = MaterialTheme.typography.bodySmall.copy(
+                                                            fontSize = 11.sp,
+                                                            lineHeight = 13.sp
+                                                        ),
+                                                        color = if (watchProgress > 0.01f) AccentGold else TextSecondary,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    if (item.type == MediaType.DIRECTORY) {
+                                        val starScale by animateFloatAsState(
+                                            targetValue = when {
+                                                isStarKeyPressed -> 0.85f
+                                                isStarFocused -> 1.32f
+                                                else -> 1.0f
+                                            },
+                                            animationSpec = tween(durationMillis = 120),
+                                            label = "dlna_star_scale"
+                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.CenterEnd)
+                                                .padding(end = 8.dp)
+                                                .size(30.dp)
+                                                .zIndex(20f)
+                                                .focusRequester(starFocusRequester)
+                                                .focusProperties {
+                                                    canFocus = !holdTransitionFocus
+                                                    left = rowFocusRequester
+                                                    right = FocusRequester.Cancel
+                                                }
+                                                .onFocusChanged { state ->
+                                                    if (!state.isFocused) {
+                                                        isStarKeyPressed = false
+                                                    } else {
+                                                        focusedItem = item
+                                                    }
+                                                }
+                                                .onKeyEvent { keyEvent ->
+                                                    val isConfirm = keyEvent.key == Key.DirectionCenter ||
+                                                        keyEvent.key == Key.Enter ||
+                                                        keyEvent.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER
+                                                    if (!isConfirm) return@onKeyEvent false
+                                                    when (keyEvent.type) {
+                                                        KeyEventType.KeyDown -> {
+                                                            if (keyEvent.nativeKeyEvent.repeatCount == 0) {
+                                                                isStarKeyPressed = true
+                                                            }
+                                                            true
+                                                        }
+                                                        KeyEventType.KeyUp -> {
+                                                            val startedHere = isStarKeyPressed
+                                                            isStarKeyPressed = false
+                                                            if (startedHere) {
+                                                                toggleFavoriteFolder()
+                                                            }
+                                                            true
+                                                        }
+                                                        else -> false
+                                                    }
+                                                }
+                                                .pointerInput(item.id) {
+                                                    detectTapGestures(onTap = { toggleFavoriteFolder() })
+                                                }
+                                                .focusable(interactionSource = starInteraction),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = if (isFav) Icons.Rounded.Star else Icons.Outlined.StarOutline,
+                                                contentDescription = "Избранное",
+                                                tint = if (isFav || isStarFocused) AccentOrange else TextSecondary.copy(alpha = 0.65f),
+                                                modifier = Modifier
+                                                    .size(19.dp)
+                                                    .scale(starScale)
+                                            )
                                         }
                                     }
                                 }
                             }
                         }
-                    }
                     }
 
                     // Right column: Movie/Series Poster Preview + Full Metadata at the bottom
