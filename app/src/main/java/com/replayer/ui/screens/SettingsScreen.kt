@@ -1094,7 +1094,7 @@ fun SettingsScreen(
                                 .heightIn(max = 260.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            items(discoveredDevices, key = { it.udn.ifEmpty { it.location } }) { device ->
+                            items(discoveredDevices, key = { it.id.ifEmpty { it.location } }) { device ->
                                 TvFocusCard(
                                     onClick = {
                                         serverConfigManager.connectUpnpDevice(device)
