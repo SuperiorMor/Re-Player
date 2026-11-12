@@ -94,7 +94,7 @@ fun TvFocusCard(
 
     val scale by animateFloatAsState(
         targetValue = when {
-            isPressed -> 0.95f
+            isPressed -> if (isFocused) (focusedScale - 0.025f).coerceAtLeast(0.99f) else 0.99f
             isFocused -> focusedScale
             else -> 1.0f
         },

@@ -685,74 +685,79 @@ fun PlayerScreen(
             )
         }
 
-        // Sleek IPTV Channel Zap Banner + Buffering / Stream Status when controls are hidden
+        // Minimalist Transparent IPTV Channel Zap Watermark (matches Seek OSD style)
         AnimatedVisibility(
             visible = zapBanner != null && !showControls && !isSeekScrubbing,
             enter = fadeIn(tween(120)),
             exit = fadeOut(tween(260)),
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .padding(top = 36.dp)
+                .padding(top = 56.dp, start = 48.dp, end = 48.dp)
         ) {
             val info = zapBanner
             if (info != null) {
-                Box(
-                    modifier = Modifier
-                        .widthIn(min = 340.dp, max = 560.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(Color(0xD4101620))
-                        .border(1.dp, AccentCyan.copy(alpha = 0.42f), RoundedCornerShape(16.dp))
-                        .padding(horizontal = 20.dp, vertical = 14.dp)
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(AccentCyan.copy(alpha = 0.18f))
-                                    .padding(horizontal = 8.dp, vertical = 2.dp)
-                            ) {
-                                Text(
-                                    text = "${info.index} / ${info.total}",
-                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = AccentCyanBright
-                                )
-                            }
-                            Text(
-                                text = info.title,
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                color = TextPrimary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f, fill = false)
-                            )
-                            if (playerState.isBuffering && zapPreviewItem == null) {
-                                CircularProgressIndicator(
-                                    color = AccentCyanBright,
-                                    strokeWidth = 2.dp,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                        }
-                        if (!info.programTitle.isNullOrBlank()) {
-                            Text(
-                                text = buildString {
-                                    if (!info.timeRange.isNullOrBlank()) append("${info.timeRange}  •  ")
-                                    append(info.programTitle)
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = TextSecondary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
                         Text(
-                            text = "‹ Пред. канал   •   OK — меню   •   След. канал ›",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = TextSecondary.copy(alpha = 0.65f)
+                            text = "${info.index}/${info.total}",
+                            style = MaterialTheme.typography.displayLarge.copy(
+                                fontSize = 36.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                shadow = Shadow(
+                                    color = Color(0xBB000000),
+                                    offset = Offset(0f, 3f),
+                                    blurRadius = 18f
+                                )
+                            ),
+                            color = AccentOrange.copy(alpha = 0.94f)
+                        )
+                        Text(
+                            text = info.title,
+                            style = MaterialTheme.typography.displayLarge.copy(
+                                fontSize = 44.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                shadow = Shadow(
+                                    color = Color(0xBB000000),
+                                    offset = Offset(0f, 3f),
+                                    blurRadius = 18f
+                                )
+                            ),
+                            color = AccentCyanBright.copy(alpha = 0.94f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        if (playerState.isBuffering && zapPreviewItem == null) {
+                            CircularProgressIndicator(
+                                color = AccentCyanBright,
+                                strokeWidth = 2.5.dp,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
+                    if (!info.programTitle.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = buildString {
+                                if (!info.timeRange.isNullOrBlank()) append("${info.timeRange}  •  ")
+                                append(info.programTitle)
+                            },
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontSize = 21.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                shadow = Shadow(
+                                    color = Color(0xBB000000),
+                                    offset = Offset(0f, 2f),
+                                    blurRadius = 14f
+                                )
+                            ),
+                            color = Color.White.copy(alpha = 0.84f),
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }

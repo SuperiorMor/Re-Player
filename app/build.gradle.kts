@@ -13,8 +13,8 @@ android {
         applicationId = "com.replayer"
         minSdk = 24
         targetSdk = 35
-        versionCode = 61
-        versionName = "1.1.1"
+        versionCode = 62
+        versionName = "1.1.2"
 
         val defaultTgToken = (System.getenv("TG_BOT_TOKEN") ?: "").replace("\\", "\\\\").replace("\"", "\\\"")
         val defaultTgChat = (System.getenv("TG_CHAT_ID") ?: "").replace("\\", "\\\\").replace("\"", "\\\"")

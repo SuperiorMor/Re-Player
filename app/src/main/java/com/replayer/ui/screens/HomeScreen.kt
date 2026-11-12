@@ -385,6 +385,13 @@ fun HomeScreen(
                             gridItemsIndexed(favorites, key = { idx, fav -> "${fav.id}_$idx" }) { idx, fav ->
                                 HomeShelfFocusCard(
                                     onClick = { onOpenFavorite(fav) },
+                                    onLongClick = {
+                                        if (favorites.size <= 1) {
+                                            val fallback = if (recentPosters.isNotEmpty()) firstItemFocusRequester else navMenuFocusRequester
+                                            runCatching { fallback.requestFocus() }
+                                        }
+                                        favoritesManager.toggleFavorite(fav)
+                                    },
                                     modifier = Modifier
                                         .width(cardWidth)
                                         .fillMaxHeight()
@@ -1056,17 +1063,30 @@ private fun GoogleTvProgramTile(
 private fun HomeShelfFocusCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    onLongClick: (() -> Unit)? = null,
     content: @Composable BoxScope.(isFocused: Boolean) -> Unit
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
     var isKeyPressed by remember { mutableStateOf(false) }
     var isPointerPressed by remember { mutableStateOf(false) }
+    var isLongPressTriggered by remember { mutableStateOf(false) }
     val isPressed = isKeyPressed || isPointerPressed
     val latestOnClick by rememberUpdatedState(onClick)
+    val latestOnLongClick by rememberUpdatedState(onLongClick)
+
+    LaunchedEffect(isPressed, onLongClick != null) {
+        val longClick = latestOnLongClick
+        if (isPressed && longClick != null) {
+            delay(450)
+            isLongPressTriggered = true
+            longClick()
+        }
+    }
+
     val scale by animateFloatAsState(
         targetValue = when {
-            isPressed -> 0.96f
+            isPressed -> if (isFocused) 1.025f else 0.99f
             isFocused -> 1.05f
             else -> 1.0f
         },
@@ -1091,6 +1111,7 @@ private fun HomeShelfFocusCard(
             .onFocusChanged { state ->
                 if (!state.isFocused) {
                     isKeyPressed = false
+                    isLongPressTriggered = false
                 }
             }
             .onKeyEvent { keyEvent ->
@@ -1102,13 +1123,16 @@ private fun HomeShelfFocusCard(
                     KeyEventType.KeyDown -> {
                         if (keyEvent.nativeKeyEvent.repeatCount == 0) {
                             isKeyPressed = true
+                            isLongPressTriggered = false
                         }
                         true
                     }
                     KeyEventType.KeyUp -> {
                         val startedHere = isKeyPressed
+                        val didLongPress = isLongPressTriggered
                         isKeyPressed = false
-                        if (startedHere) {
+                        isLongPressTriggered = false
+                        if (startedHere && !didLongPress) {
                             latestOnClick()
                         }
                         true
@@ -1116,14 +1140,23 @@ private fun HomeShelfFocusCard(
                     else -> false
                 }
             }
-            .pointerInput(Unit) {
+            .pointerInput(onLongClick != null) {
                 detectTapGestures(
                     onPress = {
                         isPointerPressed = true
-                        tryAwaitRelease()
-                        isPointerPressed = false
+                        isLongPressTriggered = false
+                        try {
+                            tryAwaitRelease()
+                        } finally {
+                            isPointerPressed = false
+                        }
                     },
-                    onTap = { latestOnClick() }
+                    onTap = {
+                        if (!isLongPressTriggered) {
+                            latestOnClick()
+                        }
+                        isLongPressTriggered = false
+                    }
                 )
             }
             .focusable(interactionSource = interactionSource)

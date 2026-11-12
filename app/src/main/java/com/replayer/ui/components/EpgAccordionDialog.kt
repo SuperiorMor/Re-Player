@@ -84,12 +84,12 @@ import com.replayer.ui.theme.TextSecondary
 import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalFoundationApi::class)
-private val TopAnchorBringIntoViewSpec = object : BringIntoViewSpec {
+private val NoopBringIntoViewSpec = object : BringIntoViewSpec {
     override fun calculateScrollDistance(
         offset: Float,
         size: Float,
         containerSize: Float
-    ): Float = offset
+    ): Float = 0f
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -117,6 +117,7 @@ fun EpgAccordionDialog(
     }
     val initialIndex = currentProgIndex.coerceAtLeast(0)
     var focusedIndex by remember { mutableIntStateOf(initialIndex) }
+    var expandedIndex by remember { mutableIntStateOf(initialIndex) }
     var hasUserNavigated by remember { mutableStateOf(false) }
     var isInitialSettled by remember { mutableStateOf(programs.isEmpty()) }
     val initialFocusRequester = remember { FocusRequester() }
@@ -130,6 +131,7 @@ fun EpgAccordionDialog(
             isInitialSettled = false
             hasUserNavigated = false
             focusedIndex = initialIndex
+            expandedIndex = initialIndex
             try {
                 listState.scrollToItem(initialIndex, 0)
             } catch (_: Exception) {}
@@ -148,14 +150,19 @@ fun EpgAccordionDialog(
         }
     }
 
-    // Always bring whichever program the user highlights cleanly to the top without downward drop
+    // Sequential accordion navigation: 1) collapse previous -> 2) scroll target to top -> 3) expand target
     LaunchedEffect(focusedIndex, isInitialSettled) {
         if (!isInitialSettled || (!hasUserNavigated && focusedIndex == initialIndex)) {
             return@LaunchedEffect
         }
+        if (expandedIndex != -1 && expandedIndex != focusedIndex) {
+            expandedIndex = -1
+            delay(130)
+        }
         try {
             listState.animateScrollToItem(index = focusedIndex, scrollOffset = 0)
         } catch (_: Exception) {}
+        expandedIndex = focusedIndex
     }
 
     Dialog(
@@ -222,7 +229,7 @@ fun EpgAccordionDialog(
                         )
                     }
                 } else {
-                    CompositionLocalProvider(LocalBringIntoViewSpec provides TopAnchorBringIntoViewSpec) {
+                    CompositionLocalProvider(LocalBringIntoViewSpec provides NoopBringIntoViewSpec) {
                         LazyColumn(
                             state = listState,
                             modifier = Modifier
@@ -234,7 +241,7 @@ fun EpgAccordionDialog(
                         itemsIndexed(programs) { index, prog ->
                             val isItemCurrent = prog.isCurrent(now)
                             val isItemPast = prog.isPast(now)
-                            val isExpanded = (index == focusedIndex)
+                            val isExpanded = (index == expandedIndex)
                             val isInitialTarget = (index == initialIndex)
                             val isPlayingArchiveItem = playingArchiveProgram != null &&
                                 playingArchiveProgram.startTime == prog.startTime &&
