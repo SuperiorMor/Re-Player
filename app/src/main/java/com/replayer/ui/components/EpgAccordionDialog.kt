@@ -9,9 +9,12 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.BringIntoViewSpec
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
@@ -36,6 +39,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -79,6 +83,16 @@ import com.replayer.ui.theme.TextPrimary
 import com.replayer.ui.theme.TextSecondary
 import kotlinx.coroutines.delay
 
+@OptIn(ExperimentalFoundationApi::class)
+private val TopAnchorBringIntoViewSpec = object : BringIntoViewSpec {
+    override fun calculateScrollDistance(
+        offset: Float,
+        size: Float,
+        containerSize: Float
+    ): Float = offset
+}
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun EpgAccordionDialog(
     channelTitle: String,
@@ -134,12 +148,11 @@ fun EpgAccordionDialog(
         }
     }
 
-    // Always bring whichever program the user highlights up to the top of the list cleanly
+    // Always bring whichever program the user highlights cleanly to the top without downward drop
     LaunchedEffect(focusedIndex, isInitialSettled) {
         if (!isInitialSettled || (!hasUserNavigated && focusedIndex == initialIndex)) {
             return@LaunchedEffect
         }
-        delay(140)
         try {
             listState.animateScrollToItem(index = focusedIndex, scrollOffset = 0)
         } catch (_: Exception) {}
@@ -209,12 +222,15 @@ fun EpgAccordionDialog(
                         )
                     }
                 } else {
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(start = 4.dp, end = 4.dp, top = 6.dp, bottom = 280.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
+                    CompositionLocalProvider(LocalBringIntoViewSpec provides TopAnchorBringIntoViewSpec) {
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(top = 6.dp),
+                            contentPadding = PaddingValues(start = 4.dp, end = 4.dp, bottom = 280.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
                         itemsIndexed(programs) { index, prog ->
                             val isItemCurrent = prog.isCurrent(now)
                             val isItemPast = prog.isPast(now)
@@ -429,6 +445,7 @@ fun EpgAccordionDialog(
                                 }
                             }
                         }
+                    }
                     }
                 }
             }

@@ -74,7 +74,6 @@ import java.util.Locale
 
 @Composable
 fun DiagnosticsSection(
-    compact: Boolean = false,
     leftFocusRequester: FocusRequester? = null
 ) {
     val scope = rememberCoroutineScope()
@@ -93,258 +92,137 @@ fun DiagnosticsSection(
     val sentCount = reports.count { it.isSent }
     val pendingCount = totalCount - sentCount
 
-    if (compact) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(DarkCard)
-                .padding(horizontal = 16.dp, vertical = 12.dp)
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.BugReport,
-                        contentDescription = null,
-                        tint = AccentCyan,
-                        modifier = Modifier.size(22.dp)
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = buildString {
-                                append("Сбоев: $totalCount • Отправлено: $sentCount")
-                                if (pendingCount > 0) append(" (ожидают: $pendingCount)")
-                            },
-                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                            color = TextPrimary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = actionFeedback ?: "Логи сбоев автоматически отправляются разработчику",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = when {
-                                (actionFeedback ?: "").startsWith("Ошибка") -> AccentOrange
-                                actionFeedback != null -> AccentCyanBright
-                                else -> TextSecondary
-                            },
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
+    Spacer(modifier = Modifier.height(28.dp))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    TvFocusCard(
-                        onClick = {
-                            if (!isSendingNow) {
-                                isSendingNow = true
-                                actionFeedback = "Отправка логов..."
-                                scope.launch {
-                                    val res = CrashReporter.sendDiagnosticSnapshotNow()
-                                    CrashReporter.refreshReportsList()
-                                    actionFeedback = res.getOrElse { "Ошибка: ${it.message}" }
-                                    isSendingNow = false
-                                }
-                            }
-                        },
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(38.dp)
-                            .then(
-                                if (leftFocusRequester != null) {
-                                    Modifier.focusProperties { left = leftFocusRequester }
-                                } else Modifier
-                            )
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxSize(),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            if (isSendingNow) {
-                                CircularProgressIndicator(
-                                    color = AccentCyan,
-                                    modifier = Modifier.size(15.dp),
-                                    strokeWidth = 2.dp
-                                )
-                            } else {
-                                Icon(Icons.Outlined.Send, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(16.dp))
-                            }
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = if (isSendingNow) "Отправка..." else "Отправить логи",
-                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                                color = TextPrimary,
-                                maxLines = 1
-                            )
-                        }
-                    }
+    Text(
+        text = "Диагностика и сбои",
+        style = MaterialTheme.typography.titleLarge,
+        color = TextPrimary,
+        modifier = Modifier.padding(bottom = 12.dp)
+    )
 
-                    TvFocusCard(
-                        onClick = {
-                            CrashReporter.refreshReportsList()
-                            showLogsDialog = true
-                        },
-                        modifier = Modifier
-                            .weight(0.75f)
-                            .height(38.dp)
-                            .focusRequester(journalFocusRequester)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxSize(),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(Icons.Outlined.ListAlt, contentDescription = null, tint = AccentOrange, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Журнал ($totalCount)",
-                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                                color = TextPrimary,
-                                maxLines = 1
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    } else {
-        Spacer(modifier = Modifier.height(28.dp))
-
-        Text(
-            text = "Диагностика и сбои",
-            style = MaterialTheme.typography.titleLarge,
-            color = TextPrimary,
-            modifier = Modifier.padding(bottom = 12.dp)
-        )
-
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(DarkCard)
-                .padding(horizontal = 20.dp, vertical = 18.dp)
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(DarkCard)
+            .padding(horizontal = 20.dp, vertical = 18.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.weight(1f),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier.weight(1f),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.BugReport,
-                        contentDescription = null,
-                        tint = AccentCyan,
-                        modifier = Modifier.size(28.dp)
+                Icon(
+                    imageVector = Icons.Outlined.BugReport,
+                    contentDescription = null,
+                    tint = AccentCyan,
+                    modifier = Modifier.size(28.dp)
+                )
+                Spacer(modifier = Modifier.width(16.dp))
+                Column {
+                    Text(
+                        text = buildString {
+                            append("Зафиксировано сбоев: $totalCount • Отправлено: $sentCount")
+                            if (pendingCount > 0) append(" (ожидают: $pendingCount)")
+                        },
+                        style = MaterialTheme.typography.titleMedium,
+                        color = TextPrimary
                     )
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Column {
-                        Text(
-                            text = buildString {
-                                append("Зафиксировано сбоев: $totalCount • Отправлено: $sentCount")
-                                if (pendingCount > 0) append(" (ожидают: $pendingCount)")
-                            },
-                            style = MaterialTheme.typography.titleMedium,
-                            color = TextPrimary
+                    Spacer(modifier = Modifier.height(3.dp))
+                    Text(
+                        text = actionFeedback ?: "Логи сбоев автоматически отправляются разработчику для исправления ошибок",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = when {
+                            (actionFeedback ?: "").startsWith("Ошибка") -> AccentOrange
+                            actionFeedback != null -> AccentCyanBright
+                            else -> TextSecondary
+                        },
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(16.dp))
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TvFocusCard(
+                    onClick = {
+                        if (!isSendingNow) {
+                            isSendingNow = true
+                            actionFeedback = "Отправка логов..."
+                            scope.launch {
+                                val res = CrashReporter.sendDiagnosticSnapshotNow()
+                                CrashReporter.refreshReportsList()
+                                actionFeedback = res.getOrElse { "Ошибка: ${it.message}" }
+                                isSendingNow = false
+                            }
+                        }
+                    },
+                    modifier = Modifier
+                        .width(225.dp)
+                        .height(44.dp)
+                        .then(
+                            if (leftFocusRequester != null) {
+                                Modifier.focusProperties { left = leftFocusRequester }
+                            } else Modifier
                         )
-                        Spacer(modifier = Modifier.height(3.dp))
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (isSendingNow) {
+                            CircularProgressIndicator(
+                                color = AccentCyan,
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(Icons.Outlined.Send, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = actionFeedback ?: "Логи сбоев автоматически отправляются разработчику для исправления ошибок",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = when {
-                                (actionFeedback ?: "").startsWith("Ошибка") -> AccentOrange
-                                actionFeedback != null -> AccentCyanBright
-                                else -> TextSecondary
-                            },
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
+                            text = if (isSendingNow) "Отправка..." else "Отправить логи сейчас",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = TextPrimary,
+                            maxLines = 1
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.width(16.dp))
-
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                TvFocusCard(
+                    onClick = {
+                        CrashReporter.refreshReportsList()
+                        showLogsDialog = true
+                    },
+                    modifier = Modifier
+                        .width(155.dp)
+                        .height(44.dp)
+                        .focusRequester(journalFocusRequester)
                 ) {
-                    TvFocusCard(
-                        onClick = {
-                            if (!isSendingNow) {
-                                isSendingNow = true
-                                actionFeedback = "Отправка логов..."
-                                scope.launch {
-                                    val res = CrashReporter.sendDiagnosticSnapshotNow()
-                                    CrashReporter.refreshReportsList()
-                                    actionFeedback = res.getOrElse { "Ошибка: ${it.message}" }
-                                    isSendingNow = false
-                                }
-                            }
-                        },
-                        modifier = Modifier
-                            .width(225.dp)
-                            .height(44.dp)
+                    Row(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxSize(),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            if (isSendingNow) {
-                                CircularProgressIndicator(
-                                    color = AccentCyan,
-                                    modifier = Modifier.size(16.dp),
-                                    strokeWidth = 2.dp
-                                )
-                            } else {
-                                Icon(Icons.Outlined.Send, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(18.dp))
-                            }
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = if (isSendingNow) "Отправка..." else "Отправить логи сейчас",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = TextPrimary,
-                                maxLines = 1
-                            )
-                        }
-                    }
-
-                    TvFocusCard(
-                        onClick = {
-                            CrashReporter.refreshReportsList()
-                            showLogsDialog = true
-                        },
-                        modifier = Modifier
-                            .width(155.dp)
-                            .height(44.dp)
-                            .focusRequester(journalFocusRequester)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxSize(),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(Icons.Outlined.ListAlt, contentDescription = null, tint = AccentOrange, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "Журнал ($totalCount)",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = TextPrimary,
-                                maxLines = 1
-                            )
-                        }
+                        Icon(Icons.Outlined.ListAlt, contentDescription = null, tint = AccentOrange, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Журнал ($totalCount)",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = TextPrimary,
+                            maxLines = 1
+                        )
                     }
                 }
             }

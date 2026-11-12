@@ -214,6 +214,7 @@ fun PlayerScreen(
         seekFadeJob = scope.launch {
             delay(950)
             isSeekScrubbing = false
+            delay(260)
             displaySeekDeltaMs = 0L
             activeScrubTargetMs = -1L
         }
@@ -277,7 +278,7 @@ fun PlayerScreen(
 
         activeScrubTargetMs = clampedTarget
         pendingCommitTargetMs = clampedTarget
-        displaySeekDeltaMs += actualStep
+        displaySeekDeltaMs = if (isSeekScrubbing) displaySeekDeltaMs + actualStep else actualStep
         isSeekScrubbing = true
 
         seekFadeJob?.cancel()
@@ -958,7 +959,7 @@ fun PlayerScreen(
                             Text(
                                 text = formatTime(displayedPosMs),
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                                color = if (isSeekScrubbing) AccentCyanBright else TextPrimary
+                                color = TextPrimary
                             )
 
                             Spacer(modifier = Modifier.width(16.dp))
