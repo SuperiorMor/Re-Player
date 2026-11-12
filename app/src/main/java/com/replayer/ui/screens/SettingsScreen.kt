@@ -12,8 +12,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -25,16 +23,19 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.BlurredEdgeTreatment
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.SpanStyle
@@ -45,7 +46,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import com.replayer.R
 import com.replayer.data.IptvManager
 import com.replayer.data.ServerConfigManager
@@ -53,8 +53,10 @@ import com.replayer.model.UpnpDevice
 import com.replayer.network.upnp.SsdpDiscovery
 import com.replayer.ui.components.DiagnosticsSection
 import com.replayer.ui.components.TvFocusCard
+import com.replayer.ui.components.settings.*
 import com.replayer.ui.theme.*
 import com.replayer.updater.ReleaseInfo
+import com.replayer.updater.UpdateChannel
 import com.replayer.updater.UpdateCheckResult
 import com.replayer.updater.UpdateManager
 import kotlinx.coroutines.Dispatchers
@@ -71,10 +73,6 @@ private sealed class UpdateUiState {
     data class Downloading(val progress: Float) : UpdateUiState()
     data class ReadyToInstall(val apkFile: File) : UpdateUiState()
     data class Error(val message: String) : UpdateUiState()
-}
-
-private enum class UrlEditTarget {
-    PLAYLIST, EPG
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -165,6 +163,10 @@ fun SettingsScreen(
     }
 
     // App updates state
+    var updateChannel by remember { mutableStateOf(updateManager.getUpdateChannel()) }
+    var channelSwitchNotice by remember { mutableStateOf<String?>(null) }
+    var rightTapCount by remember { mutableIntStateOf(0) }
+    var lastRightTapMs by remember { mutableLongStateOf(0L) }
     var updateUiState by remember { mutableStateOf<UpdateUiState>(UpdateUiState.Idle) }
     var downloadProgress by remember { mutableFloatStateOf(0f) }
     var showChangelogDialog by remember { mutableStateOf(false) }
@@ -172,6 +174,13 @@ fun SettingsScreen(
     val updateActionFocusRequester = remember { FocusRequester() }
     var showSupportQrDialog by remember { mutableStateOf(false) }
     val feedbackQrFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(channelSwitchNotice) {
+        if (channelSwitchNotice != null) {
+            delay(5000L)
+            channelSwitchNotice = null
+        }
+    }
 
     BackHandler(enabled = true) {
         onBack()
@@ -198,10 +207,10 @@ fun SettingsScreen(
         }
     }
 
-    fun startCheckUpdates() {
+    fun startCheckUpdates(channel: UpdateChannel = updateChannel) {
         updateUiState = UpdateUiState.Checking
         scope.launch {
-            val result = updateManager.checkForUpdates(currentVersion)
+            val result = updateManager.checkForUpdates(currentVersion, channel)
             updateUiState = when (result) {
                 is UpdateCheckResult.UpdateAvailable -> UpdateUiState.Available(result.release)
                 is UpdateCheckResult.UpToDate -> UpdateUiState.UpToDate
@@ -843,12 +852,35 @@ fun SettingsScreen(
                                     fontWeight = FontWeight.Bold
                                 )
                             }
+                            if (updateChannel == UpdateChannel.BETA || currentVersion.contains("beta", ignoreCase = true)) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(AccentOrange.copy(alpha = 0.22f))
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = "BETA",
+                                        color = AccentOrange,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
                         }
+                        val isRunningBetaBuild = currentVersion.contains("beta", ignoreCase = true)
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             text = when (val state = updateUiState) {
                                 is UpdateUiState.Checking -> "Проверка обновлений на GitHub..."
-                                is UpdateUiState.UpToDate -> "У вас установлена актуальная версия"
+                                is UpdateUiState.UpToDate -> {
+                                    if (updateChannel == UpdateChannel.STABLE && isRunningBetaBuild) {
+                                        "Канал Stable выбран. Установлена более новая Beta v$currentVersion (откат требует переустановки)."
+                                    } else {
+                                        "У вас установлена актуальная версия"
+                                    }
+                                }
                                 is UpdateUiState.NoReleases -> "Релизы на GitHub не найдены"
                                 is UpdateUiState.Available -> "Доступна новая версия: ${state.release.tagName}"
                                 is UpdateUiState.Downloading -> "Идёт скачивание файла обновления..."
@@ -857,12 +889,21 @@ fun SettingsScreen(
                                 else -> "Проверка новых версий на GitHub и установка в один клик"
                             },
                             style = MaterialTheme.typography.bodySmall,
-                            color = when (updateUiState) {
-                                is UpdateUiState.Available -> AccentCyan
-                                is UpdateUiState.Error -> AccentOrange
+                            color = when {
+                                updateUiState is UpdateUiState.Available -> AccentCyan
+                                updateUiState is UpdateUiState.Error -> AccentOrange
+                                updateUiState is UpdateUiState.UpToDate && updateChannel == UpdateChannel.STABLE && isRunningBetaBuild -> AccentOrange
                                 else -> TextSecondary
                             }
                         )
+                        if (channelSwitchNotice != null) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = channelSwitchNotice!!,
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = if (updateChannel == UpdateChannel.BETA) AccentOrange else AccentCyan
+                            )
+                        }
                     }
                 }
 
@@ -908,11 +949,47 @@ fun SettingsScreen(
                                 .width(if (availState != null) 150.dp else 175.dp)
                                 .height(44.dp)
                                 .focusRequester(updateActionFocusRequester)
-                                .then(
+                                .focusProperties {
+                                    right = FocusRequester.Cancel
                                     if (availState == null) {
-                                        Modifier.focusProperties { left = navMenuFocusRequester }
-                                    } else Modifier
-                                )
+                                        left = navMenuFocusRequester
+                                    }
+                                }
+                                .onFocusChanged { focusState ->
+                                    if (!focusState.isFocused) {
+                                        rightTapCount = 0
+                                    }
+                                }
+                                .onPreviewKeyEvent { keyEvent ->
+                                    if (keyEvent.type == KeyEventType.KeyDown &&
+                                        keyEvent.key == Key.DirectionRight &&
+                                        keyEvent.nativeKeyEvent.repeatCount == 0
+                                    ) {
+                                        val now = android.os.SystemClock.uptimeMillis()
+                                        val nextCount = if (now - lastRightTapMs <= 3500L) rightTapCount + 1 else 1
+                                        lastRightTapMs = now
+                                        if (nextCount >= 5) {
+                                            rightTapCount = 0
+                                            val nextChannel = if (updateChannel == UpdateChannel.STABLE) {
+                                                UpdateChannel.BETA
+                                            } else {
+                                                UpdateChannel.STABLE
+                                            }
+                                            updateChannel = nextChannel
+                                            updateManager.setUpdateChannel(nextChannel)
+                                            channelSwitchNotice = if (nextChannel == UpdateChannel.BETA) {
+                                                "Канал обновлений изменён на BETA"
+                                            } else {
+                                                "Канал обновлений изменён на STABLE"
+                                            }
+                                            startCheckUpdates(nextChannel)
+                                        } else {
+                                            rightTapCount = nextCount
+                                        }
+                                        return@onPreviewKeyEvent true
+                                    }
+                                    false
+                                }
                         ) {
                             when (updateUiState) {
                                 is UpdateUiState.Checking -> {
@@ -1148,99 +1225,9 @@ fun SettingsScreen(
     // Feedback / Donate Large QR Dialog
     // ---------------------------------------------------------
     if (showSupportQrDialog) {
-        val qrCloseFocusRequester = remember { FocusRequester() }
-
-        Dialog(onDismissRequest = { showSupportQrDialog = false }) {
-            Box(
-                modifier = Modifier
-                    .width(460.dp)
-                    .clip(RoundedCornerShape(22.dp))
-                    .border(
-                        width = 1.dp,
-                        brush = Brush.horizontalGradient(
-                            colors = listOf(AccentCyan.copy(alpha = 0.6f), AccentOrange.copy(alpha = 0.6f))
-                        ),
-                        shape = RoundedCornerShape(22.dp)
-                    )
-            ) {
-                Box(
-                    modifier = Modifier
-                        .matchParentSize()
-                        .background(Color(0xCC151B26))
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    AccentCyan.copy(alpha = 0.12f),
-                                    Color.Transparent,
-                                    AccentOrange.copy(alpha = 0.08f)
-                                )
-                            )
-                        )
-                        .then(
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                Modifier.blur(20.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
-                            } else Modifier
-                        )
-                )
-                Column(
-                    modifier = Modifier.padding(28.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        text = "Обратная связь • Re:Player",
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                        color = TextPrimary,
-                        textAlign = TextAlign.Center
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Наведите камеру телефона на QR-код или напишите на morganism@yandex.ru с темой \"Re:Player\"",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TextSecondary,
-                        textAlign = TextAlign.Center
-                    )
-                    Spacer(modifier = Modifier.height(20.dp))
-                    Box(
-                        modifier = Modifier
-                            .size(270.dp)
-                            .clip(RoundedCornerShape(18.dp))
-                            .background(Color.White)
-                            .border(
-                                width = 2.5.dp,
-                                brush = Brush.linearGradient(
-                                    colors = listOf(AccentCyan, AccentGold, AccentOrange)
-                                ),
-                                shape = RoundedCornerShape(18.dp)
-                            )
-                            .padding(8.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Image(
-                            painter = painterResource(id = R.drawable.qr_support_donate),
-                            contentDescription = "QR-код поддержки Re:Player",
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Fit
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(22.dp))
-                    TvFocusCard(
-                        onClick = { showSupportQrDialog = false },
-                        modifier = Modifier
-                            .width(180.dp)
-                            .height(44.dp)
-                            .focusRequester(qrCloseFocusRequester)
-                    ) {
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text(
-                                text = "Закрыть",
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                color = AccentCyanBright
-                            )
-                        }
-                    }
-                }
-            }
-        }
+        SettingsSupportQrDialog(
+            onDismiss = { showSupportQrDialog = false }
+        )
     }
 
     // ---------------------------------------------------------
@@ -1248,563 +1235,52 @@ fun SettingsScreen(
     // ---------------------------------------------------------
     if (showChangelogDialog && changelogRelease != null) {
         val release = changelogRelease!!
-        Dialog(onDismissRequest = { showChangelogDialog = false }) {
-            Box(
-                modifier = Modifier
-                    .width(520.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .border(1.dp, AccentCyan.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
-            ) {
-                Box(
-                    modifier = Modifier
-                        .matchParentSize()
-                        .background(Color(0xCC151B26))
-                        .then(
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                Modifier.blur(20.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
-                            } else Modifier
-                        )
-                )
-                Column(modifier = Modifier.padding(28.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text(
-                                text = "Что нового в ${release.tagName}",
-                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                                color = TextPrimary
-                            )
-                            Text(
-                                text = "Обновление готово к установке",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = TextSecondary
-                            )
-                        }
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(AccentCyan.copy(alpha = 0.15f))
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                        ) {
-                            Text(
-                                text = release.tagName,
-                                color = AccentCyan,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(18.dp))
-
-                    val changelogItems = remember(release) {
-                        getFriendlyChangelog(release.tagName, release.changelog)
-                    }
-
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        changelogItems.forEach { item ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.Top
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .padding(top = 6.dp)
-                                        .size(6.dp)
-                                        .clip(RoundedCornerShape(3.dp))
-                                        .background(AccentCyan)
-                                )
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Text(
-                                    text = item,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = TextPrimary,
-                                    lineHeight = 20.sp
-                                )
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(24.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        TvFocusCard(
-                            onClick = { showChangelogDialog = false },
-                            modifier = Modifier
-                                .width(120.dp)
-                                .height(44.dp)
-                        ) {
-                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text("Закрыть", color = TextSecondary)
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.width(12.dp))
-
-                        TvFocusCard(
-                            onClick = {
-                                showChangelogDialog = false
-                                startDownload(release)
-                            },
-                            modifier = Modifier
-                                .width(140.dp)
-                                .height(44.dp)
-                        ) {
-                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text("Загрузить", color = AccentCyan, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        SettingsChangelogDialog(
+            release = release,
+            onDownload = {
+                showChangelogDialog = false
+                startDownload(release)
+            },
+            onDismiss = { showChangelogDialog = false }
+        )
     }
 
-    // Local USB / Storage M3U File Picker Dialog (Requirement 2)
+    // ---------------------------------------------------------
+    // Local File Browser Dialog
+    // ---------------------------------------------------------
     if (showLocalFileDialog) {
-        Dialog(onDismissRequest = { showLocalFileDialog = false }) {
-            Box(
-                modifier = Modifier
-                    .width(520.dp)
-                    .height(440.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .border(1.dp, AccentCyan.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
-            ) {
-                Box(
-                    modifier = Modifier
-                        .matchParentSize()
-                        .background(Color(0xCC151B26))
-                        .then(
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                Modifier.blur(20.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
-                            } else Modifier
-                        )
-                )
-                Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text(
-                                text = "Файлы плейлистов (.m3u / .m3u8)",
-                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                                color = TextPrimary
-                            )
-                            Text(
-                                text = "Найдено на флешке и в памяти: ${localFiles.size}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = TextSecondary
-                            )
-                        }
-                        TvFocusCard(
-                            onClick = { showLocalFileDialog = false },
-                            modifier = Modifier.width(110.dp).height(40.dp)
-                        ) {
-                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text("Закрыть", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    if (localFiles.isEmpty()) {
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text(
-                                text = "Файлы .m3u / .m3u8 не найдены на подключенных накопителях.",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = TextSecondary
-                            )
-                        }
-                    } else {
-                        LazyColumn(
-                            modifier = Modifier.fillMaxSize(),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            items(localFiles, key = { it.absolutePath }) { file ->
-                                TvFocusCard(
-                                    onClick = {
-                                        showLocalFileDialog = false
-                                        scope.launch { iptvManager.loadFromLocalFile(file) }
-                                    },
-                                    modifier = Modifier.fillMaxWidth().height(64.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.weight(1f),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Icon(Icons.Outlined.FolderOpen, contentDescription = null, tint = AccentCyan, modifier = Modifier.size(24.dp))
-                                            Spacer(Modifier.width(12.dp))
-                                            Column {
-                                                Text(
-                                                    text = file.name,
-                                                    style = MaterialTheme.typography.titleMedium,
-                                                    color = TextPrimary,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                                Text(
-                                                    text = file.parent ?: "",
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = TextSecondary,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                            }
-                                        }
-                                        Text(
-                                            text = "${file.length() / 1024} КБ",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = AccentCyan
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        SettingsLocalPlaylistDialog(
+            files = localFiles,
+            onSelectFile = { file ->
+                showLocalFileDialog = false
+                scope.launch { iptvManager.loadFromLocalFile(file) }
+            },
+            onDismiss = { showLocalFileDialog = false }
+        )
     }
+
+    // ---------------------------------------------------------
     // URL Edit Dialog (Only opens when user explicitly clicks the URL card)
-    if (editingUrlTarget != null) {
-        val target = editingUrlTarget!!
-        Dialog(onDismissRequest = { editingUrlTarget = null }) {
-            val dialogFocusRequester = remember { FocusRequester() }
-            val clipboardManager = LocalClipboardManager.current
-            val clipboardText = remember { clipboardManager.getText()?.text }
-            val canPaste = remember(clipboardText) {
-                !clipboardText.isNullOrBlank() && (clipboardText.startsWith("http://", ignoreCase = true) || clipboardText.startsWith("https://", ignoreCase = true))
-            }
-
-            Box(
-                modifier = Modifier
-                    .width(620.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .border(1.dp, AccentCyan.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
-            ) {
-                Box(
-                    modifier = Modifier
-                        .matchParentSize()
-                        .background(Color(0xCC151B26))
-                        .then(
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                Modifier.blur(20.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
-                            } else Modifier
-                        )
-                )
-                Column(
-                    modifier = Modifier.padding(24.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Text(
-                        text = if (target == UrlEditTarget.PLAYLIST)
-                            "URL плейлиста (.m3u / .m3u8)"
-                        else
-                            "URL программы передач (.xml / .xml.gz)",
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                        color = TextPrimary
-                    )
-
-                    OutlinedTextField(
-                        value = editingUrlValue,
-                        onValueChange = { editingUrlValue = it },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .focusRequester(dialogFocusRequester),
-                        singleLine = true,
-                        placeholder = {
-                            Text(
-                                if (target == UrlEditTarget.PLAYLIST) "https://example.com/playlist.m3u" else "https://example.com/epg.xml.gz",
-                                color = TextSecondary
-                            )
-                        },
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary,
-                            focusedBorderColor = AccentCyan,
-                            unfocusedBorderColor = DarkSurface,
-                            focusedLabelColor = AccentCyan,
-                            unfocusedLabelColor = TextSecondary,
-                            cursorColor = AccentCyan
-                        )
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        if (canPaste) {
-                            TvFocusCard(
-                                onClick = {
-                                    clipboardText?.let { editingUrlValue = it.trim() }
-                                },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(44.dp)
-                            ) {
-                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    Text("Вставить из буфера", style = MaterialTheme.typography.bodyMedium, color = AccentCyan)
-                                }
-                            }
-                        }
-
-                        if (editingUrlValue.isNotBlank()) {
-                            TvFocusCard(
-                                onClick = { editingUrlValue = "" },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(44.dp)
-                            ) {
-                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    Text("Очистить", style = MaterialTheme.typography.bodyMedium, color = AccentOrange)
-                                }
-                            }
-                        }
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        TvFocusCard(
-                            onClick = {
-                                val clean = editingUrlValue.trim()
-                                if (target == UrlEditTarget.PLAYLIST) {
-                                    iptvPlaylistInput = clean
-                                    iptvManager.saveConfigAndLoad(clean, iptvEpgInput)
-                                } else {
-                                    iptvEpgInput = clean
-                                    iptvManager.saveConfigAndLoad(iptvPlaylistInput, clean)
-                                }
-                                editingUrlTarget = null
-                            },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(48.dp)
-                        ) {
-                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text(
-                                    "Сохранить",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = AccentCyan,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-
-                        TvFocusCard(
-                            onClick = { editingUrlTarget = null },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(48.dp)
-                        ) {
-                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text("Отмена", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
-                            }
-                        }
-                    }
+    // ---------------------------------------------------------
+    val activeUrlTarget = editingUrlTarget
+    if (activeUrlTarget != null) {
+        SettingsUrlEditDialog(
+            target = activeUrlTarget,
+            value = editingUrlValue,
+            onValueChange = { editingUrlValue = it },
+            onSave = { cleanUrl ->
+                if (activeUrlTarget == UrlEditTarget.PLAYLIST) {
+                    iptvPlaylistInput = cleanUrl
+                    iptvManager.saveConfigAndLoad(cleanUrl, iptvEpgInput)
+                } else {
+                    iptvEpgInput = cleanUrl
+                    iptvManager.saveConfigAndLoad(iptvPlaylistInput, cleanUrl)
                 }
-            }
-        }
-    }
-}
-
-private fun getFriendlyChangelog(version: String, rawChangelog: String): List<String> {
-    if (version.contains("1.1.2")) {
-        return listOf(
-            "Телепрограмма: при листании передач вниз и вверх сначала сворачивается предыдущее описание, затем список плавно перематывается наверх к новой передаче и раскрывает её описание.",
-            "Плеер (IPTV): баннер переключения каналов переработан в стиле OSD-перемотки (без рамок, фонов и подсказок навигации, с номером канала).",
-            "Главная: избранные папки можно убрать из избранного долгим нажатием OK.",
-            "Нажатие OK: уменьшена глубина анимации вдавливания карточек при долгом удержании."
+                editingUrlTarget = null
+            },
+            onDismiss = { editingUrlTarget = null }
         )
     }
-
-    if (version.contains("1.1.1")) {
-        return listOf(
-            "Плеер: убрано мигание «+ 0:00» в конце затухания OSD-перемотки; текущее время на таймбаре при перемотке остаётся белым.",
-            "Телепрограмма: при листании передач вверх и вниз выбранная передача сразу поднимается к верху списка без провала вниз.",
-            "Настройки: возвращена классическая полноширинная компоновка, заголовок закреплён наверху, а экран скроллится только тогда, когда курсор доходит до края."
-        )
-    }
-
-    if (version == "1.1" || version.startsWith("1.1.") || version.contains("v1.1")) {
-        return listOf(
-            "Избранное: звёздочки в DLNA и IPTV возвращены внутрь карточек — сжимаются и увеличиваются вместе с плашкой без перехвата курсора, а переключение избранного работает удержанием OK.",
-            "DLNA: шкала прогресса в правой панели отображается и для непросмотренных видео («Не открывался»), постер больше не меняет высоту; исправлено определение формата контейнера (MP4, MKV, AVI вместо Remux/Video/AVC).",
-            "Плеер: при перемотке крупнее отображаются только «+» и «-» со временем без лишних стрелок; в шапке плеера показывается реальное разрешение видео вместо строки источника/звука; в окне аудио и субтитров убрана кнопка «Закрыть»."
-        )
-    }
-
-    if (version.contains("1.0.9")) {
-        return listOf(
-            "Звёздочки избранного (DLNA, IPTV, Главная): переведены в фирменный оранжевый цвет без рамок и фоновых подложек.",
-            "DLNA избранное: исправлена кнопка звёздочки (разделена с открытием папки) и добавлено удержание OK на папке для добавления в избранное без её открытия.",
-            "IPTV архив: вместо текстовых значков «3д/7д» отображается аккуратный оранжевый значок VHS-кассеты.",
-            "Телепрограмма в плеере: убрано дёрганье и провал текущей передачи вниз при открытии — она сразу зафиксирована вверху списка.",
-            "Навигация: убрана кратковременная вспышка иконки «Домик» и прыжок курсора через первый элемент при смене папок DLNA и категорий ТВ."
-        )
-    }
-
-    if (version.contains("1.0.8")) {
-        return listOf(
-            "Свободная навигация с левым меню: нажатие Вправо с любого пункта меню переносит курсор в текущий открытый раздел.",
-            "Сохранность состояния меню: открытие папок DLNA, категорий ТВ, каналов и возврат из корня раздела назад в меню больше не сбрасывают выбранный раздел на «Главная».",
-            "Память позиции в глубоких папках DLNA: при переходе по вложенным папкам и при возврате назад курсор автоматически встаёт на последний открытый или недосмотренный элемент.",
-            "IPTV: плавное восстановление курсора между сеткой категорий и списком каналов с запоминанием последнего канала в категории."
-        )
-    }
-
-    if (version.contains("1.0.7")) {
-        return listOf(
-            "Полная переработка D-pad навигации: удалены все LaunchedEffect/delay костыли фокуса, переход между левым меню и экранами работает строго через focusProperties.",
-            "Левое меню: разделы переключаются только по нажатию OK, проход Вверх/Вниз подсвечивает кнопки с 4 состояниями без переключения экрана, Вправо входит в контент.",
-            "DLNA и IPTV: добавлен встроенный Modifier.focusRestorer() и ключи item.id для автоматической памяти позиции курсора в списках.",
-            "Главная: при нажатии Вправо на избранном канале оранжевый минус открывается мгновенно без фокусных задержек."
-        )
-    }
-
-    if (version.contains("1.0.6")) {
-        return listOf(
-            "Навигация: исправлена потеря/перескок фокуса — при нажатии OK на раздел в левом меню курсор надёжно остаётся на кнопке с чётким откликом нажатия.",
-            "Дизайн: заголовки всех четырёх разделов точно выровнены по видимой высоте логотипа слева.",
-            "ТВ-плеер: ускорено и стабилизировано переключение каналов кнопками Влево / Вправо с мгновенным баннером канала и индикацией буферизации.",
-            "Программа передач: текущая передача с описанием гарантированно открывается в самом верху списка.",
-            "Главная: убран столбец звёзд и проблемный диалог удержания — при наведении на канал и нажатии Вправо справа появляется оранжевый минус для удаления из избранного."
-        )
-    }
-
-    if (version.contains("1.0.5")) {
-        return listOf(
-            "Меню навигации: нажатие OK переключает раздел и оставляет курсор на кнопке меню без скачков и мерцания, переход в контент — по кнопке Вправо; заголовки выровнены по логотипу.",
-            "ТВ-плеер: кнопки Влево / Вправо на пульте переключают предыдущий / следующий канал без выхода в меню.",
-            "Программа передач в плеере: убрана лишняя кнопка «Закрыть», а текущая передача открывается сразу наверху списка.",
-            "Главная: прямо в блоке «Телепрограмма избранных каналов» можно убрать канал из избранного (звёздочкой справа или удержанием OK).",
-            "Плеер: убрана съехавшая вниз тень на кнопке Play/Pause."
-        )
-    }
-
-    if (version.contains("1.0.4")) {
-        return listOf(
-            "Исправлена навигация в ТВ: переход вниз от кнопок «Обновить»/«Настройки ТВ» в папки, фокус сразу на первом канале при открытии категории, кнопка Back возвращает в папки с одного нажатия.",
-            "Убрана лишняя кнопка «Папки» в ТВ, а в DLNA выход по кнопке Back теперь срабатывает мгновенно с первого нажатия.",
-            "Главная: постеры «Продолжить просмотр» получили формат кинопостеров 2:3, а ободок фокуса «Избранные папки» больше не обрезается.",
-            "Настройки: кнопка «Отключить» в фирменном синем стиле, кнопка «Программа обновлена» в оранжевых цветах с обновлённой галочкой, отцентрирован QR-код обратной связи и упрощён блок сбоев."
-        )
-    }
-
-    if (version.contains("1.0.3")) {
-        return listOf(
-            "Срочный фикс меню: исправлено застревание курсора на «Домике» — теперь по меню можно свободно ходить Вверх/Вниз к Настройкам и другим разделам.",
-            "Добавлен точный возврат на активную иконку при выходе Влево из контента.",
-            "Оптимизированы тайминги восстановления фокуса после смены экранов и возврата из диалогов."
-        )
-    }
-
-    if (version.contains("1.0.2")) {
-        return listOf(
-            "Полностью переработана логика фокуса D-pad: курсор сразу виден при старте и сохраняется при переходе в меню, диалоги, плеер и обратно в окно.",
-            "Добавлен новый раздел в настройках «Обратная связь» с контактами разработчика и читаемым QR-кодом поддержки в стиле Re:Player."
-        )
-    }
-
-    if (version.contains("1.0.1")) {
-        return listOf(
-            "Исправлен фокус D-pad через focusRestorer: курсор больше не улетает на Домик при сортировке и возврате из меню.",
-            "Левая панель запоминает активный раздел при выходе Влево и не отпускает курсор мимо.",
-            "Обновлённый анимированный прелоудер при старте приложения.",
-            "Полупрозрачные стеклянные диалоги с размытием (Android 12+), радиальное свечение фона и тень кнопки Play/Pause."
-        )
-    }
-
-    if (version.contains("1.0")) {
-        return listOf(
-            "Стабильный релиз Re:Player v1.0.0: устранены сбои и улёты фокуса D-pad при сортировке и переключении разделов.",
-            "Надёжная ловушка фокуса в панели управления плеером — курсор пульта не уходит за края кнопок.",
-            "Новый анимированный прелоадер при запуске и радиальный градиент главного фона.",
-            "Обновлённые полупрозрачные диалоги с эффектом размытия, свечение кнопки Play/Pause и плавное появление постеров DLNA.",
-            "Полная очистка от устаревших зависимостей и ускорение сборки."
-        )
-    }
-
-    if (version.contains("0.8")) {
-        return listOf(
-            "Стабильная загрузка телепрограммы: авто-маршрутизация CDN для epg.it999.ru и epg.one (исправлен сбой соединения).",
-            "Отдельная кнопка «Обновить EPG» для быстрой загрузки программы передач в один клик.",
-            "Плавный фокус пульта: кнопка обновления удерживает фокус при скачивании и сразу открывает установку.",
-            "Настройки ТВ: ссылки открывают экранную клавиатуру только при нажатии ОК, без ложных открытий при навигации.",
-            "Наглядный прогресс загрузки телепрограммы и плейлистов с процентами.",
-            "Раздел ТВ: категории представлены как папки с сортировкой по времени просмотра и названию."
-        )
-    }
-
-    if (version.contains("0.7")) {
-        return listOf(
-            "Полноценный IPTV плеер: загрузка M3U / M3U8 плейлистов и программы передач EPG (XMLTV, включая .xml.gz архив).",
-            "Главный экран в стиле Android TV: верхняя лента недавнего видео и избранных ТВ-каналов, а также компактные папки DLNA.",
-            "Компактные настройки серверов: аккуратная карточка подключенного DLNA с кнопкой смены сервера.",
-            "Чистый проводник файлов: скрыты лишние технические плашки форматов для быстрого и наглядного выбора видео."
-        )
-    }
-
-    if (version.contains("0.6")) {
-        return listOf(
-            "Глобальная оптимизация и стабильность: проект полностью сфокусирован на молниеносной работе с домашними серверами DLNA / UPnP.",
-            "Надёжный LibVLC: устранены вылеты при закрытии плеера и исправлено переключение звуковых дорожек.",
-            "Плавный фокус пульта: мгновенное и предсказуемое управление кнопками Android TV без потери курсора."
-        )
-    }
-
-    if (version.contains("0.5")) {
-        return listOf(
-            "Полный переход на плеерный движок LibVLC: встроенный нативный FFmpeg гарантирует 100% плавное воспроизведение любых AVI (DivX, Xvid) и идеальную синхронизацию звука.",
-            "Аппаратное и программное декодирование: плавная картинка и чистый звук на любых ТВ без задержек и артефактов.",
-            "Прямое воспроизведение DLNA: мгновенный старт потокового видео с выбором звуковых дорожек и субтитров."
-        )
-    }
-
-    if (version.contains("0.4")) {
-        return listOf(
-            "Точный расчёт времени аудиочанков в AVI: устранена рассинхронизация звука через накопление реального времени сэмплов в ChunkReader.",
-            "Автооткрытие папок: мгновенный доступ к видеофайлам."
-        )
-    }
-
-    val extracted = rawChangelog.lines()
-        .map { it.trim() }
-        .filter { it.startsWith("-") || it.startsWith("*") || (it.length > 2 && it[0].isDigit() && it[1] == '.') }
-        .map { line ->
-            line.removePrefix("-").removePrefix("*").replace(Regex("^\\d+\\.\\s*"), "").trim()
-        }
-        .filter { it.isNotEmpty() && !it.contains("Full Changelog", ignoreCase = true) }
-        .take(5)
-
-    if (extracted.size >= 2) {
-        return extracted
-    }
-
-    return listOf(
-        "Повышена стабильность и плавность воспроизведения видео и звука.",
-        "Улучшена отзывчивость управления пультом Android TV.",
-        "Оптимизирована работа с сетевыми папками и хранилищем."
-    )
 }
 
 private fun getCurrentAppVersion(context: Context): String {

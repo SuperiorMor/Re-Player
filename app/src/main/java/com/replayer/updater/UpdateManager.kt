@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import androidx.core.content.FileProvider
+import com.replayer.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -14,6 +15,11 @@ import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.TimeUnit
 
+enum class UpdateChannel(val prefValue: String, val label: String) {
+    STABLE("stable", "Stable"),
+    BETA("beta", "Beta")
+}
+
 data class ReleaseInfo(
     val tagName: String,
     val versionName: String,
@@ -21,7 +27,8 @@ data class ReleaseInfo(
     val changelog: String,
     val downloadUrl: String,
     val fileName: String,
-    val fileSize: Long
+    val fileSize: Long,
+    val isPrerelease: Boolean = false
 )
 
 sealed class UpdateCheckResult {
@@ -32,6 +39,10 @@ sealed class UpdateCheckResult {
 }
 
 class UpdateManager(private val context: Context) {
+    private val prefs by lazy {
+        context.getSharedPreferences("replayer_prefs", Context.MODE_PRIVATE)
+    }
+
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
@@ -41,6 +52,23 @@ class UpdateManager(private val context: Context) {
 
     private val repoOwner = "SuperiorMor"
     private val repoName = "Re-Player"
+
+    fun getUpdateChannel(): UpdateChannel {
+        val saved = prefs.getString(KEY_UPDATE_CHANNEL, null)
+        return when (saved?.lowercase()) {
+            UpdateChannel.BETA.prefValue -> UpdateChannel.BETA
+            UpdateChannel.STABLE.prefValue -> UpdateChannel.STABLE
+            else -> if (BuildConfig.VERSION_NAME.contains("beta", ignoreCase = true)) {
+                UpdateChannel.BETA
+            } else {
+                UpdateChannel.STABLE
+            }
+        }
+    }
+
+    fun setUpdateChannel(channel: UpdateChannel) {
+        prefs.edit().putString(KEY_UPDATE_CHANNEL, channel.prefValue).apply()
+    }
 
     fun cleanOldUpdates() {
         try {
@@ -56,10 +84,17 @@ class UpdateManager(private val context: Context) {
         }
     }
 
-    suspend fun checkForUpdates(currentVersion: String): UpdateCheckResult = withContext(Dispatchers.IO) {
+    suspend fun checkForUpdates(
+        currentVersion: String,
+        channel: UpdateChannel = getUpdateChannel()
+    ): UpdateCheckResult = withContext(Dispatchers.IO) {
         cleanOldUpdates()
         try {
-            val url = "https://api.github.com/repos/$repoOwner/$repoName/releases/latest"
+            val url = if (channel == UpdateChannel.BETA) {
+                "https://api.github.com/repos/$repoOwner/$repoName/releases?per_page=15"
+            } else {
+                "https://api.github.com/repos/$repoOwner/$repoName/releases/latest"
+            }
             val request = Request.Builder()
                 .url(url)
                 .header("Accept", "application/vnd.github.v3+json")
@@ -71,94 +106,136 @@ class UpdateManager(private val context: Context) {
                 return@withContext UpdateCheckResult.NoReleasesFound
             }
             if (response.code == 403 || !response.isSuccessful) {
-                // Rate limited (403) or API error -> Fallback to web redirect
                 Log.w("UpdateManager", "GitHub API returned ${response.code}, falling back to web release check")
-                return@withContext fetchLatestReleaseViaHtmlFallback(currentVersion)
+                return@withContext fetchLatestReleaseViaHtmlFallback(currentVersion, channel)
             }
 
             val body = response.body?.string()
             if (body.isNullOrBlank()) {
-                return@withContext fetchLatestReleaseViaHtmlFallback(currentVersion)
+                return@withContext fetchLatestReleaseViaHtmlFallback(currentVersion, channel)
             }
 
-            val json = JSONObject(body)
-            val tagName = json.optString("tag_name", "")
-            val cleanVersion = tagName.removePrefix("v").trim()
-            val name = json.optString("name", "Re:Player $tagName")
-            val changelog = json.optString("body", "Список изменений отсутствует")
+            val releaseInfo = if (channel == UpdateChannel.BETA) {
+                pickLatestReleaseFromArray(JSONArray(body))
+            } else {
+                parseReleaseObject(JSONObject(body))
+            } ?: return@withContext UpdateCheckResult.NoReleasesFound
 
-            val assets = json.optJSONArray("assets") ?: JSONArray()
-            var apkUrl: String? = null
-            var apkName = "RePlayer-update.apk"
-            var apkSize = 0L
-
-            for (i in 0 until assets.length()) {
-                val asset = assets.getJSONObject(i)
-                val assetName = asset.optString("name", "")
-                if (assetName.endsWith(".apk", ignoreCase = true)) {
-                    apkUrl = asset.optString("browser_download_url")
-                    apkName = assetName
-                    apkSize = asset.optLong("size", 0L)
-                    break
-                }
-            }
-
-            if (apkUrl.isNullOrEmpty()) {
-                apkName = "RePlayer-$tagName.apk"
-                apkUrl = "https://github.com/$repoOwner/$repoName/releases/download/$tagName/$apkName"
-            }
-
-            val releaseInfo = ReleaseInfo(
-                tagName = tagName,
-                versionName = cleanVersion,
-                title = name,
-                changelog = changelog,
-                downloadUrl = apkUrl,
-                fileName = apkName,
-                fileSize = apkSize
-            )
-
-            if (isNewerVersion(cleanVersion, currentVersion)) {
+            if (isNewerVersion(releaseInfo.versionName, currentVersion)) {
                 UpdateCheckResult.UpdateAvailable(releaseInfo)
             } else {
                 UpdateCheckResult.UpToDate
             }
         } catch (e: Exception) {
             Log.e("UpdateManager", "Check update via API failed, trying web fallback", e)
-            fetchLatestReleaseViaHtmlFallback(currentVersion)
+            fetchLatestReleaseViaHtmlFallback(currentVersion, channel)
         }
     }
 
-    private fun fetchLatestReleaseViaHtmlFallback(currentVersion: String): UpdateCheckResult {
-        return try {
-            val redirectClient = client.newBuilder()
-                .followRedirects(false)
-                .build()
-
-            val webUrl = "https://github.com/$repoOwner/$repoName/releases/latest"
-            val webRequest = Request.Builder()
-                .url(webUrl)
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) RePlayer-TV-App/$currentVersion")
-                .head()
-                .build()
-
-            val webResponse = redirectClient.newCall(webRequest).execute()
-            var targetTag: String? = null
-            val location = webResponse.header("Location")
-            if (!location.isNullOrBlank() && location.contains("/releases/tag/")) {
-                targetTag = location.substringAfterLast("/")
+    private fun pickLatestReleaseFromArray(array: JSONArray): ReleaseInfo? {
+        var best: ReleaseInfo? = null
+        for (i in 0 until array.length()) {
+            val obj = array.optJSONObject(i) ?: continue
+            if (obj.optBoolean("draft", false)) continue
+            val info = parseReleaseObject(obj) ?: continue
+            if (best == null || compareVersions(info.versionName, best.versionName) > 0) {
+                best = info
             }
+        }
+        return best
+    }
 
-            if (targetTag.isNullOrBlank()) {
-                val fullResponse = client.newCall(
+    private fun parseReleaseObject(json: JSONObject): ReleaseInfo? {
+        val tagName = json.optString("tag_name", "").trim()
+        if (tagName.isEmpty()) return null
+        val cleanVersion = tagName.removePrefix("v").trim()
+        val name = json.optString("name", "Re:Player $tagName")
+        val changelog = json.optString("body", "Список изменений отсутствует")
+        val isPrerelease = json.optBoolean("prerelease", false) ||
+            cleanVersion.contains("beta", ignoreCase = true)
+
+        val assets = json.optJSONArray("assets") ?: JSONArray()
+        var apkUrl: String? = null
+        var apkName = "RePlayer-$tagName.apk"
+        var apkSize = 0L
+
+        for (i in 0 until assets.length()) {
+            val asset = assets.getJSONObject(i)
+            val assetName = asset.optString("name", "")
+            if (assetName.endsWith(".apk", ignoreCase = true)) {
+                apkUrl = asset.optString("browser_download_url")
+                apkName = assetName
+                apkSize = asset.optLong("size", 0L)
+                break
+            }
+        }
+
+        if (apkUrl.isNullOrEmpty()) {
+            apkUrl = "https://github.com/$repoOwner/$repoName/releases/download/$tagName/$apkName"
+        }
+
+        return ReleaseInfo(
+            tagName = tagName,
+            versionName = cleanVersion,
+            title = name,
+            changelog = changelog,
+            downloadUrl = apkUrl,
+            fileName = apkName,
+            fileSize = apkSize,
+            isPrerelease = isPrerelease
+        )
+    }
+
+    private fun fetchLatestReleaseViaHtmlFallback(
+        currentVersion: String,
+        channel: UpdateChannel = UpdateChannel.STABLE
+    ): UpdateCheckResult {
+        return try {
+            var targetTag: String? = null
+            if (channel == UpdateChannel.BETA) {
+                val html = client.newCall(
                     Request.Builder()
-                        .url(webUrl)
+                        .url("https://github.com/$repoOwner/$repoName/releases")
                         .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) RePlayer-TV-App/$currentVersion")
                         .build()
-                ).execute()
-                val finalUrl = fullResponse.request.url.toString()
-                if (finalUrl.contains("/releases/tag/")) {
-                    targetTag = finalUrl.substringAfterLast("/")
+                ).execute().body?.string().orEmpty()
+                val matches = Regex("""/$repoOwner/$repoName/releases/tag/(v[^"'?\s<]+)""")
+                    .findAll(html)
+                    .map { it.groupValues[1] }
+                    .distinct()
+                    .toList()
+                targetTag = matches.maxWithOrNull { a, b ->
+                    compareVersions(a.removePrefix("v"), b.removePrefix("v"))
+                }
+            } else {
+                val redirectClient = client.newBuilder()
+                    .followRedirects(false)
+                    .build()
+
+                val webUrl = "https://github.com/$repoOwner/$repoName/releases/latest"
+                val webRequest = Request.Builder()
+                    .url(webUrl)
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) RePlayer-TV-App/$currentVersion")
+                    .head()
+                    .build()
+
+                val webResponse = redirectClient.newCall(webRequest).execute()
+                val location = webResponse.header("Location")
+                if (!location.isNullOrBlank() && location.contains("/releases/tag/")) {
+                    targetTag = location.substringAfterLast("/")
+                }
+
+                if (targetTag.isNullOrBlank()) {
+                    val fullResponse = client.newCall(
+                        Request.Builder()
+                            .url(webUrl)
+                            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) RePlayer-TV-App/$currentVersion")
+                            .build()
+                    ).execute()
+                    val finalUrl = fullResponse.request.url.toString()
+                    if (finalUrl.contains("/releases/tag/")) {
+                        targetTag = finalUrl.substringAfterLast("/")
+                    }
                 }
             }
 
@@ -177,7 +254,8 @@ class UpdateManager(private val context: Context) {
                 changelog = "Обновление доступно для установки",
                 downloadUrl = apkUrl,
                 fileName = apkName,
-                fileSize = 0L
+                fileSize = 0L,
+                isPrerelease = cleanVersion.contains("beta", ignoreCase = true)
             )
 
             if (isNewerVersion(cleanVersion, currentVersion)) {
@@ -267,17 +345,51 @@ class UpdateManager(private val context: Context) {
         }
     }
 
-    fun isNewerVersion(remote: String, current: String): Boolean {
-        val remoteParts = remote.split('.').mapNotNull { it.toIntOrNull() }
-        val currentParts = current.split('.').mapNotNull { it.toIntOrNull() }
+    fun isNewerVersion(remote: String, current: String): Boolean =
+        compareVersions(remote, current) > 0
 
-        val maxLen = maxOf(remoteParts.size, currentParts.size)
+    fun compareVersions(remote: String, current: String): Int {
+        val r = parseSemVer(remote)
+        val c = parseSemVer(current)
+
+        val maxLen = maxOf(r.parts.size, c.parts.size)
         for (i in 0 until maxLen) {
-            val r = remoteParts.getOrElse(i) { 0 }
-            val c = currentParts.getOrElse(i) { 0 }
-            if (r > c) return true
-            if (r < c) return false
+            val rv = r.parts.getOrElse(i) { 0 }
+            val cv = c.parts.getOrElse(i) { 0 }
+            if (rv != cv) return rv.compareTo(cv)
         }
-        return false
+
+        // Stable (isBeta = false) is strictly newer than any beta of the same base version
+        if (!r.isBeta && c.isBeta) return 1
+        if (r.isBeta && !c.isBeta) return -1
+        if (!r.isBeta && !c.isBeta) return 0
+        return r.betaNum.compareTo(c.betaNum)
+    }
+
+    private data class ParsedSemVer(
+        val parts: List<Int>,
+        val isBeta: Boolean,
+        val betaNum: Int
+    )
+
+    private fun parseSemVer(version: String): ParsedSemVer {
+        val clean = version.removePrefix("v").trim()
+        val match = SEMVER_REGEX.matchEntire(clean)
+        if (match != null) {
+            val parts = match.groupValues[1].split('.').mapNotNull { it.toIntOrNull() }
+            val hasBeta = match.groupValues[2].isNotEmpty()
+            val betaNum = match.groupValues[3].toIntOrNull() ?: 0
+            return ParsedSemVer(parts = parts, isBeta = hasBeta, betaNum = betaNum)
+        }
+        val basePart = clean.substringBefore('-')
+        val parts = basePart.split('.').mapNotNull { it.toIntOrNull() }
+        val isBeta = clean.contains("beta", ignoreCase = true)
+        val betaNum = Regex("""\d+$""").find(clean.substringAfter('-', ""))?.value?.toIntOrNull() ?: 0
+        return ParsedSemVer(parts = parts, isBeta = isBeta, betaNum = betaNum)
+    }
+
+    companion object {
+        private const val KEY_UPDATE_CHANNEL = "update_channel"
+        private val SEMVER_REGEX = Regex("""^(\d+(?:\.\d+)*)(-(?:beta|rc|alpha)(?:\.?(\d+))?)?$""", RegexOption.IGNORE_CASE)
     }
 }

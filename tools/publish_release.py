@@ -43,8 +43,10 @@ def main():
         run_cmd(f"git tag -d {tag}")
     run_cmd(f'git tag -a {tag} -m "Release {tag}: {commit_msg}"')
 
-    # 4. Push branch and tag
-    run_cmd("git push origin main")
+    # 4. Push current branch and tag
+    branch_res = subprocess.run("git rev-parse --abbrev-ref HEAD", shell=True, text=True, capture_output=True)
+    current_branch = branch_res.stdout.strip() or "main"
+    run_cmd(f"git push origin {current_branch}")
     run_cmd(f"git push origin {tag} --force")
 
     # 5. Monitor GitHub Actions

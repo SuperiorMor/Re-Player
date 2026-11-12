@@ -358,11 +358,23 @@ object CrashReporter {
 
         val logcatText = if (includeLogcat) readOwnLogcat(250) else ""
 
+        val activeChannel = try {
+            val prefs = appContext?.getSharedPreferences("replayer_prefs", Context.MODE_PRIVATE)
+            val saved = prefs?.getString("update_channel", null)
+            when (saved?.lowercase()) {
+                "beta" -> "BETA"
+                "stable" -> "STABLE"
+                else -> if (BuildConfig.VERSION_NAME.contains("beta", ignoreCase = true)) "BETA" else "STABLE"
+            }
+        } catch (_: Throwable) {
+            "UNKNOWN"
+        }
+
         return buildString {
             appendLine("=== RE:PLAYER CRASH REPORT ===")
             appendLine("Type: $kind")
             appendLine("Time: $dateStr")
-            appendLine("App: ${BuildConfig.VERSION_NAME} (code ${BuildConfig.VERSION_CODE})")
+            appendLine("App: ${BuildConfig.VERSION_NAME} (code ${BuildConfig.VERSION_CODE}, channel $activeChannel)")
             appendLine("Device: ${Build.MANUFACTURER} ${Build.MODEL} (${Build.DEVICE})")
             appendLine("Android: ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})")
             appendLine("ABI: ${Build.SUPPORTED_ABIS.joinToString(", ")}")
