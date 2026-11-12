@@ -13,5 +13,7 @@ data class RePlayerState(
     val subtitleTracks: List<SubtitleTrackInfo> = emptyList(),
     val selectedAudioTrackId: String? = null,
     val selectedSubtitleTrackId: String? = null,
+    val videoWidth: Int = 0,
+    val videoHeight: Int = 0,
     val errorMessage: String? = null
 )

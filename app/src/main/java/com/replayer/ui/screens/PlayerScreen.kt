@@ -578,32 +578,30 @@ fun PlayerScreen(
             exit = fadeOut(tween(240)),
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .padding(top = 64.dp)
+                .padding(top = 56.dp)
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 val isForward = lastSeekDir >= 0
                 val deltaLabel = if (displaySeekDeltaMs != 0L) {
                     formatSignedSeekDelta(displaySeekDeltaMs)
                 } else {
-                    if (isForward) "+0:00" else "-0:00"
+                    if (isForward) "+ 0:00" else "- 0:00"
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = if (isForward) "$deltaLabel  ››" else "‹‹  $deltaLabel",
-                        style = MaterialTheme.typography.displayLarge.copy(
-                            fontSize = 34.sp,
-                            fontWeight = FontWeight.Bold,
-                            shadow = Shadow(
-                                color = Color(0x99000000),
-                                offset = Offset(0f, 2f),
-                                blurRadius = 14f
-                            )
-                        ),
-                        color = if (isForward) AccentCyanBright.copy(alpha = 0.78f) else AccentOrange.copy(alpha = 0.80f)
-                    )
-                }
+                Text(
+                    text = deltaLabel,
+                    style = MaterialTheme.typography.displayLarge.copy(
+                        fontSize = 54.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        shadow = Shadow(
+                            color = Color(0xBB000000),
+                            offset = Offset(0f, 3f),
+                            blurRadius = 18f
+                        )
+                    ),
+                    color = if (isForward) AccentCyanBright.copy(alpha = 0.92f) else AccentOrange.copy(alpha = 0.92f)
+                )
                 if (activeScrubTargetMs >= 0L) {
-                    Spacer(modifier = Modifier.height(2.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
                     val targetSub = if (!isIptv && playerState.durationMs > 0L) {
                         "${formatTime(activeScrubTargetMs)}  /  ${formatTime(playerState.durationMs)}"
                     } else {
@@ -612,15 +610,15 @@ fun PlayerScreen(
                     Text(
                         text = targetSub,
                         style = MaterialTheme.typography.titleMedium.copy(
-                            fontSize = 15.sp,
+                            fontSize = 22.sp,
                             fontWeight = FontWeight.SemiBold,
                             shadow = Shadow(
-                                color = Color(0x99000000),
-                                offset = Offset(0f, 1f),
-                                blurRadius = 10f
+                                color = Color(0xBB000000),
+                                offset = Offset(0f, 2f),
+                                blurRadius = 14f
                             )
                         ),
-                        color = Color.White.copy(alpha = 0.56f)
+                        color = Color.White.copy(alpha = 0.80f)
                     )
                 }
             }
@@ -825,19 +823,22 @@ fun PlayerScreen(
                     )
                     .padding(horizontal = 48.dp, vertical = 32.dp)
             ) {
-                // Top Bar: Title & Source & Active Audio Track
+                // Top Bar: Title & Video Resolution
                 Column(modifier = Modifier.align(Alignment.TopStart)) {
                     Text(
                         text = playerState.currentMediaTitle.ifEmpty { mediaItem.title },
                         style = MaterialTheme.typography.titleLarge,
                         color = TextPrimary
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    val selectedAudio = playerState.audioTracks.find { it.id == playerState.selectedAudioTrackId }
-                    val audioInfo = selectedAudio?.let { " • Звук: ${it.label}" } ?: ""
-                    if (!isIptv) {
+                    val resolutionText = if (playerState.videoWidth > 0 && playerState.videoHeight > 0) {
+                        "${playerState.videoWidth}x${playerState.videoHeight}"
+                    } else {
+                        mediaItem.resolution?.trim()?.takeIf { it.isNotEmpty() && !it.equals("null", ignoreCase = true) }
+                    }
+                    if (!resolutionText.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "Источник: ${mediaItem.sourceType.name}$audioInfo",
+                            text = resolutionText,
                             style = MaterialTheme.typography.bodyMedium,
                             color = AccentCyanBright
                         )
@@ -1176,7 +1177,7 @@ private fun formatTime(ms: Long): String {
 }
 
 private fun formatSignedSeekDelta(deltaMs: Long): String {
-    val sign = if (deltaMs >= 0L) "+" else "-"
+    val sign = if (deltaMs >= 0L) "+ " else "- "
     val totalSec = abs(deltaMs) / 1000L
     val sec = totalSec % 60L
     val min = (totalSec / 60L) % 60L

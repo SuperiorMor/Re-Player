@@ -74,7 +74,7 @@ class RePlayerEngine(private val context: Context) {
                         _playerState.value = _playerState.value.copy(durationMs = event.lengthChanged)
                         updateTracks()
                     }
-                    MediaPlayer.Event.ESAdded, MediaPlayer.Event.ESDeleted, MediaPlayer.Event.ESSelected -> {
+                    MediaPlayer.Event.ESAdded, MediaPlayer.Event.ESDeleted, MediaPlayer.Event.ESSelected, MediaPlayer.Event.Vout -> {
                         updateTracks()
                     }
                     MediaPlayer.Event.EncounteredError -> {
@@ -120,7 +120,9 @@ class RePlayerEngine(private val context: Context) {
             audioTracks = emptyList(),
             subtitleTracks = emptyList(),
             selectedAudioTrackId = null,
-            selectedSubtitleTrackId = null
+            selectedSubtitleTrackId = null,
+            videoWidth = 0,
+            videoHeight = 0
         )
         if (mediaItem.uri.isBlank()) {
             _playerState.value = _playerState.value.copy(
@@ -293,11 +295,17 @@ class RePlayerEngine(private val context: Context) {
                 )
             }
 
+            val videoTrack = try { mediaPlayer.currentVideoTrack } catch (_: Throwable) { null }
+            val vWidth = if (videoTrack != null && videoTrack.width > 0) videoTrack.width else _playerState.value.videoWidth
+            val vHeight = if (videoTrack != null && videoTrack.height > 0) videoTrack.height else _playerState.value.videoHeight
+
             _playerState.value = _playerState.value.copy(
                 audioTracks = audioList,
                 subtitleTracks = subList,
                 selectedAudioTrackId = if (currentAudioId != -1) currentAudioId.toString() else null,
-                selectedSubtitleTrackId = if (currentSpuId != -1) currentSpuId.toString() else null
+                selectedSubtitleTrackId = if (currentSpuId != -1) currentSpuId.toString() else null,
+                videoWidth = vWidth,
+                videoHeight = vHeight
             )
         } catch (_: Throwable) {}
     }
@@ -310,10 +318,18 @@ class RePlayerEngine(private val context: Context) {
                 try {
                     val t = mediaPlayer.time
                     val len = mediaPlayer.length
-                    if (t >= 0) {
-                        _playerState.value = _playerState.value.copy(
-                            currentPositionMs = t,
-                            durationMs = if (len > 0) len else _playerState.value.durationMs
+                    val curState = _playerState.value
+                    val videoTrack = if (curState.videoWidth == 0 || curState.videoHeight == 0) {
+                        try { mediaPlayer.currentVideoTrack } catch (_: Throwable) { null }
+                    } else null
+                    val vWidth = if (videoTrack != null && videoTrack.width > 0) videoTrack.width else curState.videoWidth
+                    val vHeight = if (videoTrack != null && videoTrack.height > 0) videoTrack.height else curState.videoHeight
+                    if (t >= 0 || (vWidth > 0 && vWidth != curState.videoWidth)) {
+                        _playerState.value = curState.copy(
+                            currentPositionMs = if (t >= 0) t else curState.currentPositionMs,
+                            durationMs = if (len > 0) len else curState.durationMs,
+                            videoWidth = vWidth,
+                            videoHeight = vHeight
                         )
                     }
                 } catch (_: Throwable) {}

@@ -103,6 +103,7 @@ fun EpgAccordionDialog(
     }
     val initialIndex = currentProgIndex.coerceAtLeast(0)
     var focusedIndex by remember { mutableIntStateOf(initialIndex) }
+    var hasUserNavigated by remember { mutableStateOf(false) }
     var isInitialSettled by remember { mutableStateOf(programs.isEmpty()) }
     val initialFocusRequester = remember { FocusRequester() }
     val listState = rememberLazyListState(
@@ -113,6 +114,7 @@ fun EpgAccordionDialog(
     LaunchedEffect(initialIndex, programs.size) {
         if (programs.isNotEmpty()) {
             isInitialSettled = false
+            hasUserNavigated = false
             focusedIndex = initialIndex
             try {
                 listState.scrollToItem(initialIndex, 0)
@@ -132,24 +134,14 @@ fun EpgAccordionDialog(
         }
     }
 
-    // Ensure newly expanded accordion item's description is never clipped below the viewport
+    // Always bring whichever program the user highlights up to the top of the list cleanly
     LaunchedEffect(focusedIndex, isInitialSettled) {
-        if (!isInitialSettled || focusedIndex == initialIndex) {
+        if (!isInitialSettled || (!hasUserNavigated && focusedIndex == initialIndex)) {
             return@LaunchedEffect
         }
-        delay(235)
+        delay(140)
         try {
-            val visibleInfo = listState.layoutInfo.visibleItemsInfo.find { it.index == focusedIndex }
-            val viewportEnd = listState.layoutInfo.viewportEndOffset
-            val viewportStart = listState.layoutInfo.viewportStartOffset
-            val viewportHeight = viewportEnd - viewportStart
-            if (visibleInfo != null && (visibleInfo.offset + visibleInfo.size) > viewportEnd) {
-                val targetTopOffset = -(viewportHeight - visibleInfo.size).coerceAtLeast(0)
-                listState.animateScrollToItem(
-                    index = focusedIndex,
-                    scrollOffset = targetTopOffset
-                )
-            }
+            listState.animateScrollToItem(index = focusedIndex, scrollOffset = 0)
         } catch (_: Exception) {}
     }
 
@@ -286,6 +278,9 @@ fun EpgAccordionDialog(
                                     }
                                     .onFocusChanged { focusState ->
                                         if (focusState.isFocused) {
+                                            if (isInitialSettled && focusedIndex != index) {
+                                                hasUserNavigated = true
+                                            }
                                             focusedIndex = index
                                         } else {
                                             isKeyPressed = false

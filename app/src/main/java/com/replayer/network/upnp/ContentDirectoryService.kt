@@ -5,6 +5,7 @@ import android.util.Xml
 import com.replayer.model.MediaItem
 import com.replayer.model.MediaSourceType
 import com.replayer.model.MediaType
+import com.replayer.model.resolveMediaContainerFormat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -287,9 +288,6 @@ class ContentDirectoryService {
                         fun hasAnyExt(vararg exts: String): Boolean =
                             exts.any { titleLower.endsWith(it) || resLower.endsWith(it) }
 
-                        val ext = title.substringAfterLast('.', "").uppercase()
-                        val format = if (ext.isNotEmpty() && ext.length <= 5) ext else null
-
                         val mediaType = when {
                             isContainer -> MediaType.DIRECTORY
                             upnpClass.contains("imageItem", ignoreCase = true) ||
@@ -308,6 +306,13 @@ class ContentDirectoryService {
                             else -> MediaType.UNKNOWN
                         }
 
+                        val resolvedFormat = resolveMediaContainerFormat(
+                            title = title,
+                            uri = res,
+                            mimeOrProto = proto,
+                            type = mediaType
+                        )
+
                         items.add(
                             MediaItem(
                                 id = id,
@@ -316,10 +321,11 @@ class ContentDirectoryService {
                                 type = mediaType,
                                 sourceType = MediaSourceType.UPNP_DLNA,
                                 size = size,
+                                mimeType = proto.ifBlank { null },
                                 thumbnailUrl = albumArt,
                                 parentId = itemParentId,
                                 dateAdded = date,
-                                format = format,
+                                format = resolvedFormat,
                                 resolution = resolution
                             )
                         )
