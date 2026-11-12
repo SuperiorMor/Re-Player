@@ -37,6 +37,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -76,13 +77,13 @@ private sealed class UpdateUiState {
 }
 
 @OptIn(ExperimentalFoundationApi::class)
-private val EdgeOnlyBringIntoViewSpec = object : BringIntoViewSpec {
+private fun createEdgeOnlyBringIntoViewSpec(marginPx: Float): BringIntoViewSpec = object : BringIntoViewSpec {
     override fun calculateScrollDistance(
         offset: Float,
         size: Float,
         containerSize: Float
     ): Float {
-        val margin = (containerSize * 0.04f).coerceIn(12f, 36f)
+        val margin = marginPx.coerceAtMost(containerSize * 0.15f)
         val leadingEdge = offset
         val trailingEdge = offset + size
         return when {
@@ -256,13 +257,18 @@ fun SettingsScreen(
             modifier = Modifier.padding(bottom = 18.dp)
         )
 
-        CompositionLocalProvider(LocalBringIntoViewSpec provides EdgeOnlyBringIntoViewSpec) {
+        val density = LocalDensity.current
+        val edgeOnlyBringIntoViewSpec = remember(density) {
+            createEdgeOnlyBringIntoViewSpec(with(density) { 24.dp.toPx() })
+        }
+
+        CompositionLocalProvider(LocalBringIntoViewSpec provides edgeOnlyBringIntoViewSpec) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
                     .verticalScroll(rememberScrollState())
-                    .padding(bottom = 16.dp)
+                    .padding(bottom = 24.dp)
             ) {
 
         // ---------------------------------------------------------

@@ -2,9 +2,12 @@ package com.replayer.ui.components
 
 import android.os.Build
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -47,6 +50,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
@@ -72,6 +76,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun DiagnosticsSection(
     leftFocusRequester: FocusRequester? = null
@@ -83,9 +88,18 @@ fun DiagnosticsSection(
     var actionFeedback by remember { mutableStateOf<String?>(null) }
     var showLogsDialog by remember { mutableStateOf(false) }
     val journalFocusRequester = remember { FocusRequester() }
+    val cardBringIntoViewRequester = remember { BringIntoViewRequester() }
+    var isCardFocused by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         CrashReporter.refreshReportsList()
+    }
+
+    // Ensure the full card (including its bottom padding) scrolls into view, not just the 44.dp inner button.
+    LaunchedEffect(isCardFocused, actionFeedback) {
+        if (isCardFocused) {
+            cardBringIntoViewRequester.bringIntoView()
+        }
     }
 
     val totalCount = reports.size
@@ -104,6 +118,8 @@ fun DiagnosticsSection(
     Box(
         modifier = Modifier
             .fillMaxWidth()
+            .bringIntoViewRequester(cardBringIntoViewRequester)
+            .onFocusChanged { isCardFocused = it.hasFocus }
             .clip(RoundedCornerShape(12.dp))
             .background(DarkCard)
             .padding(horizontal = 20.dp, vertical = 18.dp)
