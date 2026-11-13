@@ -105,6 +105,7 @@ fun HomeScreen(
     }
 
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var showVasilisaDialog by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         while (isActive) {
             delay(30_000L)
@@ -118,8 +119,6 @@ fun HomeScreen(
             .verticalScroll(rememberScrollState())
             .padding(start = 28.dp, end = 28.dp, top = 42.dp, bottom = 18.dp)
     ) {
-        var showVasilisaDialog by remember { mutableStateOf(false) }
-
         // -------------------------------------------------------------
         // САМОЕ ВИДНОЕ МЕСТО: ВАСИЛИСИНА ОЦЕНКА
         // -------------------------------------------------------------
