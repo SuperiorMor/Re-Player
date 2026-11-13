@@ -60,6 +60,8 @@ import com.replayer.model.EpgProgram
 import com.replayer.model.FavoriteFolder
 import com.replayer.model.IptvChannel
 import com.replayer.model.MediaItem
+import com.replayer.ui.components.VasilisaRatingBanner
+import com.replayer.ui.components.VasilisaReviewDialog
 import com.replayer.ui.theme.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -116,6 +118,19 @@ fun HomeScreen(
             .verticalScroll(rememberScrollState())
             .padding(start = 28.dp, end = 28.dp, top = 42.dp, bottom = 18.dp)
     ) {
+        var showVasilisaDialog by remember { mutableStateOf(false) }
+
+        // -------------------------------------------------------------
+        // САМОЕ ВИДНОЕ МЕСТО: ВАСИЛИСИНА ОЦЕНКА
+        // -------------------------------------------------------------
+        VasilisaRatingBanner(
+            focusRequester = firstItemFocusRequester,
+            leftFocusRequester = navMenuFocusRequester,
+            onClick = { showVasilisaDialog = true }
+        )
+
+        Spacer(modifier = Modifier.height(18.dp))
+
         // -------------------------------------------------------------
         // ВЕРХНИЙ БЛОК: СЛЕВА ПОСТЕРЫ (2:3) | СПРАВА «ИЗБРАННЫЕ ПАПКИ» ДО КРАЯ ЭКРАНА
         // (Выровнен по видимой графике левого логотипа: y ≈ 44..71dp)
@@ -151,7 +166,6 @@ fun HomeScreen(
                             .then(
                                 if (allHomeShelvesEmpty) {
                                     Modifier
-                                        .focusRequester(firstItemFocusRequester)
                                         .focusProperties { left = navMenuFocusRequester }
                                         .focusable()
                                 } else Modifier
@@ -193,9 +207,7 @@ fun HomeScreen(
                                     .aspectRatio(2f / 3f, matchHeightConstraintsFirst = true)
                                     .then(
                                         if (idx == 0) {
-                                            Modifier
-                                                .focusRequester(firstItemFocusRequester)
-                                                .focusProperties { left = navMenuFocusRequester }
+                                            Modifier.focusProperties { left = navMenuFocusRequester }
                                         } else Modifier
                                     )
                             ) { isFocused ->
@@ -397,9 +409,7 @@ fun HomeScreen(
                                         .fillMaxHeight()
                                         .then(
                                             if (recentPosters.isEmpty() && idx == 0) {
-                                                Modifier
-                                                    .focusRequester(firstItemFocusRequester)
-                                                    .focusProperties { left = navMenuFocusRequester }
+                                                Modifier.focusProperties { left = navMenuFocusRequester }
                                             } else Modifier
                                         )
                                 ) { _ ->
@@ -511,19 +521,26 @@ fun HomeScreen(
                 }
             }
         } else {
-            val hasUpperShelf = recentPosters.isNotEmpty() || favorites.isNotEmpty()
+            val hasUpperShelf = true
+            val guideFirstFocusRequester = remember { FocusRequester() }
             GoogleTvLiveGuide(
                 favoriteChannels = favoriteChannels,
                 epgMap = epgMap,
                 iptvManager = iptvManager,
                 nowMs = nowMs,
-                firstItemFocusRequester = firstItemFocusRequester,
+                firstItemFocusRequester = guideFirstFocusRequester,
                 navMenuFocusRequester = navMenuFocusRequester,
                 hasUpperShelf = hasUpperShelf,
                 onPlayChannel = { ch -> onPlayChannel(ch, favoriteChannels) },
                 onRemoveFavorite = { ch -> iptvManager.toggleFavorite(ch.id) }
             )
         }
+    }
+
+    if (showVasilisaDialog) {
+        VasilisaReviewDialog(
+            onDismiss = { showVasilisaDialog = false }
+        )
     }
 }
 
