@@ -772,36 +772,6 @@ fun UpnpBrowseScreen(
                     )
                 }
             }
-
-            if (isLoadingFolder) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.48f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(DarkCard)
-                            .border(1.dp, BorderSubtle, RoundedCornerShape(14.dp))
-                            .padding(horizontal = 24.dp, vertical = 16.dp)
-                    ) {
-                        CircularProgressIndicator(
-                            color = AccentCyan,
-                            strokeWidth = 2.5.dp,
-                            modifier = Modifier.size(22.dp)
-                        )
-                        Spacer(modifier = Modifier.width(14.dp))
-                        Text(
-                            text = "Загрузка содержимого...",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = TextPrimary
-                        )
-                    }
-                }
-            }
         }
     }
 }

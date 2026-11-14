@@ -162,9 +162,13 @@ class MainActivity : ComponentActivity() {
                                         activeMediaItem = mediaItem
                                     },
                                     onPlayChannel = { channel, channelList ->
+                                        lastPlayedMediaId = channel.id
                                         activePlaylist = channelList.map { it.toMediaItem() }.ifEmpty { listOf(channel.toMediaItem()) }
                                         activeMediaItem = channel.toMediaItem()
-                                    }
+                                    },
+                                    lastPlayedMediaId = lastPlayedMediaId,
+                                    isPlayerActive = (activeMediaItem != null),
+                                    onConsumeLastPlayedMediaId = { lastPlayedMediaId = null }
                                 )
                                 NavItem.UPNP -> UpnpBrowseScreen(
                                     firstItemFocusRequester = upnpFirstItemFocus,
@@ -228,12 +232,17 @@ class MainActivity : ComponentActivity() {
                         PlayerScreen(
                             mediaItem = activeMediaItem!!,
                             playlist = activePlaylist,
-                            onPlayMediaItem = { activeMediaItem = it },
+                            onPlayMediaItem = { newItem ->
+                                lastPlayedMediaId = newItem.id
+                                activeMediaItem = newItem
+                            },
                             onBack = {
                                 activeMediaItem = null
-                                try {
-                                    activeScreenFocusRequester.requestFocus()
-                                } catch (_: Exception) {}
+                                if (selectedNav != NavItem.HOME && selectedNav != NavItem.UPNP) {
+                                    try {
+                                        activeScreenFocusRequester.requestFocus()
+                                    } catch (_: Exception) {}
+                                }
                             }
                         )
                     }

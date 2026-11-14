@@ -699,33 +699,33 @@ fun PlayerScreen(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Text(
                             text = "${info.index}/${info.total}",
-                            style = MaterialTheme.typography.displayLarge.copy(
-                                fontSize = 36.sp,
-                                fontWeight = FontWeight.ExtraBold,
+                            style = MaterialTheme.typography.titleLarge.copy(
+                                fontSize = 22.sp,
+                                fontWeight = FontWeight.Bold,
                                 shadow = Shadow(
                                     color = Color(0xBB000000),
-                                    offset = Offset(0f, 3f),
-                                    blurRadius = 18f
+                                    offset = Offset(0f, 2f),
+                                    blurRadius = 12f
                                 )
                             ),
-                            color = AccentOrange.copy(alpha = 0.94f)
+                            color = AccentCyan.copy(alpha = 0.90f)
                         )
                         Text(
                             text = info.title,
-                            style = MaterialTheme.typography.displayLarge.copy(
-                                fontSize = 44.sp,
-                                fontWeight = FontWeight.ExtraBold,
+                            style = MaterialTheme.typography.headlineMedium.copy(
+                                fontSize = 26.sp,
+                                fontWeight = FontWeight.Bold,
                                 shadow = Shadow(
                                     color = Color(0xBB000000),
-                                    offset = Offset(0f, 3f),
-                                    blurRadius = 18f
+                                    offset = Offset(0f, 2f),
+                                    blurRadius = 14f
                                 )
                             ),
-                            color = AccentCyanBright.copy(alpha = 0.94f),
+                            color = AccentCyanBright,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f, fill = false)
@@ -733,28 +733,28 @@ fun PlayerScreen(
                         if (playerState.isBuffering && zapPreviewItem == null) {
                             CircularProgressIndicator(
                                 color = AccentCyanBright,
-                                strokeWidth = 2.5.dp,
-                                modifier = Modifier.size(22.dp)
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }
                     if (!info.programTitle.isNullOrBlank()) {
-                        Spacer(modifier = Modifier.height(6.dp))
+                        Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             text = buildString {
                                 if (!info.timeRange.isNullOrBlank()) append("${info.timeRange}  •  ")
                                 append(info.programTitle)
                             },
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontSize = 21.sp,
-                                fontWeight = FontWeight.SemiBold,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Medium,
                                 shadow = Shadow(
                                     color = Color(0xBB000000),
                                     offset = Offset(0f, 2f),
-                                    blurRadius = 14f
+                                    blurRadius = 10f
                                 )
                             ),
-                            color = Color.White.copy(alpha = 0.84f),
+                            color = Color.White.copy(alpha = 0.88f),
                             textAlign = TextAlign.Center,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis

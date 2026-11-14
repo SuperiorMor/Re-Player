@@ -60,8 +60,6 @@ import com.replayer.model.EpgProgram
 import com.replayer.model.FavoriteFolder
 import com.replayer.model.IptvChannel
 import com.replayer.model.MediaItem
-import com.replayer.ui.components.VasilisaRatingBanner
-import com.replayer.ui.components.VasilisaReviewDialog
 import com.replayer.ui.theme.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -77,6 +75,9 @@ fun HomeScreen(
     onOpenFavorite: (FavoriteFolder) -> Unit,
     onPlayMedia: (MediaItem) -> Unit,
     onPlayChannel: (IptvChannel, List<IptvChannel>) -> Unit,
+    lastPlayedMediaId: String? = null,
+    isPlayerActive: Boolean = false,
+    onConsumeLastPlayedMediaId: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -94,6 +95,29 @@ fun HomeScreen(
     val watchTimes by iptvManager.watchTimes.collectAsState()
     val epgMap by iptvManager.epgMap.collectAsState()
 
+    val channelFocusRequesters = remember { mutableStateMapOf<String, FocusRequester>() }
+    val recentFocusRequesters = remember { mutableStateMapOf<String, FocusRequester>() }
+    var hadPlayerActive by remember { mutableStateOf(false) }
+
+    LaunchedEffect(isPlayerActive, lastPlayedMediaId) {
+        if (hadPlayerActive && !isPlayerActive && !lastPlayedMediaId.isNullOrBlank()) {
+            val targetReq = channelFocusRequesters[lastPlayedMediaId]
+                ?: recentFocusRequesters[lastPlayedMediaId]
+            if (targetReq != null) {
+                repeat(10) {
+                    withFrameNanos { }
+                    if (runCatching { targetReq.requestFocus() }.isSuccess) {
+                        onConsumeLastPlayedMediaId?.invoke()
+                        hadPlayerActive = false
+                        return@LaunchedEffect
+                    }
+                }
+            }
+            onConsumeLastPlayedMediaId?.invoke()
+        }
+        hadPlayerActive = isPlayerActive
+    }
+
     val favoriteChannels = remember(channels, favoriteChannelIds, watchTimes) {
         iptvManager.getFavoriteChannels()
     }
@@ -105,7 +129,6 @@ fun HomeScreen(
     }
 
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    var showVasilisaDialog by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         while (isActive) {
             delay(30_000L)
@@ -119,16 +142,6 @@ fun HomeScreen(
             .verticalScroll(rememberScrollState())
             .padding(start = 28.dp, end = 28.dp, top = 42.dp, bottom = 18.dp)
     ) {
-        // -------------------------------------------------------------
-        // САМОЕ ВИДНОЕ МЕСТО: ВАСИЛИСИНА ОЦЕНКА
-        // -------------------------------------------------------------
-        VasilisaRatingBanner(
-            focusRequester = firstItemFocusRequester,
-            leftFocusRequester = navMenuFocusRequester,
-            onClick = { showVasilisaDialog = true }
-        )
-
-        Spacer(modifier = Modifier.height(18.dp))
 
         // -------------------------------------------------------------
         // ВЕРХНИЙ БЛОК: СЛЕВА ПОСТЕРЫ (2:3) | СПРАВА «ИЗБРАННЫЕ ПАПКИ» ДО КРАЯ ЭКРАНА
@@ -165,6 +178,7 @@ fun HomeScreen(
                             .then(
                                 if (allHomeShelvesEmpty) {
                                     Modifier
+                                        .focusRequester(firstItemFocusRequester)
                                         .focusProperties { left = navMenuFocusRequester }
                                         .focusable()
                                 } else Modifier
@@ -198,6 +212,10 @@ fun HomeScreen(
                                     ?: progressMap[recent.uri]?.progress()
                                     ?: recent.progress()).coerceIn(0f, 1f)
                             }
+                            val recentReq = remember(recent.id) { FocusRequester() }
+                            SideEffect {
+                                recentFocusRequesters[recent.id] = if (idx == 0) firstItemFocusRequester else recentReq
+                            }
 
                             HomeShelfFocusCard(
                                 onClick = { onPlayMedia(recent.toMediaItem()) },
@@ -206,8 +224,12 @@ fun HomeScreen(
                                     .aspectRatio(2f / 3f, matchHeightConstraintsFirst = true)
                                     .then(
                                         if (idx == 0) {
-                                            Modifier.focusProperties { left = navMenuFocusRequester }
-                                        } else Modifier
+                                            Modifier
+                                                .focusRequester(firstItemFocusRequester)
+                                                .focusProperties { left = navMenuFocusRequester }
+                                        } else {
+                                            Modifier.focusRequester(recentReq)
+                                        }
                                     )
                             ) { isFocused ->
                                 Box(modifier = Modifier.fillMaxSize()) {
@@ -408,7 +430,9 @@ fun HomeScreen(
                                         .fillMaxHeight()
                                         .then(
                                             if (recentPosters.isEmpty() && idx == 0) {
-                                                Modifier.focusProperties { left = navMenuFocusRequester }
+                                                Modifier
+                                                    .focusRequester(firstItemFocusRequester)
+                                                    .focusProperties { left = navMenuFocusRequester }
                                             } else Modifier
                                         )
                                 ) { _ ->
@@ -520,26 +544,20 @@ fun HomeScreen(
                 }
             }
         } else {
-            val hasUpperShelf = true
-            val guideFirstFocusRequester = remember { FocusRequester() }
+            val hasUpperShelf = recentPosters.isNotEmpty() || favorites.isNotEmpty()
             GoogleTvLiveGuide(
                 favoriteChannels = favoriteChannels,
                 epgMap = epgMap,
                 iptvManager = iptvManager,
                 nowMs = nowMs,
-                firstItemFocusRequester = guideFirstFocusRequester,
+                firstItemFocusRequester = firstItemFocusRequester,
                 navMenuFocusRequester = navMenuFocusRequester,
                 hasUpperShelf = hasUpperShelf,
+                channelFocusRequesters = channelFocusRequesters,
                 onPlayChannel = { ch -> onPlayChannel(ch, favoriteChannels) },
                 onRemoveFavorite = { ch -> iptvManager.toggleFavorite(ch.id) }
             )
         }
-    }
-
-    if (showVasilisaDialog) {
-        VasilisaReviewDialog(
-            onDismiss = { showVasilisaDialog = false }
-        )
     }
 }
 
@@ -610,6 +628,7 @@ private fun GoogleTvLiveGuide(
     firstItemFocusRequester: FocusRequester,
     navMenuFocusRequester: FocusRequester,
     hasUpperShelf: Boolean,
+    channelFocusRequesters: MutableMap<String, FocusRequester>? = null,
     onPlayChannel: (IptvChannel) -> Unit,
     onRemoveFavorite: (IptvChannel) -> Unit
 ) {
@@ -728,6 +747,7 @@ private fun GoogleTvLiveGuide(
                     }
                     SideEffect {
                         rowRequesters[channel.id] = rowFocusReq
+                        channelFocusRequesters?.put(channel.id, rowFocusReq)
                     }
 
                     val rowInteractionSource = remember { MutableInteractionSource() }
