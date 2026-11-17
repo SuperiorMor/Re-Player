@@ -184,7 +184,6 @@ class RecentMediaManager private constructor(context: Context) {
 
             val resolvedThumb = thumbnailUrl?.ifBlank { null }
                 ?: sameExact?.thumbnailUrl?.ifBlank { null }
-                ?: sameFolder?.thumbnailUrl?.ifBlank { null }
 
             // Deduplicate: keep only ONE entry per folder (or per item if parentId unknown)
             current.removeAll { item ->
@@ -220,7 +219,7 @@ class RecentMediaManager private constructor(context: Context) {
             val cleanParent = parentId?.ifBlank { null }
             for (i in current.indices) {
                 val item = current[i]
-                if (item.id == id || item.uri == uri || (cleanParent != null && item.parentId == cleanParent)) {
+                if (item.id == id || item.uri == uri) {
                     if (item.thumbnailUrl != thumbnailUrl) {
                         current[i] = item.copy(thumbnailUrl = thumbnailUrl)
                         changed = true
@@ -288,7 +287,7 @@ class RecentMediaManager private constructor(context: Context) {
                 MediaType.VIDEO, MediaType.UNKNOWN -> {
                     // Instant reuse if already resolved for Continue Watching
                     val fromRecent = _recentList.value.firstOrNull {
-                        (it.id == item.id || it.uri == item.uri || (!item.parentId.isNullOrBlank() && it.parentId == item.parentId)) &&
+                        (it.id == item.id || it.uri == item.uri) &&
                             !it.thumbnailUrl.isNullOrBlank()
                     }?.thumbnailUrl
                     if (!fromRecent.isNullOrBlank()) {
@@ -413,184 +412,14 @@ class RecentMediaManager private constructor(context: Context) {
         controlUrl: String?,
         folderTitle: String?
     ): String? {
-        // 1. Local image inside the current folder
-        findVerticalPosterInList(targetItem, folderItems)?.let { return it }
-
-        // 2. Fallback: server-provided albumArtURI on the video item itself
+        // 1. Direct server-provided albumArtURI on the video item itself (if provided directly by DLNA server)
         val art = targetItem.thumbnailUrl
         if (!art.isNullOrBlank() && isVerticalImage(art, null)) {
             return art
         }
 
-        // 3. DLNA servers like MiniDLNA/Keenetic hide images inside "Video" folders, placing the same
-        // folder under "Pictures/Изображения" instead. Search the DLNA server across image branches!
-        if (!controlUrl.isNullOrBlank()) {
-            findPosterAcrossUpnpServer(
-                controlUrl = controlUrl,
-                targetItem = targetItem,
-                folderTitle = folderTitle
-            )?.let { return it }
-        }
-
-        // 4. Last-resort fallback: vertical poster via TVMaze / iTunes by clean title
+        // 2. Fallback: fetch clean vertical poster online (Kinopoisk / TVMaze / iTunes / OMDb)
         return findOnlineVerticalPoster(folderTitle, targetItem.title)
-    }
-
-    private fun findVerticalPosterInList(targetItem: MediaItem, folderItems: List<MediaItem>): String? {
-        if (folderItems.isEmpty()) return null
-        val videoStem = targetItem.title.substringBeforeLast('.').lowercase().trim()
-        val images = folderItems
-            .filter { item ->
-                item.uri.isNotBlank() && item.type != MediaType.DIRECTORY && (
-                    item.type == MediaType.IMAGE ||
-                    isLikelyImageByNameOrUri(item.title, item.uri)
-                )
-            }
-            .sortedBy { img ->
-                val imgStem = img.title.substringBeforeLast('.').lowercase().trim()
-                when {
-                    imgStem == videoStem -> 0
-                    imgStem.contains("poster") || imgStem.contains("cover") || imgStem == "folder" -> 1
-                    else -> 2
-                }
-            }
-
-        for (img in images) {
-            if (isVerticalImage(img.uri, img.resolution)) {
-                return img.uri
-            }
-        }
-
-        // Also check sub-folder/container albumArt if present
-        for (item in folderItems) {
-            val itemArt = item.thumbnailUrl
-            if (!itemArt.isNullOrBlank() && isVerticalImage(itemArt, null)) {
-                return itemArt
-            }
-        }
-        return null
-    }
-
-    private suspend fun findPosterAcrossUpnpServer(
-        controlUrl: String,
-        targetItem: MediaItem,
-        folderTitle: String?
-    ): String? {
-        val cds = ContentDirectoryService()
-        val folderName = folderTitle?.trim()?.ifBlank { null }
-        val currentParentId = targetItem.parentId
-        val showQuery = extractCleanMediaTitle(folderName ?: targetItem.title)
-        val stemTokens = showQuery.lowercase().split(' ').filter { it.length >= 3 }
-
-        fun matchesTargetFolder(candidateTitle: String): Boolean {
-            if (folderName != null && candidateTitle.equals(folderName, ignoreCase = true)) return true
-            if (stemTokens.isNotEmpty()) {
-                val lower = candidateTitle.lowercase()
-                if (stemTokens.all { lower.contains(it) }) return true
-            }
-            return false
-        }
-
-        // 3a. Try UPnP Search for containers matching folderTitle or show name (catches clone under Pictures/Изображения)
-        val containerQueries = buildList {
-            if (folderName != null) {
-                val esc = folderName.replace("\"", "\\\"")
-                add("upnp:class derivedfrom \"object.container\" and dc:title = \"$esc\"")
-                add("upnp:class derivedfrom \"object.container\" and dc:title contains \"$esc\"")
-            }
-            if (showQuery.length >= 3 && !showQuery.equals(folderName, ignoreCase = true)) {
-                val escShow = showQuery.replace("\"", "\\\"")
-                add("upnp:class derivedfrom \"object.container\" and dc:title contains \"$escShow\"")
-            }
-        }
-        if (containerQueries.isNotEmpty()) {
-            val matchingContainers = containerQueries
-                .flatMap { q -> cds.search(controlUrl, "0", q, 20) }
-                .distinctBy { it.id }
-
-            for (container in matchingContainers) {
-                if (container.id == currentParentId) continue
-                val containerArt = container.thumbnailUrl
-                if (!containerArt.isNullOrBlank() && isVerticalImage(containerArt, null)) {
-                    return containerArt
-                }
-                val children = cds.browse(controlUrl, container.id)
-                findVerticalPosterInList(targetItem, children)?.let { return it }
-            }
-        }
-
-        // 3b. Traverse Pictures/Photos/Folders root branches if UPnP Search is unavailable or returned empty
-        if (folderName != null || stemTokens.isNotEmpty()) {
-            val rootItems = cds.browse(controlUrl, "0")
-            val queue = ArrayDeque<Pair<String, Int>>()
-            val visited = HashSet<String>()
-            visited.add("0")
-            currentParentId?.let { visited.add(it) }
-
-            val priorityDirs = rootItems
-                .filter { it.type == MediaType.DIRECTORY }
-                .sortedBy { dir ->
-                    val t = dir.title.lowercase()
-                    when {
-                        t.contains("изображ") || t.contains("фото") || t.contains("картин") ||
-                        t.contains("picture") || t.contains("photo") || t.contains("image") -> 0
-                        t.contains("папк") || t.contains("folder") || t.contains("all") || t.contains("все") -> 1
-                        t.contains("music") || t.contains("музык") || t.contains("audio") || t.contains("аудио") ||
-                        t.contains("video") || t.contains("видео") -> 9
-                        else -> 3
-                    }
-                }
-
-            for (dir in priorityDirs) {
-                val t = dir.title.lowercase()
-                val isSkippedCategory = t.contains("music") || t.contains("музык") || t.contains("audio") || t.contains("аудио")
-                if (!isSkippedCategory && dir.id.isNotBlank() && visited.add(dir.id)) {
-                    if (matchesTargetFolder(dir.title) && dir.id != currentParentId) {
-                        val children = cds.browse(controlUrl, dir.id)
-                        findVerticalPosterInList(targetItem, children)?.let { return it }
-                    }
-                    queue.addLast(dir.id to 1)
-                }
-            }
-
-            var browseCalls = 0
-            while (queue.isNotEmpty() && browseCalls < 35) {
-                val (dirId, depth) = queue.removeFirst()
-                browseCalls++
-                val children = cds.browse(controlUrl, dirId)
-                for (child in children) {
-                    if (child.type != MediaType.DIRECTORY) continue
-                    if (matchesTargetFolder(child.title) && child.id != currentParentId) {
-                        val art = child.thumbnailUrl
-                        if (!art.isNullOrBlank() && isVerticalImage(art, null)) return art
-                        val matchItems = cds.browse(controlUrl, child.id)
-                        findVerticalPosterInList(targetItem, matchItems)?.let { return it }
-                    }
-                    if (depth < 4 && child.id.isNotBlank() && visited.add(child.id)) {
-                        val lt = child.title.lowercase()
-                        val skipSub = lt == "all" || lt == "все" || lt.contains("recent") || lt.contains("недавн")
-                        if (!skipSub) {
-                            queue.addLast(child.id to (depth + 1))
-                        }
-                    }
-                }
-            }
-        }
-
-        // 3c. Flat UPnP Search for imageItem matching show/video stem
-        if (stemTokens.isNotEmpty()) {
-            val foundImgs = cds.search(controlUrl, "0", "upnp:class derivedfrom \"object.item.imageItem\"", 100)
-            for (img in foundImgs) {
-                val tLower = img.title.lowercase()
-                val matchesFolderOrTitle = (currentParentId != null && img.parentId == currentParentId) ||
-                    stemTokens.all { tLower.contains(it) }
-                if (matchesFolderOrTitle && img.uri.isNotBlank() && isVerticalImage(img.uri, img.resolution)) {
-                    return img.uri
-                }
-            }
-        }
-
-        return null
     }
 
     private fun extractCleanMediaTitle(rawName: String): String {

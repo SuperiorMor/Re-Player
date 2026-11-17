@@ -84,12 +84,31 @@ import com.replayer.ui.theme.TextSecondary
 import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalFoundationApi::class)
-private val NoopBringIntoViewSpec = object : BringIntoViewSpec {
+private val SmoothAccordionBringIntoViewSpec = object : BringIntoViewSpec {
     override fun calculateScrollDistance(
         offset: Float,
         size: Float,
         containerSize: Float
-    ): Float = 0f
+    ): Float {
+        val topPadding = 12f
+        val bottomPadding = 24f
+        val visibleSpace = containerSize - topPadding - bottomPadding
+
+        if (offset < topPadding) {
+            return offset - topPadding
+        }
+        val bottom = offset + size
+        val maxBottom = containerSize - bottomPadding
+        if (bottom > maxBottom) {
+            val neededScroll = bottom - maxBottom
+            return if (size > visibleSpace) {
+                (offset - topPadding).coerceAtLeast(0f)
+            } else {
+                neededScroll
+            }
+        }
+        return 0f
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -150,18 +169,9 @@ fun EpgAccordionDialog(
         }
     }
 
-    // Sequential accordion navigation: 1) collapse previous -> 2) scroll target to top -> 3) expand target
+    // Keep expandedIndex aligned with focusedIndex smoothly without jumping
     LaunchedEffect(focusedIndex, isInitialSettled) {
-        if (!isInitialSettled || (!hasUserNavigated && focusedIndex == initialIndex)) {
-            return@LaunchedEffect
-        }
-        if (expandedIndex != -1 && expandedIndex != focusedIndex) {
-            expandedIndex = -1
-            delay(130)
-        }
-        try {
-            listState.animateScrollToItem(index = focusedIndex, scrollOffset = 0)
-        } catch (_: Exception) {}
+        if (!isInitialSettled) return@LaunchedEffect
         expandedIndex = focusedIndex
     }
 
@@ -229,7 +239,7 @@ fun EpgAccordionDialog(
                         )
                     }
                 } else {
-                    CompositionLocalProvider(LocalBringIntoViewSpec provides NoopBringIntoViewSpec) {
+                    CompositionLocalProvider(LocalBringIntoViewSpec provides SmoothAccordionBringIntoViewSpec) {
                         LazyColumn(
                             state = listState,
                             modifier = Modifier
@@ -305,6 +315,7 @@ fun EpgAccordionDialog(
                                                 hasUserNavigated = true
                                             }
                                             focusedIndex = index
+                                            expandedIndex = index
                                         } else {
                                             isKeyPressed = false
                                         }

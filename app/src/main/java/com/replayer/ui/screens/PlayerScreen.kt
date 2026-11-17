@@ -139,11 +139,21 @@ fun PlayerScreen(
         )
     }
 
-    fun playArchiveProgram(prog: EpgProgram) {
+    fun playArchiveProgram(prog: EpgProgram, initialPositionMs: Long = 0L) {
         val archiveUrl = iptvManager.buildArchiveUrl(fullChannel, prog)
         if (archiveUrl != null) {
             playingArchiveProgram = prog
-            engine.play(mediaItem.copy(title = "${fullChannel.name} • ${prog.title}", uri = archiveUrl))
+            val progDuration = (prog.endTime - prog.startTime).coerceAtLeast(0L)
+            engine.play(
+                mediaItem.copy(title = "${fullChannel.name} • ${prog.title}", uri = archiveUrl),
+                initialDurationMs = progDuration,
+                initialPositionMs = initialPositionMs
+            )
+            osdFeedback = if (initialPositionMs > 0L) {
+                "Архив: ${formatTime(initialPositionMs)} / ${formatTime(progDuration)}"
+            } else {
+                "Архив: ${prog.title}"
+            }
         } else {
             osdFeedback = "Архив недоступен для этого канала"
         }
@@ -209,7 +219,12 @@ fun PlayerScreen(
         if (target < 0L) return
         pendingCommitTargetMs = -1L
         seekCommitJob?.cancel()
-        engine.seekTo(target)
+        val knownDur = if (playingArchiveProgram != null) {
+            (playingArchiveProgram!!.endTime - playingArchiveProgram!!.startTime).coerceAtLeast(0L)
+        } else {
+            playerState.durationMs
+        }
+        engine.seekTo(target, knownDur)
         seekFadeJob?.cancel()
         seekFadeJob = scope.launch {
             delay(950)
@@ -222,19 +237,27 @@ fun PlayerScreen(
 
     fun handleScrubStep(dir: Int, repeatCount: Int) {
         if (isIptv && playingArchiveProgram == null) {
+            if (!fullChannel.hasArchive) {
+                osdFeedback = "Канал без архива"
+                return
+            }
             if (dir > 0) {
                 if (showControls) {
                     osdFeedback = "Прямой эфир"
                 } else {
                     showLiveWatermark()
                 }
-            } else if (repeatCount == 0) {
-                val cur = currentProgram
-                if (fullChannel.hasArchive && cur != null) {
-                    playArchiveProgram(cur)
-                } else {
-                    osdFeedback = "Архив недоступен для этого канала"
-                }
+                return
+            }
+            // Rewind from live TV: switch into the current broadcast archive
+            val cur = currentProgram
+            if (cur != null) {
+                val now = System.currentTimeMillis()
+                val liveElapsedMs = (now - cur.startTime).coerceAtLeast(0L)
+                val target = (liveElapsedMs - 15_000L).coerceAtLeast(0L)
+                playArchiveProgram(cur, initialPositionMs = target)
+            } else {
+                osdFeedback = "Телепрограмма недоступна"
             }
             return
         }
@@ -275,6 +298,18 @@ fun PlayerScreen(
         val rawTarget = (currentBase + dir * stepMs).coerceAtLeast(0L)
         val clampedTarget = if (maxDur > 0L) rawTarget.coerceAtMost(maxDur) else rawTarget
         val actualStep = clampedTarget - currentBase
+
+        // If watching archive and scrubbed right past the program end / back to live broadcast
+        if (playingArchiveProgram != null && dir > 0 && maxDur > 0L && rawTarget >= maxDur - 3000L) {
+            playingArchiveProgram = null
+            activeScrubTargetMs = -1L
+            pendingCommitTargetMs = -1L
+            displaySeekDeltaMs = 0L
+            isSeekScrubbing = false
+            engine.play(mediaItem)
+            osdFeedback = "Прямой эфир: ${fullChannel.name}"
+            return
+        }
 
         activeScrubTargetMs = clampedTarget
         pendingCommitTargetMs = clampedTarget
@@ -451,6 +486,25 @@ fun PlayerScreen(
                 if (keyEvent.type == KeyEventType.KeyDown && showControls) {
                     lastInteractionTime = System.currentTimeMillis()
                 }
+                if (!showTracksDialog && !showEpgDialog) {
+                    val nativeCode = keyEvent.nativeKeyEvent.keyCode
+                    if (nativeCode == android.view.KeyEvent.KEYCODE_MEDIA_REWIND) {
+                        if (keyEvent.type == KeyEventType.KeyDown) {
+                            handleScrubStep(-1, keyEvent.nativeKeyEvent.repeatCount)
+                        } else if (keyEvent.type == KeyEventType.KeyUp) {
+                            commitScrubIfPending()
+                        }
+                        return@onPreviewKeyEvent true
+                    }
+                    if (nativeCode == android.view.KeyEvent.KEYCODE_MEDIA_FAST_FORWARD) {
+                        if (keyEvent.type == KeyEventType.KeyDown) {
+                            handleScrubStep(1, keyEvent.nativeKeyEvent.repeatCount)
+                        } else if (keyEvent.type == KeyEventType.KeyUp) {
+                            commitScrubIfPending()
+                        }
+                        return@onPreviewKeyEvent true
+                    }
+                }
                 if (isIptv && !showTracksDialog && !showEpgDialog && keyEvent.type == KeyEventType.KeyDown &&
                     keyEvent.nativeKeyEvent.repeatCount == 0
                 ) {
@@ -501,7 +555,7 @@ fun PlayerScreen(
                     if (keyEvent.type == KeyEventType.KeyDown) {
                         when (keyEvent.key) {
                             Key.DirectionRight -> {
-                                if (isIptv && playingArchiveProgram == null) {
+                                if (isIptv && playingArchiveProgram == null && !fullChannel.hasArchive) {
                                     if (keyEvent.nativeKeyEvent.repeatCount == 0) {
                                         switchIptvChannel(1)
                                     }
@@ -511,13 +565,21 @@ fun PlayerScreen(
                                 true
                             }
                             Key.DirectionLeft -> {
-                                if (isIptv && playingArchiveProgram == null) {
+                                if (isIptv && playingArchiveProgram == null && !fullChannel.hasArchive) {
                                     if (keyEvent.nativeKeyEvent.repeatCount == 0) {
                                         switchIptvChannel(-1)
                                     }
                                 } else {
                                     handleScrubStep(dir = -1, repeatCount = keyEvent.nativeKeyEvent.repeatCount)
                                 }
+                                true
+                            }
+                            Key.MediaRewind -> {
+                                handleScrubStep(dir = -1, repeatCount = keyEvent.nativeKeyEvent.repeatCount)
+                                true
+                            }
+                            Key.MediaFastForward -> {
+                                handleScrubStep(dir = 1, repeatCount = keyEvent.nativeKeyEvent.repeatCount)
                                 true
                             }
                             Key.DirectionCenter, Key.Enter,
@@ -535,11 +597,10 @@ fun PlayerScreen(
                             } else false
                         }
                     } else if (keyEvent.type == KeyEventType.KeyUp &&
-                        (keyEvent.key == Key.DirectionLeft || keyEvent.key == Key.DirectionRight)
+                        (keyEvent.key == Key.DirectionLeft || keyEvent.key == Key.DirectionRight ||
+                         keyEvent.key == Key.MediaRewind || keyEvent.key == Key.MediaFastForward)
                     ) {
-                        if (!isIptv || playingArchiveProgram != null) {
-                            commitScrubIfPending()
-                        }
+                        commitScrubIfPending()
                         true
                     } else {
                         false

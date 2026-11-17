@@ -43,6 +43,7 @@ class RePlayerEngine(private val context: Context) {
     private var currentLayout: VLCVideoLayout? = null
     @Volatile
     private var isReleased = false
+    @Volatile private var pendingSeekOnStartMs: Long = 0L
 
     init {
         mediaPlayer.setEventListener { event ->
@@ -54,6 +55,11 @@ class RePlayerEngine(private val context: Context) {
                         CrashReporter.breadcrumb("VLC", "Playing: ${_playerState.value.currentMediaTitle}")
                         updateTracks()
                         startProgressTracking()
+                        val seekOnStart = pendingSeekOnStartMs
+                        if (seekOnStart > 0L) {
+                            pendingSeekOnStartMs = 0L
+                            seekTo(seekOnStart, _playerState.value.durationMs)
+                        }
                     }
                     MediaPlayer.Event.Paused -> {
                         _playerState.value = _playerState.value.copy(isPlaying = false)
@@ -105,18 +111,19 @@ class RePlayerEngine(private val context: Context) {
         }
     }
 
-    fun play(mediaItem: MediaItem) {
+    fun play(mediaItem: MediaItem, initialDurationMs: Long = 0L, initialPositionMs: Long = 0L) {
         if (isReleased) return
         CrashReporter.breadcrumb("Player", "play(${mediaItem.sourceType}): ${mediaItem.title}")
         val reqId = playRequestSeq.incrementAndGet()
         stopProgressTracking()
+        pendingSeekOnStartMs = initialPositionMs
         _playerState.value = _playerState.value.copy(
             currentMediaTitle = mediaItem.title,
             errorMessage = null,
             isBuffering = true,
             isPlaying = false,
-            currentPositionMs = 0L,
-            durationMs = 0L,
+            currentPositionMs = initialPositionMs.coerceAtLeast(0L),
+            durationMs = initialDurationMs.coerceAtLeast(0L),
             audioTracks = emptyList(),
             subtitleTracks = emptyList(),
             selectedAudioTrackId = null,
@@ -198,33 +205,74 @@ class RePlayerEngine(private val context: Context) {
         } catch (_: Throwable) {}
     }
 
-    fun seekRelative(deltaMs: Long) {
+    fun seekRelative(deltaMs: Long, knownDurationMs: Long = 0L) {
         if (isReleased) return
         try {
             engineExecutor.execute {
                 if (isReleased) return@execute
                 try {
-                    val duration = if (mediaPlayer.length > 0) mediaPlayer.length else _playerState.value.durationMs
-                    val rawTarget = (mediaPlayer.time + deltaMs).coerceAtLeast(0L)
+                    val duration = when {
+                        mediaPlayer.length > 0 -> mediaPlayer.length
+                        knownDurationMs > 0L -> knownDurationMs
+                        _playerState.value.durationMs > 0L -> _playerState.value.durationMs
+                        else -> 0L
+                    }
+                    val cur = if (mediaPlayer.time >= 0L) mediaPlayer.time else _playerState.value.currentPositionMs
+                    val rawTarget = (cur + deltaMs).coerceAtLeast(0L)
                     val target = if (duration > 0L) rawTarget.coerceAtMost(duration) else rawTarget
-                    mediaPlayer.time = target
-                    _playerState.value = _playerState.value.copy(currentPositionMs = target)
+
+                    try {
+                        mediaPlayer.time = target
+                    } catch (_: Throwable) {}
+
+                    if (duration > 0L) {
+                        try {
+                            val fraction = (target.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
+                            mediaPlayer.position = fraction
+                        } catch (_: Throwable) {}
+                    }
+
+                    _playerState.value = _playerState.value.copy(
+                        currentPositionMs = target,
+                        durationMs = if (duration > 0L) duration else _playerState.value.durationMs
+                    )
                 } catch (_: Throwable) {}
             }
         } catch (_: Throwable) {}
     }
 
-    fun seekTo(positionMs: Long) {
+    fun seekTo(positionMs: Long, knownDurationMs: Long = 0L) {
         if (isReleased) return
         try {
             engineExecutor.execute {
                 if (isReleased) return@execute
                 try {
-                    val duration = if (mediaPlayer.length > 0) mediaPlayer.length else _playerState.value.durationMs
+                    val duration = when {
+                        mediaPlayer.length > 0 -> mediaPlayer.length
+                        knownDurationMs > 0L -> knownDurationMs
+                        _playerState.value.durationMs > 0L -> _playerState.value.durationMs
+                        else -> 0L
+                    }
                     val rawTarget = positionMs.coerceAtLeast(0L)
                     val target = if (duration > 0L) rawTarget.coerceAtMost(duration) else rawTarget
-                    mediaPlayer.time = target
-                    _playerState.value = _playerState.value.copy(currentPositionMs = target)
+
+                    // 1. Time-based seek
+                    try {
+                        mediaPlayer.time = target
+                    } catch (_: Throwable) {}
+
+                    // 2. Position-fraction seek (vital for LibVLC on HLS / network catchup)
+                    if (duration > 0L) {
+                        try {
+                            val fraction = (target.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
+                            mediaPlayer.position = fraction
+                        } catch (_: Throwable) {}
+                    }
+
+                    _playerState.value = _playerState.value.copy(
+                        currentPositionMs = target,
+                        durationMs = if (duration > 0L) duration else _playerState.value.durationMs
+                    )
                 } catch (_: Throwable) {}
             }
         } catch (_: Throwable) {}
@@ -318,16 +366,23 @@ class RePlayerEngine(private val context: Context) {
                 try {
                     val t = mediaPlayer.time
                     val len = mediaPlayer.length
+                    val pos = try { mediaPlayer.position } catch (_: Throwable) { -1f }
                     val curState = _playerState.value
+                    val curDur = if (len > 0) len else curState.durationMs
+                    val curPos = when {
+                        t >= 0 -> t
+                        pos in 0f..1f && curDur > 0 -> (pos * curDur).toLong()
+                        else -> curState.currentPositionMs
+                    }
                     val videoTrack = if (curState.videoWidth == 0 || curState.videoHeight == 0) {
                         try { mediaPlayer.currentVideoTrack } catch (_: Throwable) { null }
                     } else null
                     val vWidth = if (videoTrack != null && videoTrack.width > 0) videoTrack.width else curState.videoWidth
                     val vHeight = if (videoTrack != null && videoTrack.height > 0) videoTrack.height else curState.videoHeight
-                    if (t >= 0 || (vWidth > 0 && vWidth != curState.videoWidth)) {
+                    if (curPos >= 0 || (vWidth > 0 && vWidth != curState.videoWidth)) {
                         _playerState.value = curState.copy(
-                            currentPositionMs = if (t >= 0) t else curState.currentPositionMs,
-                            durationMs = if (len > 0) len else curState.durationMs,
+                            currentPositionMs = if (curPos >= 0) curPos else curState.currentPositionMs,
+                            durationMs = curDur,
                             videoWidth = vWidth,
                             videoHeight = vHeight
                         )
